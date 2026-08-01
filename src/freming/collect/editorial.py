@@ -38,17 +38,25 @@ class CollectStats:
     skipped_known: int = 0
     skipped_robots: int = 0
     fetch_failed: int = 0
+    article_fetch_failed: int = 0
+    used_feed_only: int = 0
     no_signal: int = 0
     inserted: int = 0
     candidates: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
-        return (
+        line = (
             f"[{self.source}] フィード {self.feed_entries} 件 → 候補 {self.inserted} 件"
             f"（期間外 {self.skipped_old} / 取得済み {self.skipped_known} /"
             f" robots {self.skipped_robots} / 取得失敗 {self.fetch_failed} /"
             f" シグナルなし {self.no_signal}）"
         )
+        if self.used_feed_only:
+            line += (
+                f"\n  ※ {self.used_feed_only} 件はフィード配信分の本文で判定しました"
+                f"（記事ページの取得失敗 {self.article_fetch_failed} 件）"
+            )
+        return line
 
 
 def _entry_published(entry) -> datetime | None:
@@ -59,6 +67,26 @@ def _entry_published(entry) -> datetime | None:
     return None
 
 
+def _entry_html(entry) -> str:
+    """フィードが配信している本文（要約・全文）を集めて1つのHTMLにする。
+
+    記事ページを取りに行かなくても判定できるだけの材料が、たいていは
+    フィード側に含まれている。
+    """
+    parts: list[str] = []
+    title = getattr(entry, "title", None)
+    if title:
+        parts.append(f"<h1>{title}</h1>")
+    summary = getattr(entry, "summary", None)
+    if summary:
+        parts.append(summary)
+    for item in getattr(entry, "content", None) or []:
+        value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
+        if value:
+            parts.append(value)
+    return "".join(parts)
+
+
 class EditorialCollector:
     """編集ソース1つ分の収集。"""
 
@@ -66,6 +94,8 @@ class EditorialCollector:
         self.config = config
         self.client = client
         self.conn = conn
+        self._article_fetch_disabled = not config.collect.fetch_article_pages
+        self._consecutive_article_failures = 0
 
     def collect(
         self, source: EditorialSource, limit: int | None = None, dry_run: bool = False
@@ -112,6 +142,32 @@ class EditorialCollector:
         stats.feed_entries += len(parsed.entries)
         return parsed.entries
 
+    def _note_article_failure(self, url: str, exc: Exception, stats: CollectStats) -> None:
+        """記事ページの取得失敗を記録し、続くようなら取得自体をやめる。
+
+        ブラウザ以外からのアクセスを拒否するサイトでは全記事が失敗する。
+        User-Agent を偽装して回避することはしないので、フィード配信分の
+        本文で判定を続け、無駄なリクエストを送り続けないようにする。
+        """
+        stats.article_fetch_failed += 1
+        self._consecutive_article_failures += 1
+        limit = self.config.collect.article_fetch_failure_limit
+
+        if self._consecutive_article_failures == 1:
+            log.warning("記事ページを取得できませんでした: %s (%s)", url, exc)
+        else:
+            log.debug("記事ページを取得できませんでした: %s (%s)", url, exc)
+
+        if not self._article_fetch_disabled and self._consecutive_article_failures >= limit:
+            self._article_fetch_disabled = True
+            log.warning(
+                "記事ページの取得が %d 回続けて失敗したため、この実行では"
+                "フィード配信分の本文だけで判定します。"
+                "（サイト側がブラウザ以外を拒否している可能性があります。"
+                "User-Agent の偽装による回避は行いません）",
+                limit,
+            )
+
     def _process_entry(
         self,
         entry,
@@ -135,17 +191,31 @@ class EditorialCollector:
             log.debug("取得済みのためスキップ: %s", url)
             return
 
-        try:
-            response = self.client.get(url)
-        except RobotsDisallowed:
-            stats.skipped_robots += 1
-            return
-        except Exception:  # noqa: BLE001 - 1記事の失敗で全体を止めない
-            log.exception("記事の取得に失敗: %s", url)
+        # まずフィードが配信している本文で判定材料を作る
+        page = parse_page(_entry_html(entry), base_url=url)
+        from_feed_only = True
+
+        if not self._article_fetch_disabled:
+            try:
+                response = self.client.get(url)
+            except RobotsDisallowed:
+                stats.skipped_robots += 1
+                return
+            except Exception as exc:  # noqa: BLE001 - 1記事の失敗で全体を止めない
+                self._note_article_failure(url, exc, stats)
+            else:
+                page = parse_page(response.text, base_url=url)
+                from_feed_only = False
+                self._consecutive_article_failures = 0
+
+        if from_feed_only:
+            stats.used_feed_only += 1
+
+        if not page.text.strip():
+            log.warning("本文を取得できませんでした（フィードにも本文なし）: %s", url)
             stats.fetch_failed += 1
             return
 
-        page = parse_page(response.text, base_url=url)
         result = signals.detect(page.text, page.links, self.config.for_sale_signals)
 
         threshold = self.config.for_sale_signals.min_signal_score

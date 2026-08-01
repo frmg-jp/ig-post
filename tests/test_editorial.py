@@ -23,10 +23,11 @@ def _rfc822(dt: datetime) -> str:
     return dt.strftime("%a, %d %b %Y %H:%M:%S +0000")
 
 
-def _feed(entries: list[tuple[str, str, datetime]]) -> str:
+def _feed(entries: list[tuple[str, str, datetime]], description: str = "") -> str:
+    body = f"<description><![CDATA[{description}]]></description>" if description else ""
     items = "".join(
         f"<item><title>{title}</title><link>{link}</link>"
-        f"<pubDate>{_rfc822(published)}</pubDate></item>"
+        f"<pubDate>{_rfc822(published)}</pubDate>{body}</item>"
         for title, link, published in entries
     )
     return (
@@ -49,18 +50,30 @@ class _Response:
         self.status_code = 200
 
 
+class Forbidden(RuntimeError):
+    """記事ページが 403 を返す状況（ブラウザ以外を拒否するサイト）。"""
+
+
 class FakeClient:
     """HttpClient の代わり。robots.txt もレート制限も既に検証済みなので省く。"""
 
-    def __init__(self, pages: dict[str, str], disallowed: set[str] | None = None) -> None:
+    def __init__(
+        self,
+        pages: dict[str, str],
+        disallowed: set[str] | None = None,
+        forbidden: set[str] | None = None,
+    ) -> None:
         self.pages = pages
         self.disallowed = disallowed or set()
+        self.forbidden = forbidden or set()
         self.requested: list[str] = []
 
     def get(self, url: str, **_kwargs) -> _Response:
         self.requested.append(url)
         if url in self.disallowed:
             raise RobotsDisallowed(url)
+        if url in self.forbidden:
+            raise Forbidden(f"403 Forbidden for url '{url}'")
         if url not in self.pages:
             raise RuntimeError(f"想定外のURL: {url}")
         return _Response(self.pages[url])
@@ -85,8 +98,8 @@ def source(config):
     return config.editorial_source("dezeen")
 
 
-def _run(config, conn, pages, source, disallowed=None, limit=None, dry_run=False):
-    client = FakeClient(pages, disallowed)
+def _run(config, conn, pages, source, disallowed=None, limit=None, dry_run=False, forbidden=None):
+    client = FakeClient(pages, disallowed, forbidden)
     collector = EditorialCollector(config, client, conn)
     return collector.collect(source, limit=limit, dry_run=dry_run), client
 
@@ -198,6 +211,75 @@ def test_dry_run_does_not_write_to_the_database(config, conn, source) -> None:
     assert stats.inserted == 1
     (count,) = conn.execute("SELECT COUNT(*) FROM properties").fetchone()
     assert count == 0
+
+
+def test_falls_back_to_feed_content_when_the_article_page_is_blocked(
+    config, conn, source
+) -> None:
+    """記事ページが 403 でも、フィードが配信している本文で判定を続ける。
+
+    User-Agent を偽装して回避することはしない。
+    """
+    now = datetime.now(timezone.utc)
+    body = (
+        "<p>The converted firehouse is now for sale, asking price $2.4 million.</p>"
+        "<img src='/hero.jpg'>"
+    )
+    pages = {FEED_URL: _feed([("Loft", "https://www.dezeen.com/h/", now)], description=body)}
+
+    stats, _ = _run(
+        config, conn, pages, source, forbidden={"https://www.dezeen.com/h"}
+    )
+
+    assert stats.inserted == 1
+    assert stats.used_feed_only == 1
+    assert stats.article_fetch_failed == 1
+    row = conn.execute("SELECT * FROM properties").fetchone()
+    assert "asking price" in row["for_sale_evidence"].lower()
+    assert row["content_text"]
+    assert row["thumbnail_url"] == "https://www.dezeen.com/hero.jpg"
+
+
+def test_stops_requesting_article_pages_after_repeated_failures(config, conn, source) -> None:
+    """全滅するサイトに無駄なリクエストを送り続けない。"""
+    now = datetime.now(timezone.utc)
+    entries = [(f"L{i}", f"https://www.dezeen.com/i{i}/", now) for i in range(6)]
+    body = "<p>Now for sale. Asking price $1,000,000.</p>"
+    pages = {FEED_URL: _feed(entries, description=body)}
+    forbidden = {f"https://www.dezeen.com/i{i}" for i in range(6)}
+
+    stats, client = _run(config, conn, pages, source, forbidden=forbidden)
+
+    limit = config.collect.article_fetch_failure_limit
+    article_requests = [u for u in client.requested if u != FEED_URL]
+    assert len(article_requests) == limit      # 上限に達したら取得をやめる
+    assert stats.inserted == 6                 # それでも候補化は続く
+    assert stats.used_feed_only == 6
+
+
+def test_article_fetching_can_be_disabled_entirely(config, conn, source) -> None:
+    now = datetime.now(timezone.utc)
+    body = "<p>For sale. Asking price $800,000.</p>"
+    pages = {FEED_URL: _feed([("Loft", "https://www.dezeen.com/j/", now)], description=body)}
+
+    config = config.model_copy(deep=True)
+    config.collect.fetch_article_pages = False
+    stats, client = _run(config, conn, pages, source)
+
+    assert client.requested == [FEED_URL]
+    assert stats.inserted == 1
+    assert stats.used_feed_only == 1
+
+
+def test_entry_without_any_body_is_not_a_candidate(config, conn, source) -> None:
+    """フィードにも記事にも本文が無ければ候補化しない。"""
+    now = datetime.now(timezone.utc)
+    pages = {FEED_URL: _feed([("", "https://www.dezeen.com/k/", now)])}
+
+    stats, _ = _run(config, conn, pages, source, forbidden={"https://www.dezeen.com/k"})
+
+    assert stats.inserted == 0
+    assert stats.fetch_failed == 1
 
 
 def test_limit_caps_the_number_of_candidates(config, conn, source) -> None:

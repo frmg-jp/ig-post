@@ -66,6 +66,11 @@ def parse_page(html: str, base_url: str) -> PageContent:
     og_image = soup.find("meta", property="og:image")
     if og_image and og_image.get("content"):
         thumbnail = urljoin(base_url, og_image["content"].strip())
+    else:
+        # フィード配信分のHTMLには og:image が無いので本文中の最初の画像を使う
+        first_img = soup.find("img", src=True)
+        if first_img:
+            thumbnail = urljoin(base_url, first_img["src"].strip())
 
     text = " ".join(soup.get_text(separator=" ").split())[:_MAX_TEXT_CHARS]
 

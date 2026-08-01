@@ -70,6 +70,11 @@ class HttpConfig(BaseModel):
 class CollectConfig(BaseModel):
     lookback_days: int = 30
     max_items_per_source_per_run: int = 30
+    # 記事ページも取得して本文を補うか。false ならフィードの配信内容だけで判定する。
+    fetch_article_pages: bool = True
+    # 記事ページの取得が連続でこの回数失敗したら、その実行では取得を諦めて
+    # フィードの内容だけで判定する（無駄なリクエストを相手に送り続けない）。
+    article_fetch_failure_limit: int = 3
 
 
 class EditorialSource(BaseModel):
