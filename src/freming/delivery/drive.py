@@ -35,6 +35,7 @@ SCOPES = ["https://www.googleapis.com/auth/drive"]
 FOLDER_MIME = "application/vnd.google-apps.folder"
 
 _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+DEFAULT_OAUTH_PORT = 8765
 T = TypeVar("T")
 
 
@@ -187,39 +188,35 @@ class DriveClient:
             log.warning("この環境では既定のブラウザを開けません。URLを表示します。")
             open_browser = False
 
-        prompt = (
-            "\n"
-            + "=" * 68
-            + "\n Google の同意画面を開いてください（初回のみ）\n"
-            + "=" * 68
-            + "\n\n    {url}\n\n"
-            + ("  ブラウザが自動で開かない場合は、上のURLをコピーして開いてください。\n"
-               if open_browser
-               else "  上のURLを、このマシンのブラウザで開いてください。\n"
-                    "  リモートサーバーで実行している場合は、手元のPCから\n"
-                    "    ssh -L {port}:localhost:{port} <ユーザ>@<サーバ>\n"
-                    "  のようにポート転送してから開いてください。\n")
-            + "=" * 68
-            + "\n"
-        )
+        success_message = "認証が完了しました。このタブを閉じてターミナルに戻ってください。"
 
-        # ポートを固定しておくと、リモート実行時のポート転送を案内できる
-        port = 8765
-        log.info("認証待ち受けポート: %d", port)
+        # 既定はポート固定（リモート実行時のSSHポート転送を案内できる）。
+        # 使用中なら空きポートに自動で切り替える。
         try:
+            log.info("認証待ち受けポート: %d", DEFAULT_OAUTH_PORT)
             creds = flow.run_local_server(
-                port=port,
+                port=DEFAULT_OAUTH_PORT,
                 open_browser=open_browser,
-                authorization_prompt_message=prompt.replace("{port}", str(port)),
-                success_message=(
-                    "認証が完了しました。このタブを閉じてターミナルに戻ってください。"
-                ),
+                authorization_prompt_message=_auth_prompt(open_browser, DEFAULT_OAUTH_PORT),
+                success_message=success_message,
             )
         except OSError as exc:
-            raise DriveAuthError(
-                f"認証用のポート {port} を使用できませんでした（{exc}）。"
-                "他のプロセスが使用していないか確認してください。"
-            ) from exc
+            log.warning(
+                "ポート %d は使用中のため空きポートで再試行します（%s）。"
+                "前回の認証プロセスが残っている可能性があります。",
+                DEFAULT_OAUTH_PORT, exc,
+            )
+            try:
+                creds = flow.run_local_server(
+                    port=0,
+                    open_browser=open_browser,
+                    authorization_prompt_message=_auth_prompt(open_browser, None),
+                    success_message=success_message,
+                )
+            except OSError as exc2:
+                raise DriveAuthError(
+                    f"認証用のローカルサーバーを起動できませんでした（{exc2}）。"
+                ) from exc2
         except Exception as exc:  # noqa: BLE001 - 同意画面での拒否などを分かる形にする
             log.exception("OAuth 認証に失敗")
             if "access_denied" in str(exc):
@@ -425,6 +422,35 @@ class DriveClient:
             f"削除({file_id})",
         )
         log.info("削除しました: id=%s", file_id)
+
+
+def _auth_prompt(open_browser: bool, port: int | None) -> str:
+    """同意画面のURLを目立つ形で表示するためのメッセージ。"""
+    if open_browser:
+        tail = "  ブラウザが自動で開かない場合は、上のURLをコピーして開いてください。\n"
+    elif port is not None:
+        tail = (
+            "  上のURLを、このマシンのブラウザで開いてください。\n"
+            "  リモートサーバーで実行している場合は、手元のPCから\n"
+            f"    ssh -L {port}:localhost:{port} <ユーザ>@<サーバ>\n"
+            "  のようにポート転送してから開いてください。\n"
+        )
+    else:
+        tail = (
+            "  上のURLを、このマシンのブラウザで開いてください。\n"
+            "  リモート実行の場合は、URL内の redirect_uri のポート番号を\n"
+            "  手元のPCへSSHポート転送してから開いてください。\n"
+        )
+    return (
+        "\n"
+        + "=" * 68
+        + "\n Google の同意画面を開いてください（初回のみ）\n"
+        + "=" * 68
+        + "\n\n    {url}\n\n"
+        + tail
+        + "=" * 68
+        + "\n"
+    )
 
 
 def _browser_available() -> bool:
