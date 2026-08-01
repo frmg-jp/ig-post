@@ -1,0 +1,262 @@
+# =====================================================================
+# FREMING CURATED — 全設定
+# コード変更なしで調整できる値はすべてここに集約する。
+# APIキー等の秘匿値は .env（config.yaml には書かない）。
+# =====================================================================
+
+app:
+  timezone: Asia/Tokyo
+  db_path: data/freming.db
+  log_dir: logs
+  log_level: INFO
+
+# ---------------------------------------------------------------------
+# アクセスポリシー
+#   ここの値は「守るための下限」であり、緩める方向の変更は想定しない。
+#   ログイン・CAPTCHA回避・レート制限回避は一切実装しない。
+# ---------------------------------------------------------------------
+http:
+  user_agent: "FremingCuratedBot/0.1 (+https://freming.jp/bot; contact@freming.jp)"
+  request_interval_sec: 3.0        # 同一ドメインへの最低リクエスト間隔
+  max_concurrency_per_domain: 1    # 同一ドメインへの並列アクセス禁止
+  max_concurrency_global: 4
+  timeout_sec: 30
+  max_retries: 3
+  backoff_factor: 2.0
+  respect_robots_txt: true         # 監査のため明示。false は想定しない
+
+collect:
+  lookback_days: 30
+  max_items_per_source_per_run: 30
+
+# ---------------------------------------------------------------------
+# 経路B: 編集ソース（品質の目利き。公式RSSフィードを優先）
+#   feeds が空のソースは実フィードURLを確認してから enabled: true にする。
+#   実装順に従い、まず dezeen のみ有効。
+# ---------------------------------------------------------------------
+editorial_sources:
+  - key: dezeen
+    name: "Dezeen"
+    rank: S
+    enabled: true
+    feeds:
+      - "https://www.dezeen.com/architecture/feed/"
+  - key: dwell
+    name: "Dwell"
+    rank: S
+    enabled: false
+    feeds: []
+  - key: designboom
+    name: "designboom"
+    rank: S
+    enabled: false
+    feeds: []
+  - key: wallpaper
+    name: "Wallpaper*"
+    rank: S
+    enabled: false
+    feeds: []
+  - key: archdaily
+    name: "ArchDaily"
+    rank: A
+    enabled: false
+    feeds: []
+  - key: arch_record
+    name: "Architectural Record"
+    rank: A
+    enabled: false
+    feeds: []
+  - key: domus
+    name: "Domus"
+    rank: A
+    enabled: false
+    feeds: []
+  - key: ad
+    name: "Architectural Digest"
+    rank: B
+    enabled: false
+    feeds: []
+  - key: iconic_houses
+    name: "Iconic Houses"
+    rank: B
+    enabled: false
+    feeds: []
+
+# ---------------------------------------------------------------------
+# 経路A: 販売ソース
+#   mode: crawl        … robots.txt を確認したうえで自動収集
+#   mode: manual_only  … 自動クロールを一切行わず、管理画面のURL投入のみ
+# ---------------------------------------------------------------------
+listing_sources:
+  - key: sothebys
+    name: "Sotheby's International Realty"
+    rank: A
+    mode: crawl
+    enabled: false          # robots.txt 確認後に有効化
+    base_url: "https://www.sothebysrealty.com"
+  - key: christies
+    name: "Christie's International Real Estate"
+    rank: A
+    mode: crawl
+    enabled: false
+    base_url: "https://www.christiesrealestate.com"
+  - key: architecture_for_sale
+    name: "Architecture For Sale"
+    rank: A
+    mode: crawl
+    enabled: false
+    base_url: "https://architectureforsale.com"
+  - key: zillow
+    name: "Zillow"
+    rank: B
+    mode: manual_only
+    enabled: true
+    base_url: "https://www.zillow.com"
+    note: "利用規約で自動収集禁止。手動URL投入のみ"
+  - key: redfin
+    name: "Redfin"
+    rank: B
+    mode: manual_only
+    enabled: true
+    base_url: "https://www.redfin.com"
+    note: "利用規約で自動収集禁止。手動URL投入のみ"
+  - key: compass
+    name: "Compass"
+    rank: B
+    mode: manual_only
+    enabled: true
+    base_url: "https://www.compass.com"
+    note: "利用規約で自動収集禁止。手動URL投入のみ"
+
+# ---------------------------------------------------------------------
+# 販売シグナル検出（経路Bの核心）
+#   スコア合計が min_signal_score 以上のものだけを候補化する。
+# ---------------------------------------------------------------------
+for_sale_signals:
+  keyword_score: 1
+  price_score: 1
+  listing_link_score: 2
+  min_signal_score: 2
+  keywords:
+    - "for sale"
+    - "on the market"
+    - "listed for"
+    - "asking price"
+    - "now available"
+    - "price upon request"
+    - "currently listed"
+    - "販売中"
+    - "売出中"
+  price_patterns:
+    - '[$€£]\s?\d[\d,.]*\s?(million|M|k)?\b'
+    - '\d[\d,.]*\s?(万円|億円)'
+  listing_domains:
+    - sothebysrealty.com
+    - christiesrealestate.com
+    - architectureforsale.com
+    - zillow.com
+    - redfin.com
+    - compass.com
+    - idealista.com
+    - idealista.pt
+    - rightmove.co.uk
+
+# ---------------------------------------------------------------------
+# 重点エリア / 優先ジャンル
+# ---------------------------------------------------------------------
+focus_areas:
+  - { country: "United States", city: "Los Angeles" }
+  - { country: "United States", city: "San Francisco", districts: ["South Beach", "SOMA"] }
+  - { country: "United States", city: "Portland", districts: ["Pearl District"] }
+  - { country: "United States", city: "Seattle", districts: ["Pioneer Square"] }
+  - { country: "Portugal" }
+  - { country: "Spain" }
+  - { country: "Taiwan" }
+
+genres:
+  priority: [adaptive_reuse, loft, hidden_gem, penthouse, architect]
+  keywords:
+    adaptive_reuse:
+      ["conversion", "converted", "adaptive reuse", "former factory", "former school",
+       "firehouse", "fire station", "warehouse conversion", "church conversion"]
+    loft: ["loft", "warehouse", "industrial space", "open plan"]
+    penthouse: ["penthouse", "rooftop residence", "top floor"]
+    architect: ["designed by", "architect's own", "landmark home", "modernist"]
+    hidden_gem: ["rarely seen", "little-known", "hidden", "off market"]
+
+# ---------------------------------------------------------------------
+# スコアリング（Claude API）
+# ---------------------------------------------------------------------
+scoring:
+  model: "claude-sonnet-4-6"   # 上位に切替可: claude-sonnet-5 / claude-opus-5
+  max_tokens: 2000
+  effort: medium               # low | medium | high | max
+  summary_max_chars: 80
+  score_scale: 100             # 0-100
+  weights:                     # 合計 1.0
+    story: 0.30                       # 用途転換・歴史・建築家の物語
+    source_rank: 0.20                 # S > A > B
+    editorial_for_sale_bonus: 0.20    # 編集ソース掲載 かつ 販売中 = Hidden Gem
+    genre_match: 0.15
+    area_match: 0.10
+    price: 0.05                       # 二の次。高額を優遇しない
+  source_rank_score:
+    S: 1.0
+    A: 0.7
+    B: 0.4
+  thresholds:
+    min_to_persist: 30         # これ未満は保存はするが一覧デフォルト非表示
+    highlight_above: 80
+  feedback:
+    recent_reasons_in_prompt: 30   # 直近N件の非承認理由をプロンプトに含める
+    tagging_batch_size: 10         # N件溜まるごとに reason_tag を付与
+    rule_candidate_min_hits: 3     # 同一タグがN回でルール候補として提示
+
+# ---------------------------------------------------------------------
+# 審査UI
+# ---------------------------------------------------------------------
+review_ui:
+  host: "127.0.0.1"
+  port: 8000
+  page_size: 50
+  default_filter: pending
+  thumbnail_max_px: 480
+
+# ---------------------------------------------------------------------
+# 画像取得・加工
+# ---------------------------------------------------------------------
+images:
+  max_per_property: 10
+  min_short_edge_px: 800           # ロゴ・アイコン混入対策
+  allowed_content_types: ["image/jpeg", "image/png", "image/webp"]
+  work_dir: "data/images"
+
+process:
+  output_size: [1080, 1080]
+  jpeg_quality: 90
+  pad_when_aspect_over: 2.0        # 縦横比2.0超はクロップせず余白パディング
+  pad_color: "#FFFFFF"
+  resample: lanczos
+
+# ---------------------------------------------------------------------
+# Drive納品
+#   parent_folder_id: 納品先の親フォルダ
+#   shared_drive_id : 共有ドライブ配下ならそのドライブID（マイドライブなら null）
+#     ※ サービスアカウントは「マイドライブ」に保存容量を持たないため、
+#       共有ドライブを強く推奨。詳細は scripts/check_drive.py の診断を参照。
+# ---------------------------------------------------------------------
+drive:
+  enabled: true
+  credentials_path: "credentials/service-account.json"
+  parent_folder_id: "1O30wu9cTz2mSXcWXQ8vvCbRo4HgH0W5z"   # ig-post
+  shared_drive_id: null
+  folder_prefix: "frmg_ig"
+  sequence_digits: 3
+  meta_filename: "meta.txt"
+  verify_uploaded_size: true       # アップロード後 files.get でサイズ再取得し 0 バイトでないか確認
+  preflight:
+    enabled: true                  # 起動時に実際にテストファイルを作成→削除して権限検証
+    test_filename: ".frmg_write_test"
+  retry:
+    max_attempts: 5
+    backoff_factor: 2.0

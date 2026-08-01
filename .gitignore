@@ -1,0 +1,25 @@
+# --- 秘匿情報 ---
+.env
+credentials/*
+!credentials/.gitkeep
+
+# --- 生成物 ---
+data/
+logs/
+*.db
+*.db-journal
+*.db-wal
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# --- OS ---
+.DS_Store
+Thumbs.db

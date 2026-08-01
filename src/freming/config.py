@@ -1,0 +1,279 @@
+"""config.yaml と .env のロード・検証。
+
+設定値の参照はすべてこのモジュール経由で行う。欠落・型不正は起動時に
+ValidationError として落とし、実行中に None が漏れ出さないようにする。
+"""
+
+from __future__ import annotations
+
+import os
+from functools import lru_cache
+from pathlib import Path
+from typing import Literal
+
+import yaml
+from dotenv import load_dotenv
+from pydantic import BaseModel, Field, field_validator
+
+SourceRank = Literal["S", "A", "B"]
+ListingMode = Literal["crawl", "manual_only"]
+
+DEFAULT_CONFIG_PATH = "config.yaml"
+
+
+class AppConfig(BaseModel):
+    timezone: str = "Asia/Tokyo"
+    db_path: Path = Path("data/freming.db")
+    log_dir: Path = Path("logs")
+    log_level: str = "INFO"
+
+
+class HttpConfig(BaseModel):
+    user_agent: str
+    request_interval_sec: float = 3.0
+    max_concurrency_per_domain: int = 1
+    max_concurrency_global: int = 4
+    timeout_sec: float = 30.0
+    max_retries: int = 3
+    backoff_factor: float = 2.0
+    respect_robots_txt: bool = True
+
+    @field_validator("request_interval_sec")
+    @classmethod
+    def _min_interval(cls, v: float) -> float:
+        if v < 3.0:
+            raise ValueError("request_interval_sec は 3.0 秒以上にすること")
+        return v
+
+    @field_validator("max_concurrency_per_domain")
+    @classmethod
+    def _no_parallel_per_domain(cls, v: int) -> int:
+        if v != 1:
+            raise ValueError("同一ドメインへの並列アクセスは禁止（max_concurrency_per_domain は 1）")
+        return v
+
+    @field_validator("respect_robots_txt")
+    @classmethod
+    def _must_respect_robots(cls, v: bool) -> bool:
+        if not v:
+            raise ValueError("robots.txt の尊重は必須（respect_robots_txt を false にはできない）")
+        return v
+
+    @field_validator("user_agent")
+    @classmethod
+    def _contact_in_ua(cls, v: str) -> str:
+        if "@" not in v and "http" not in v:
+            raise ValueError("User-Agent には連絡先（メールまたはURL）を明記すること")
+        return v
+
+
+class CollectConfig(BaseModel):
+    lookback_days: int = 30
+    max_items_per_source_per_run: int = 30
+
+
+class EditorialSource(BaseModel):
+    key: str
+    name: str
+    rank: SourceRank
+    enabled: bool = False
+    feeds: list[str] = Field(default_factory=list)
+    sitemap: str | None = None
+
+
+class ListingSource(BaseModel):
+    key: str
+    name: str
+    rank: SourceRank
+    mode: ListingMode
+    enabled: bool = False
+    base_url: str | None = None
+    note: str | None = None
+
+
+class ForSaleSignals(BaseModel):
+    keyword_score: int = 1
+    price_score: int = 1
+    listing_link_score: int = 2
+    min_signal_score: int = 2
+    keywords: list[str] = Field(default_factory=list)
+    price_patterns: list[str] = Field(default_factory=list)
+    listing_domains: list[str] = Field(default_factory=list)
+
+
+class FocusArea(BaseModel):
+    country: str
+    city: str | None = None
+    districts: list[str] = Field(default_factory=list)
+
+
+class GenresConfig(BaseModel):
+    priority: list[str] = Field(default_factory=list)
+    keywords: dict[str, list[str]] = Field(default_factory=dict)
+
+
+class ScoringWeights(BaseModel):
+    story: float
+    source_rank: float
+    editorial_for_sale_bonus: float
+    genre_match: float
+    area_match: float
+    price: float
+
+    @property
+    def total(self) -> float:
+        return (
+            self.story
+            + self.source_rank
+            + self.editorial_for_sale_bonus
+            + self.genre_match
+            + self.area_match
+            + self.price
+        )
+
+
+class ScoringThresholds(BaseModel):
+    min_to_persist: float = 30.0
+    highlight_above: float = 80.0
+
+
+class FeedbackConfig(BaseModel):
+    recent_reasons_in_prompt: int = 30
+    tagging_batch_size: int = 10
+    rule_candidate_min_hits: int = 3
+
+
+class ScoringConfig(BaseModel):
+    model: str = "claude-sonnet-4-6"
+    max_tokens: int = 2000
+    effort: Literal["low", "medium", "high", "max"] = "medium"
+    summary_max_chars: int = 80
+    score_scale: int = 100
+    weights: ScoringWeights
+    source_rank_score: dict[str, float]
+    thresholds: ScoringThresholds = Field(default_factory=ScoringThresholds)
+    feedback: FeedbackConfig = Field(default_factory=FeedbackConfig)
+
+    @field_validator("weights")
+    @classmethod
+    def _weights_sum_to_one(cls, v: ScoringWeights) -> ScoringWeights:
+        if abs(v.total - 1.0) > 1e-6:
+            raise ValueError(f"scoring.weights の合計は 1.0 にすること（現在 {v.total}）")
+        return v
+
+
+class ReviewUIConfig(BaseModel):
+    host: str = "127.0.0.1"
+    port: int = 8000
+    page_size: int = 50
+    default_filter: str = "pending"
+    thumbnail_max_px: int = 480
+
+
+class ImagesConfig(BaseModel):
+    max_per_property: int = 10
+    min_short_edge_px: int = 800
+    allowed_content_types: list[str] = Field(
+        default_factory=lambda: ["image/jpeg", "image/png", "image/webp"]
+    )
+    work_dir: Path = Path("data/images")
+
+
+class ProcessConfig(BaseModel):
+    output_size: tuple[int, int] = (1080, 1080)
+    jpeg_quality: int = 90
+    pad_when_aspect_over: float = 2.0
+    pad_color: str = "#FFFFFF"
+    resample: str = "lanczos"
+
+
+class DrivePreflight(BaseModel):
+    enabled: bool = True
+    test_filename: str = ".frmg_write_test"
+
+
+class DriveRetry(BaseModel):
+    max_attempts: int = 5
+    backoff_factor: float = 2.0
+
+
+class DriveConfig(BaseModel):
+    enabled: bool = True
+    credentials_path: Path = Path("credentials/service-account.json")
+    parent_folder_id: str
+    shared_drive_id: str | None = None
+    folder_prefix: str = "frmg_ig"
+    sequence_digits: int = 3
+    meta_filename: str = "meta.txt"
+    verify_uploaded_size: bool = True
+    preflight: DrivePreflight = Field(default_factory=DrivePreflight)
+    retry: DriveRetry = Field(default_factory=DriveRetry)
+
+    @field_validator("parent_folder_id")
+    @classmethod
+    def _placeholder_not_allowed(cls, v: str) -> str:
+        if not v or v.startswith("PUT_"):
+            raise ValueError("drive.parent_folder_id に実際のフォルダIDを設定すること")
+        return v
+
+
+class Config(BaseModel):
+    app: AppConfig = Field(default_factory=AppConfig)
+    http: HttpConfig
+    collect: CollectConfig = Field(default_factory=CollectConfig)
+    editorial_sources: list[EditorialSource] = Field(default_factory=list)
+    listing_sources: list[ListingSource] = Field(default_factory=list)
+    for_sale_signals: ForSaleSignals = Field(default_factory=ForSaleSignals)
+    focus_areas: list[FocusArea] = Field(default_factory=list)
+    genres: GenresConfig = Field(default_factory=GenresConfig)
+    scoring: ScoringConfig
+    review_ui: ReviewUIConfig = Field(default_factory=ReviewUIConfig)
+    images: ImagesConfig = Field(default_factory=ImagesConfig)
+    process: ProcessConfig = Field(default_factory=ProcessConfig)
+    drive: DriveConfig
+
+    # --- 秘匿値は .env からのみ ---
+    @property
+    def anthropic_api_key(self) -> str:
+        key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if not key:
+            raise RuntimeError(
+                "ANTHROPIC_API_KEY が未設定です。.env.example を .env にコピーして設定してください。"
+            )
+        return key
+
+    # --- 便利アクセサ ---
+    def editorial_source(self, key: str) -> EditorialSource | None:
+        return next((s for s in self.editorial_sources if s.key == key), None)
+
+    def listing_source(self, key: str) -> ListingSource | None:
+        return next((s for s in self.listing_sources if s.key == key), None)
+
+    def source_rank(self, source_key: str) -> str | None:
+        src = self.editorial_source(source_key) or self.listing_source(source_key)
+        return src.rank if src else None
+
+    def crawlable_listing_sources(self) -> list[ListingSource]:
+        """自動クロールを許可されている販売ソースのみを返す。
+
+        mode: manual_only のソース（Zillow / Redfin / Compass）は
+        ここから必ず除外される。
+        """
+        return [s for s in self.listing_sources if s.enabled and s.mode == "crawl"]
+
+
+def load_config(path: str | Path | None = None) -> Config:
+    """config.yaml を読み込んで検証済みの Config を返す。"""
+    load_dotenv()
+    cfg_path = Path(path or os.environ.get("FREMING_CONFIG", DEFAULT_CONFIG_PATH))
+    if not cfg_path.exists():
+        raise FileNotFoundError(f"設定ファイルが見つかりません: {cfg_path.resolve()}")
+    with cfg_path.open("r", encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or {}
+    return Config.model_validate(raw)
+
+
+@lru_cache(maxsize=1)
+def get_config() -> Config:
+    """プロセス内で使い回す設定インスタンス。"""
+    return load_config()
