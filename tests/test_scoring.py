@@ -325,3 +325,30 @@ def test_max_tokens_leaves_room_for_thinking(config) -> None:
     2000 程度では打ち切られうるので、設定側で余裕を確保しておく。
     """
     assert config.scoring.max_tokens >= 4000
+
+
+def test_summary_limit_comes_from_config(config) -> None:
+    """summary の字数上限が config.yaml から効くこと。
+
+    以前は 80 という数値がプロンプトとスキーマに直書きされていて、
+    scoring.summary_max_chars を変えても何も起きなかった。
+    """
+    cfg = config.model_copy(deep=True)
+    cfg.scoring.summary_max_chars = 120
+
+    assert "120字以内" in build_system_prompt(cfg, [])
+    assert "80字以内" not in build_system_prompt(cfg, [])
+
+
+def test_long_summary_is_reported_not_truncated(config, conn) -> None:
+    """字数超過は切り詰めず、超えている事実を報告すること。"""
+    property_id = _add(conn)
+    long_summary = "あ" * (config.scoring.summary_max_chars + 20)
+    verbose = Assessment(**{**_STRONG.__dict__, "summary": long_summary})
+
+    stats = score_pending(config, conn, client=FakeClient(verbose))
+
+    assert stats.long_summaries == 1
+    assert "字数上限" in stats.summary()
+    # 切り詰めずにそのまま保存する（途中で切れた要約を納品しない）
+    assert _row(conn, property_id)["summary"] == long_summary

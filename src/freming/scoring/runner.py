@@ -37,13 +37,20 @@ class ScoreStats:
     failed: int = 0
     below_threshold: int = 0
     highlighted: int = 0
+    long_summaries: int = 0
     lines: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
-        return (
+        line = (
             f"採点 {self.scored} 件（失敗 {self.failed} / "
             f"閾値未満 {self.below_threshold} / 注目 {self.highlighted}）"
         )
+        if self.long_summaries:
+            line += (
+                f"\n  ※ {self.long_summaries} 件は summary が字数上限を超えています"
+                "（config.yaml の scoring.summary_max_chars を確認してください）"
+            )
+        return line
 
     def report(self) -> str:
         return "\n".join(self.lines)
@@ -99,6 +106,16 @@ def score_pending(
             log.error("判定できませんでした: %s (%s)", row["source_url"], exc)
             stats.failed += 1
             continue
+
+        # 字数超過は切り詰めない。文の途中で切れた要約を納品するより、
+        # 超えている事実を出して summary_max_chars か指示を見直す方がよい。
+        limit = config.scoring.summary_max_chars
+        if len(assessment.summary) > limit:
+            log.warning(
+                "summary が %d字を超えています（%d字）: %s",
+                limit, len(assessment.summary), row["source_url"],
+            )
+            stats.long_summaries += 1
 
         result = build_result(config, assessment, row, client.model)
         stats.scored += 1

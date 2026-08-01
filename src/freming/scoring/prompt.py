@@ -38,7 +38,7 @@ _SYSTEM = """あなたは建築キュレーションメディア「FREMING CURAT
   しない。転用前の痕跡が残っていると読み取れる記述がある場合だけ true。
 - is_for_sale は「いま売りに出ている」場合のみ true。建設費、落札額、
   過去の取引価格、周辺相場の話は該当しない。
-- summary は日本語80字以内。誇張しない。
+- summary は日本語{summary_max_chars}字以内。誇張しない。
 """
 
 _EMPTY = "（まだ蓄積がありません）"
@@ -59,6 +59,7 @@ def build_system_prompt(
         examples=examples or "（未設定）",
         rejects="\n".join(f"- {r}" for r in reject_reasons) if reject_reasons else _EMPTY,
         rules="\n".join(f"- {r}" for r in (rules or [])) if rules else _EMPTY,
+        summary_max_chars=config.scoring.summary_max_chars,
     )
 
 

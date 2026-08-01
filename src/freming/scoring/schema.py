@@ -76,7 +76,9 @@ OUTPUT_SCHEMA: dict = {
         },
         "summary": {
             "type": "string",
-            "description": "なぜ選ぶ価値があるかの一言（日本語80字以内）。",
+            # 字数の上限は config.yaml の scoring.summary_max_chars が持ち、
+            # システムプロンプト側で指示する。ここに数値を書くと二重管理になる。
+            "description": "なぜ選ぶ価値があるかの一言（日本語）。",
         },
         "architect": {"type": "string", "description": "設計者。不明なら空文字。"},
         "year_built": {"type": "string", "description": "竣工年。不明なら空文字。"},
