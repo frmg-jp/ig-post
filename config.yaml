@@ -35,12 +35,29 @@ collect:
 #   実装順に従い、まず dezeen のみ有効。
 # ---------------------------------------------------------------------
 editorial_sources:
+  # --- 販売専門（掲載＝売出中。probe-feed で実測して採用） ---
+  - key: wowhaus
+    name: "WowHaus"
+    rank: A
+    enabled: true
+    assume_for_sale: true
+    feeds:
+      - "https://www.wowhaus.co.uk/feed/"
+  - key: circa_old_houses
+    name: "CIRCA Old Houses"
+    rank: B
+    enabled: true
+    assume_for_sale: true
+    feeds:
+      - "https://circaoldhouses.com/feed/"
+
+  # --- 編集メディア（販売記事は時々。ここが FREMING の独自性） ---
   - key: dezeen
     name: "Dezeen"
     rank: S
     enabled: true
     feeds:
-      - "https://www.dezeen.com/architecture/feed/"
+      - "https://www.dezeen.com/feed/"          # 全カテゴリ（本文 中央値4408字）
   - key: dwell
     name: "Dwell"
     rank: S
@@ -49,8 +66,9 @@ editorial_sources:
   - key: designboom
     name: "designboom"
     rank: S
-    enabled: false
-    feeds: []
+    enabled: true
+    feeds:
+      - "https://www.designboom.com/architecture/feed/"   # 本文 中央値5088字
   - key: wallpaper
     name: "Wallpaper*"
     rank: S

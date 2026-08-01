@@ -95,7 +95,23 @@ def conn(tmp_path):
 
 @pytest.fixture()
 def source(config):
-    return config.editorial_source("dezeen")
+    """編集ソース1つ分。フィードURLはテスト用に固定し、config.yaml の
+    実際のURL変更でテストが壊れないようにする。"""
+    src = config.editorial_source("dezeen").model_copy(deep=True)
+    src.feeds = [FEED_URL]
+    return src
+
+
+@pytest.fixture()
+def listing_source(config):
+    """販売専門メディア（掲載＝売出中）。"""
+    src = config.editorial_source("dezeen").model_copy(deep=True)
+    src.key = "wowhaus"
+    src.name = "WowHaus"
+    src.rank = "A"
+    src.assume_for_sale = True
+    src.feeds = [FEED_URL]
+    return src
 
 
 def _run(config, conn, pages, source, disallowed=None, limit=None, dry_run=False,
@@ -322,3 +338,45 @@ def test_explain_reports_scores_below_the_threshold(config, conn, source) -> Non
     assert "本文の長さ" in report
     # キーワードだけ拾えた記事が上位に来る
     assert stats.explanations and max(e.score for e in stats.explanations) == 1
+
+
+def test_listing_only_media_does_not_require_for_sale_signals(
+    config, conn, listing_source
+) -> None:
+    """掲載記事すべてが売出中のメディアでは、シグナル不足でも候補化する。
+
+    CIRCA Old Houses が本文にキーワードを含まないため0件だった実例に対応。
+    """
+    now = datetime.now(timezone.utc)
+    pages = {
+        FEED_URL: _feed(
+            [("A modernist bungalow", "https://www.wowhaus.co.uk/p1/", now)],
+            description="<p>A 1960s bungalow in Kent. Three bedrooms.</p>",
+        )
+    }
+
+    stats, _ = _run(config, conn, pages, listing_source, forbidden={"https://www.wowhaus.co.uk/p1"})
+
+    assert stats.inserted == 1
+    assert stats.no_signal == 0
+    row = conn.execute("SELECT * FROM properties").fetchone()
+    assert row["source"] == "wowhaus"
+    assert "販売中の物件のみを掲載" in row["for_sale_evidence"]
+    assert row["signal_score"] == 0        # シグナルは0点だが候補化されている
+    assert row["is_for_sale"] is None      # 最終判断はスコアリングに委ねる
+
+
+def test_editorial_media_still_requires_signals(config, conn, source) -> None:
+    """通常の編集ソースでは足切りが効いたままであること。"""
+    now = datetime.now(timezone.utc)
+    pages = {
+        FEED_URL: _feed(
+            [("A house", "https://www.dezeen.com/n1/", now)],
+            description="<p>A 1960s bungalow in Kent. Three bedrooms.</p>",
+        )
+    }
+
+    stats, _ = _run(config, conn, pages, source, forbidden={"https://www.dezeen.com/n1"})
+
+    assert stats.inserted == 0
+    assert stats.no_signal == 1

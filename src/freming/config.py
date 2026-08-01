@@ -84,6 +84,10 @@ class EditorialSource(BaseModel):
     enabled: bool = False
     feeds: list[str] = Field(default_factory=list)
     sitemap: str | None = None
+    # 掲載記事すべてが売出中の物件であるメディア（販売専門）は、
+    # 本文から販売シグナルを探す前提が成り立たないため足切りを行わない。
+    # 販売可否の最終判断は従来どおり [2] スコアリングに委ねる。
+    assume_for_sale: bool = False
 
 
 class ListingSource(BaseModel):

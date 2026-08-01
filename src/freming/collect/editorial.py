@@ -290,10 +290,15 @@ class EditorialCollector:
                 )
             )
 
-        if not result.is_candidate(threshold):
+        if not result.is_candidate(threshold) and not source.assume_for_sale:
             stats.no_signal += 1
             log.debug("シグナル不足（%d点 < %d点）: %s", result.score, threshold, url)
             return
+
+        evidence = result.evidence
+        if source.assume_for_sale:
+            prefix = f"{source.name} は販売中の物件のみを掲載"
+            evidence = f"{prefix} / {evidence}" if evidence else prefix
 
         title = page.title or getattr(entry, "title", None)
         log.info("候補: [%d点] %s — %s", result.score, title, url)
@@ -310,7 +315,7 @@ class EditorialCollector:
             title=title,
             thumbnail_url=page.thumbnail_url,
             content_text=page.text,
-            for_sale_evidence=result.evidence,
+            for_sale_evidence=evidence,
             signal_score=result.score,
         )
         if insert_candidate(self.conn, candidate) is not None:

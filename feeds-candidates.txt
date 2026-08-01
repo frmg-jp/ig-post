@@ -1,18 +1,31 @@
-# 調査するフィード候補（未検証。probe-feed で確認する）
-# 販売物件を扱う頻度が高い順。# 行はコメント。
+# フィード候補（probe-feed で検証する）
+# 検証済みの結果は config.yaml に反映済み。ここは未確定分の調査用。
 #
-# --- 販売物件の掲載が主目的 ---
-https://architectureforsale.com/status/for-sale/feed/
-https://architectureforsale.com/feed/
-https://www.wowhaus.co.uk/feed/
-https://circaoldhouses.com/feed/
-https://www.iconichouses.org/rss.xml
+# === 検証済み（2026-08-01） ===
+#  OK  10件 中央値5140字 候補4件  https://www.wowhaus.co.uk/feed/         → 採用
+#  OK  12件 中央値 973字 候補0件  https://circaoldhouses.com/feed/        → 採用（販売専門扱い）
+#  OK  50件 中央値4408字 候補0件  https://www.dezeen.com/feed/            → 採用（編集ソース）
+#  OK  10件 中央値5088字 候補0件  https://www.designboom.com/architecture/feed/ → 採用（編集ソース）
+#  OK  24件 中央値 466字 候補0件  https://www.archdaily.com/rss/          → 本文が薄い。保留
+#  OK  30件 中央値 154字 候補0件  https://www.architecturaldigest.com/feed/rss → 本文が薄い。保留
 #
-# --- 編集メディア（販売記事を含むことがある） ---
-https://www.dwell.com/feed
-https://www.dwell.com/rss
-https://www.architecturaldigest.com/feed/rss
-https://www.wallpaper.com/feed
-https://www.archdaily.com/rss/
-https://www.designboom.com/architecture/feed/
-https://www.dezeen.com/feed/
+# === 未確定: 別のパスを試す ===
+# Dwell（Real Estate セクションがあり期待値は高い）
+https://www.dwell.com/rss.xml
+https://www.dwell.com/feeds/all.rss
+https://www.dwell.com/channel/real-estate/rss
+#
+# Iconic Houses（icons for sale ページあり）
+https://www.iconichouses.org/feed
+https://www.iconichouses.org/blog/rss.xml
+https://www.iconichouses.org/rss
+#
+# Architecture For Sale（販売専門。WordPress なら /?feed=rss2 が通る）
+https://architectureforsale.com/?feed=rss2
+https://architectureforsale.com/listings/feed/
+https://architectureforsale.com/rss
+#
+# Wallpaper*
+https://www.wallpaper.com/rss
+https://www.wallpaper.com/feeds/all
+https://www.wallpaper.com/architecture/feed
