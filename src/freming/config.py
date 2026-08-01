@@ -88,6 +88,24 @@ class EditorialSource(BaseModel):
     # 本文から販売シグナルを探す前提が成り立たないため足切りを行わない。
     # 販売可否の最終判断は従来どおり [2] スコアリングに委ねる。
     assume_for_sale: bool = False
+    # URLの正規表現による絞り込み。フィードに物件以外（エージェント紹介、
+    # イベント告知など）が混ざるソースで使う。記事を取得する前に判定するため、
+    # 相手サイトへの無駄なアクセスも減る。
+    url_include: list[str] = Field(default_factory=list)   # 空なら全件通す
+    url_exclude: list[str] = Field(default_factory=list)
+    # 記事ページを取得するか。None なら collect.fetch_article_pages に従う。
+    # Crawl-delay の長いサイトでは false にして、フィード配信分だけで判定する
+    # （リクエストがフィード1回で済み、待ち時間がなくなる）。
+    fetch_article_pages: bool | None = None
+
+    def url_allowed(self, url: str) -> bool:
+        import re
+
+        if any(re.search(pattern, url) for pattern in self.url_exclude):
+            return False
+        if not self.url_include:
+            return True
+        return any(re.search(pattern, url) for pattern in self.url_include)
 
 
 class ListingSource(BaseModel):

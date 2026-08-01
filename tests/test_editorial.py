@@ -380,3 +380,69 @@ def test_editorial_media_still_requires_signals(config, conn, source) -> None:
 
     assert stats.inserted == 0
     assert stats.no_signal == 1
+
+
+def test_url_pattern_filters_out_non_property_pages(config, conn, listing_source) -> None:
+    """フィードに混ざるエージェント紹介ページを、取得する前に除外する。
+
+    CIRCA Old Houses で人名のページが5件取り込まれた実例に対応。
+    """
+    now = datetime.now(timezone.utc)
+    listing_source.url_exclude = [r"/(barry|cynthia)-"]
+    pages = {
+        FEED_URL: _feed(
+            [
+                ("Barry & Rebecca Richards", "https://www.wowhaus.co.uk/barry-rebecca/", now),
+                ("A modernist house", "https://www.wowhaus.co.uk/oldhouse/123/", now),
+            ],
+            description="<p>A 1960s house.</p>",
+        )
+    }
+
+    stats, client = _run(config, conn, pages, listing_source,
+                         forbidden={"https://www.wowhaus.co.uk/oldhouse/123"})
+
+    assert stats.skipped_url_pattern == 1
+    assert stats.inserted == 1
+    # 除外したURLには一切アクセスしていない
+    assert not any("barry" in url for url in client.requested)
+
+
+def test_url_include_restricts_to_listing_paths(config, conn, listing_source) -> None:
+    now = datetime.now(timezone.utc)
+    listing_source.url_include = [r"/oldhouse/"]
+    pages = {
+        FEED_URL: _feed(
+            [
+                ("Agent", "https://www.wowhaus.co.uk/some-person/", now),
+                ("House", "https://www.wowhaus.co.uk/oldhouse/1/", now),
+            ],
+            description="<p>A house.</p>",
+        )
+    }
+
+    stats, _ = _run(config, conn, pages, listing_source,
+                    forbidden={"https://www.wowhaus.co.uk/oldhouse/1"})
+
+    assert stats.skipped_url_pattern == 1
+    assert stats.inserted == 1
+    row = conn.execute("SELECT source_url FROM properties").fetchone()
+    assert "/oldhouse/" in row["source_url"]
+
+
+def test_source_can_opt_out_of_article_fetching(config, conn, listing_source) -> None:
+    """Crawl-delay が長いサイトでは、フィード1回のリクエストで済ませる。"""
+    now = datetime.now(timezone.utc)
+    listing_source.fetch_article_pages = False
+    pages = {
+        FEED_URL: _feed(
+            [("House", "https://www.wowhaus.co.uk/h/", now)],
+            description="<p>A 1960s house for sale, asking price £450,000.</p>",
+        )
+    }
+
+    stats, client = _run(config, conn, pages, listing_source)
+
+    assert client.requested == [FEED_URL]     # 記事ページは取りに行かない
+    assert stats.inserted == 1
+    assert stats.used_feed_only == 1

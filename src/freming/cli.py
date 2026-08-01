@@ -136,6 +136,19 @@ def _cmd_add_manual(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_remove(args: argparse.Namespace) -> int:
+    """誤って取り込んだ候補を削除する（納品済みは対象外）。"""
+    from freming.db.connection import session
+    from freming.db.repository import delete_properties
+
+    cfg = load_config(args.config)
+    setup_logging(cfg.app.log_dir, cfg.app.log_level)
+    with session(cfg.app.db_path) as conn:
+        removed = delete_properties(conn, source=args.source, property_id=args.id)
+    print(f"{removed} 件削除しました")
+    return 0
+
+
 def _cmd_status(args: argparse.Namespace) -> int:
     from freming.db.connection import connect
     from freming.db.repository import count_by_status
@@ -204,6 +217,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_manual.add_argument("--note", default=None, help="スコアリングに渡す補足メモ")
     p_manual.add_argument("--image", default=None, help="サムネイル画像のURL")
     p_manual.set_defaults(func=_cmd_add_manual)
+
+    p_remove = sub.add_parser("remove", help="誤って取り込んだ候補を削除（納品済みは除く）")
+    group = p_remove.add_mutually_exclusive_group(required=True)
+    group.add_argument("--source", help="ソースキー（例: circa_old_houses）")
+    group.add_argument("--id", type=int, help="property_id")
+    p_remove.set_defaults(func=_cmd_remove)
 
     p_status = sub.add_parser("status", help="候補の件数をステータス別に表示")
     p_status.set_defaults(func=_cmd_status)

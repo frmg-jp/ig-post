@@ -80,6 +80,23 @@ def recent_reject_reasons(conn: sqlite3.Connection, limit: int = 30) -> list[str
     return [row["reason"] for row in rows]
 
 
+def delete_properties(
+    conn: sqlite3.Connection, *, source: str | None = None, property_id: int | None = None
+) -> int:
+    """誤って取り込んだ候補を消す。納品済みのものは対象外にする。"""
+    if property_id is not None:
+        cursor = conn.execute(
+            "DELETE FROM properties WHERE id = ? AND status != 'delivered'", (property_id,)
+        )
+    elif source is not None:
+        cursor = conn.execute(
+            "DELETE FROM properties WHERE source = ? AND status != 'delivered'", (source,)
+        )
+    else:
+        raise ValueError("source か property_id のどちらかを指定してください")
+    return cursor.rowcount
+
+
 def count_by_status(conn: sqlite3.Connection) -> dict[str, int]:
     rows = conn.execute(
         "SELECT status, COUNT(*) AS n FROM properties GROUP BY status"

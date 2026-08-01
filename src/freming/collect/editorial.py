@@ -66,6 +66,7 @@ class CollectStats:
     feed_entries: int = 0
     skipped_old: int = 0
     skipped_known: int = 0
+    skipped_url_pattern: int = 0
     skipped_robots: int = 0
     fetch_failed: int = 0
     article_fetch_failed: int = 0
@@ -98,6 +99,7 @@ class CollectStats:
         line = (
             f"[{self.source}] フィード {self.feed_entries} 件 → 候補 {self.inserted} 件"
             f"（期間外 {self.skipped_old} / 取得済み {self.skipped_known} /"
+            f" 対象外URL {self.skipped_url_pattern} /"
             f" robots {self.skipped_robots} / 取得失敗 {self.fetch_failed} /"
             f" シグナルなし {self.no_signal}）"
         )
@@ -147,6 +149,17 @@ class EditorialCollector:
         self._article_fetch_disabled = not config.collect.fetch_article_pages
         self._consecutive_article_failures = 0
 
+    def _apply_source_policy(self, source: EditorialSource) -> None:
+        """ソース単位の設定を反映する（記事取得の有無）。"""
+        if source.fetch_article_pages is not None:
+            self._article_fetch_disabled = not source.fetch_article_pages
+            if not source.fetch_article_pages:
+                log.info(
+                    "%s: 記事ページを取得せず、フィード配信分の本文だけで判定します",
+                    source.key,
+                )
+        self._consecutive_article_failures = 0
+
     def collect(
         self,
         source: EditorialSource,
@@ -155,6 +168,7 @@ class EditorialCollector:
         explain: bool = False,
     ) -> CollectStats:
         stats = CollectStats(source=source.key)
+        self._apply_source_policy(source)
         if not source.feeds:
             log.warning(
                 "%s: フィードURLが未設定です。config.yaml の editorial_sources に "
@@ -235,6 +249,11 @@ class EditorialCollector:
         if not link:
             return
         url = normalize_url(link)
+
+        if not source.url_allowed(url):
+            stats.skipped_url_pattern += 1
+            log.debug("URLパターンに合わないためスキップ: %s", url)
+            return
 
         published = _entry_published(entry)
         if published and published < cutoff:

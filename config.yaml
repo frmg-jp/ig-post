@@ -48,6 +48,12 @@ editorial_sources:
     rank: B
     enabled: true
     assume_for_sale: true
+    # robots.txt が Crawl-delay: 60 を指定しているため、記事ページは取得せず
+    # フィード配信分（中央値973字）だけで判定する。リクエストはフィード1回のみ。
+    fetch_article_pages: false
+    # フィードにエージェント紹介ページが混ざるため、物件ページだけに絞る。
+    # 実際のURL構造を probe-feed --details で確認してから設定する。
+    url_exclude: []
     feeds:
       - "https://circaoldhouses.com/feed/"
 
@@ -216,11 +222,11 @@ scoring:
   summary_max_chars: 80
   score_scale: 100             # 0-100
   weights:                     # 合計 1.0
-    story: 0.30                       # 用途転換・歴史・建築家の物語
-    source_rank: 0.20                 # S > A > B
+    story: 0.25                       # 用途転換・歴史・建築家の物語
+    source_rank: 0.15                 # S > A > B
     editorial_for_sale_bonus: 0.20    # 編集ソース掲載 かつ 販売中 = Hidden Gem
     genre_match: 0.15
-    area_match: 0.10
+    area_match: 0.20                  # 重点エリアを優先（2026-08-01 に 0.10 から引き上げ）
     price: 0.05                       # 二の次。高額を優遇しない
   source_rank_score:
     S: 1.0
