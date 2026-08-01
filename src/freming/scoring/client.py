@@ -37,8 +37,12 @@ class ScoringClient:
         for attempt in range(1, max_attempts + 1):
             try:
                 return self._assess_once(user_prompt)
-            except Exception as exc:  # noqa: BLE001 - 種類を問わず再試行する
+            except Exception as exc:  # noqa: BLE001 - 判定して再試行の可否を決める
                 last_error = exc
+                if not _is_retryable(exc):
+                    # 鍵の不備やスキーマの誤りは、何度試しても同じ結果になる。
+                    # 待ち時間をかけて全件失敗させるより、すぐ理由を出す。
+                    raise ScoringError(f"再試行しても解決しない失敗です: {exc}") from exc
                 if attempt == max_attempts:
                     break
                 wait = 2.0 ** attempt
@@ -60,7 +64,42 @@ class ScoringClient:
                 "format": {"type": "json_schema", "schema": OUTPUT_SCHEMA},
             },
         )
+        _check_stop_reason(response, self.config.scoring.max_tokens)
         return Assessment.from_json(json.loads(_text_of(response)))
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """再試行して解決する見込みがあるか。
+
+    鍵の不備（401）、権限（403）、リクエストの誤り（400）は何度送っても
+    同じ結果になる。3回×指数バックオフを費やしてから同じ理由で落ちるより、
+    最初の1回で理由を返す。
+    """
+    import anthropic
+
+    if isinstance(exc, ScoringError):
+        return False
+    if isinstance(exc, anthropic.APIStatusError):
+        return exc.status_code == 429 or exc.status_code >= 500
+    # 接続断・タイムアウトは時間をおけば直りうる
+    return isinstance(exc, anthropic.APIConnectionError)
+
+
+def _check_stop_reason(response, max_tokens: int) -> None:
+    """本文を読む前に停止理由を確かめる。
+
+    max_tokens で切れた返答は JSON として壊れており、パースの失敗として
+    しか現れない。原因が分かる形で先に落とす。
+    """
+    reason = getattr(response, "stop_reason", None)
+    if reason == "max_tokens":
+        raise ScoringError(
+            f"返答が max_tokens（{max_tokens}）で打ち切られました。"
+            "config.yaml の scoring.max_tokens を増やすか effort を下げてください"
+            "（thinking と本文は同じ上限を共有します）"
+        )
+    if reason == "refusal":
+        raise ScoringError("モデルが判定を拒否しました（記事の内容を確認してください）")
 
 
 _CHECK_ARTICLE = (

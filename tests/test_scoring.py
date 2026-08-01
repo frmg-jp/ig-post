@@ -260,3 +260,68 @@ def test_check_api_reports_missing_key(config, monkeypatch) -> None:
     ok, message = check_api(config)
     assert ok is False
     assert "ANTHROPIC_API_KEY" in message
+
+
+def test_truncated_response_reports_max_tokens(config) -> None:
+    """max_tokens で切れた返答を、JSONパース失敗ではなく原因として出すこと。"""
+    from freming.scoring.client import ScoringError, _check_stop_reason
+
+    class _Resp:
+        stop_reason = "max_tokens"
+
+    with pytest.raises(ScoringError) as exc:
+        _check_stop_reason(_Resp(), 2000)
+    assert "max_tokens" in str(exc.value)
+
+
+def test_refusal_is_reported(config) -> None:
+    from freming.scoring.client import ScoringError, _check_stop_reason
+
+    class _Resp:
+        stop_reason = "refusal"
+
+    with pytest.raises(ScoringError):
+        _check_stop_reason(_Resp(), 8000)
+
+
+def test_normal_stop_reason_passes(config) -> None:
+    from freming.scoring.client import _check_stop_reason
+
+    class _Resp:
+        stop_reason = "end_turn"
+
+    _check_stop_reason(_Resp(), 8000)   # 例外が出ないこと
+
+
+def test_non_retryable_errors_are_not_retried() -> None:
+    """鍵の不備やリクエストの誤りを3回試さないこと。
+
+    同じ理由で失敗すると分かっているものに指数バックオフを費やすと、
+    全件が失敗するまでの時間が伸びるだけになる。
+    """
+    import anthropic
+    import httpx
+
+    from freming.scoring.client import _is_retryable
+
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+
+    def _status_error(status: int) -> anthropic.APIStatusError:
+        return anthropic.APIStatusError(
+            "err", response=httpx.Response(status, request=request), body=None
+        )
+
+    assert _is_retryable(_status_error(429)) is True
+    assert _is_retryable(_status_error(500)) is True
+    assert _is_retryable(_status_error(401)) is False
+    assert _is_retryable(_status_error(400)) is False
+    assert _is_retryable(anthropic.APIConnectionError(request=request)) is True
+
+
+def test_max_tokens_leaves_room_for_thinking(config) -> None:
+    """claude-sonnet-5 は thinking が既定で動くため、上限に余裕が要る。
+
+    max_tokens は thinking と本文の合計に効く。判定結果のJSONが小さくても
+    2000 程度では打ち切られうるので、設定側で余裕を確保しておく。
+    """
+    assert config.scoring.max_tokens >= 4000
