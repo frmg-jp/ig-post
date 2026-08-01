@@ -98,10 +98,11 @@ def source(config):
     return config.editorial_source("dezeen")
 
 
-def _run(config, conn, pages, source, disallowed=None, limit=None, dry_run=False, forbidden=None):
+def _run(config, conn, pages, source, disallowed=None, limit=None, dry_run=False,
+         forbidden=None, explain=False):
     client = FakeClient(pages, disallowed, forbidden)
     collector = EditorialCollector(config, client, conn)
-    return collector.collect(source, limit=limit, dry_run=dry_run), client
+    return collector.collect(source, limit=limit, dry_run=dry_run, explain=explain), client
 
 
 def test_only_articles_with_for_sale_signals_become_candidates(config, conn, source) -> None:
@@ -294,3 +295,30 @@ def test_limit_caps_the_number_of_candidates(config, conn, source) -> None:
     stats, _ = _run(config, conn, pages, source, limit=2)
 
     assert stats.inserted == 2
+
+
+def test_explain_reports_scores_below_the_threshold(config, conn, source) -> None:
+    """候補0件のとき、フィード本文が薄いのか販売物件が無いのかを切り分けられること。"""
+    now = datetime.now(timezone.utc)
+    entries = [
+        ("Just a house", "https://www.dezeen.com/m1/", now),
+        ("Listed home", "https://www.dezeen.com/m2/", now),
+    ]
+    pages = {
+        FEED_URL: _feed(entries, description="<p>A house completed in 2019.</p>"),
+        "https://www.dezeen.com/m1": _article("A house completed in 2019."),
+        "https://www.dezeen.com/m2": _article("The home is currently listed for viewing."),
+    }
+
+    stats, _ = _run(config, conn, pages, source)
+    assert stats.explanations == []          # 既定では収集しない
+
+    stats, _ = _run(config, conn, pages, source, explain=True)
+
+    assert stats.inserted == 0
+    assert len(stats.explanations) == 2
+    report = stats.explain_report()
+    assert "判定内訳" in report
+    assert "本文の長さ" in report
+    # キーワードだけ拾えた記事が上位に来る
+    assert stats.explanations and max(e.score for e in stats.explanations) == 1

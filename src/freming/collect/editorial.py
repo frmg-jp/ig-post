@@ -31,6 +31,33 @@ log = get_logger(__name__)
 
 
 @dataclass
+class Explanation:
+    """1記事分の判定内訳（--explain 用）。閾値未満のものも含む。"""
+
+    url: str
+    title: str
+    score: int
+    text_chars: int
+    from_feed_only: bool
+    keywords: list[str] = field(default_factory=list)
+    prices: list[str] = field(default_factory=list)
+    listing_links: list[str] = field(default_factory=list)
+    text_head: str = ""
+
+    def line(self) -> str:
+        found: list[str] = []
+        if self.keywords:
+            found.append(f"kw={','.join(self.keywords[:3])}")
+        if self.prices:
+            found.append(f"price={','.join(self.prices[:2])}")
+        if self.listing_links:
+            found.append(f"listing={len(self.listing_links)}")
+        detail = " ".join(found) or "シグナルなし"
+        origin = "feed" if self.from_feed_only else "記事"
+        return f"  {self.score}点 [{origin} {self.text_chars:>5}字] {self.title[:48]:<48} {detail}"
+
+
+@dataclass
 class CollectStats:
     source: str
     feed_entries: int = 0
@@ -43,6 +70,26 @@ class CollectStats:
     no_signal: int = 0
     inserted: int = 0
     candidates: list[str] = field(default_factory=list)
+    explanations: list[Explanation] = field(default_factory=list)
+
+    def explain_report(self, top: int = 15) -> str:
+        """判定内訳をスコア降順で表示する。フィード本文が薄いのか、
+        そもそも販売物件が無いのかを切り分けるための出力。"""
+        if not self.explanations:
+            return ""
+        ranked = sorted(self.explanations, key=lambda e: (-e.score, -e.text_chars))
+        chars = [e.text_chars for e in self.explanations]
+        lines = [
+            "",
+            f"--- 判定内訳（上位 {min(top, len(ranked))} 件 / 全 {len(ranked)} 件）---",
+            *[e.line() for e in ranked[:top]],
+            "",
+            f"本文の長さ: 中央値 {sorted(chars)[len(chars) // 2]}字 "
+            f"最小 {min(chars)}字 最大 {max(chars)}字",
+        ]
+        sample = ranked[0]
+        lines.append(f"本文の冒頭（最高スコアの記事）: {sample.text_head}")
+        return "\n".join(lines)
 
     def summary(self) -> str:
         line = (
@@ -98,7 +145,11 @@ class EditorialCollector:
         self._consecutive_article_failures = 0
 
     def collect(
-        self, source: EditorialSource, limit: int | None = None, dry_run: bool = False
+        self,
+        source: EditorialSource,
+        limit: int | None = None,
+        dry_run: bool = False,
+        explain: bool = False,
     ) -> CollectStats:
         stats = CollectStats(source=source.key)
         if not source.feeds:
@@ -117,7 +168,7 @@ class EditorialCollector:
             for entry in self._feed_entries(feed_url, stats):
                 if stats.inserted >= max_items:
                     break
-                self._process_entry(entry, source, cutoff, stats, dry_run)
+                self._process_entry(entry, source, cutoff, stats, dry_run, explain)
 
         log.info(stats.summary())
         return stats
@@ -175,6 +226,7 @@ class EditorialCollector:
         cutoff: datetime,
         stats: CollectStats,
         dry_run: bool,
+        explain: bool = False,
     ) -> None:
         link = getattr(entry, "link", None)
         if not link:
@@ -219,6 +271,21 @@ class EditorialCollector:
         result = signals.detect(page.text, page.links, self.config.for_sale_signals)
 
         threshold = self.config.for_sale_signals.min_signal_score
+        if explain:
+            stats.explanations.append(
+                Explanation(
+                    url=url,
+                    title=page.title or getattr(entry, "title", "") or "",
+                    score=result.score,
+                    text_chars=len(page.text),
+                    from_feed_only=from_feed_only,
+                    keywords=list(result.keywords),
+                    prices=list(result.prices),
+                    listing_links=list(result.listing_links),
+                    text_head=page.text[:160],
+                )
+            )
+
         if not result.is_candidate(threshold):
             stats.no_signal += 1
             log.debug("シグナル不足（%d点 < %d点）: %s", result.score, threshold, url)
@@ -250,7 +317,11 @@ class EditorialCollector:
 
 
 def collect_source(
-    config: Config, source_key: str, limit: int | None = None, dry_run: bool = False
+    config: Config,
+    source_key: str,
+    limit: int | None = None,
+    dry_run: bool = False,
+    explain: bool = False,
 ) -> CollectStats:
     source = config.editorial_source(source_key)
     if source is None:
@@ -261,7 +332,9 @@ def collect_source(
     conn = connect(config.app.db_path)
     try:
         with HttpClient(config.http) as client:
-            return EditorialCollector(config, client, conn).collect(source, limit, dry_run)
+            return EditorialCollector(config, client, conn).collect(
+                source, limit, dry_run, explain
+            )
     finally:
         conn.close()
 
@@ -271,14 +344,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source", required=True, help="editorial_sources の key（例: dezeen）")
     parser.add_argument("--limit", type=int, default=None, help="候補化する最大件数")
     parser.add_argument("--dry-run", action="store_true", help="DBに書き込まず結果だけ表示")
+    parser.add_argument(
+        "--explain", action="store_true", help="閾値未満も含めて判定内訳を表示（調整用）"
+    )
     args = parser.parse_args(argv)
 
     config = load_config()
     setup_logging(config.app.log_dir, config.app.log_level)
-    stats = collect_source(config, args.source, args.limit, args.dry_run)
+    stats = collect_source(config, args.source, args.limit, args.dry_run, args.explain)
     print(stats.summary())
     for url in stats.candidates:
         print(f"  - {url}")
+    if args.explain:
+        print(stats.explain_report())
     return 0
 
 

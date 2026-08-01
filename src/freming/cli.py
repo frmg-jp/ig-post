@@ -51,10 +51,12 @@ def _cmd_collect(args: argparse.Namespace) -> int:
 
     cfg = load_config(args.config)
     setup_logging(cfg.app.log_dir, cfg.app.log_level)
-    stats = collect_source(cfg, args.source, args.limit, args.dry_run)
+    stats = collect_source(cfg, args.source, args.limit, args.dry_run, args.explain)
     print(stats.summary())
     for url in stats.candidates:
         print(f"  - {url}")
+    if args.explain:
+        print(stats.explain_report())
     return 0
 
 
@@ -111,6 +113,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_collect.add_argument("--source", required=True, help="editorial_sources の key")
     p_collect.add_argument("--limit", type=int, default=None)
     p_collect.add_argument("--dry-run", action="store_true")
+    p_collect.add_argument(
+        "--explain", action="store_true", help="閾値未満も含めて判定内訳を表示（調整用）"
+    )
     p_collect.set_defaults(func=_cmd_collect)
 
     p_ingest = sub.add_parser("ingest-url", help="URLを1件だけ取得して候補化")
