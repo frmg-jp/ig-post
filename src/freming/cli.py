@@ -113,6 +113,29 @@ def _cmd_ingest_url(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_add_manual(args: argparse.Namespace) -> int:
+    from freming.collect.manual import AlreadyCollected, add_manual_entry
+
+    cfg = load_config(args.config)
+    setup_logging(cfg.app.log_dir, cfg.app.log_level)
+    try:
+        property_id = add_manual_entry(
+            cfg,
+            source_url=args.url,
+            title=args.title,
+            price=args.price,
+            city=args.city,
+            country=args.country,
+            note=args.note,
+            thumbnail_url=args.image,
+        )
+    except AlreadyCollected as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(f"OK: property_id={property_id}")
+    return 0
+
+
 def _cmd_status(args: argparse.Namespace) -> int:
     from freming.db.connection import connect
     from freming.db.repository import count_by_status
@@ -168,6 +191,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_ingest = sub.add_parser("ingest-url", help="URLを1件だけ取得して候補化")
     p_ingest.add_argument("url")
     p_ingest.set_defaults(func=_cmd_ingest_url)
+
+    p_manual = sub.add_parser(
+        "add-manual",
+        help="ページを取得せず手入力で候補化（自動収集が禁止されているサイト用）",
+    )
+    p_manual.add_argument("--url", required=True, help="物件ページのURL（取得はしない）")
+    p_manual.add_argument("--title", required=True)
+    p_manual.add_argument("--price", default=None, help="原文のまま（例: $2,400,000）")
+    p_manual.add_argument("--city", default=None)
+    p_manual.add_argument("--country", default=None)
+    p_manual.add_argument("--note", default=None, help="スコアリングに渡す補足メモ")
+    p_manual.add_argument("--image", default=None, help="サムネイル画像のURL")
+    p_manual.set_defaults(func=_cmd_add_manual)
 
     p_status = sub.add_parser("status", help="候補の件数をステータス別に表示")
     p_status.set_defaults(func=_cmd_status)

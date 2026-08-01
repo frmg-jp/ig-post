@@ -25,8 +25,10 @@ def insert_candidate(conn: sqlite3.Connection, candidate: Candidate) -> int | No
         """
         INSERT OR IGNORE INTO properties (
             source, source_rank, source_url, title, thumbnail_url,
-            content_text, for_sale_evidence, signal_score, status, collected_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+            content_text, for_sale_evidence, signal_score,
+            price, location_city, location_country, is_for_sale,
+            status, collected_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
         """,
         (
             candidate.source,
@@ -37,6 +39,10 @@ def insert_candidate(conn: sqlite3.Connection, candidate: Candidate) -> int | No
             candidate.content_text,
             candidate.for_sale_evidence,
             candidate.signal_score,
+            candidate.price,
+            candidate.location_city,
+            candidate.location_country,
+            candidate.is_for_sale,
             candidate.collected_at,
         ),
     )

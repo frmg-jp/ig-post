@@ -188,3 +188,46 @@ def test_price_far_from_the_keyword_is_ignored() -> None:
     assert "€240 million" in " ".join(result.ignored_prices)
     assert result.prices == []
     assert result.score == SIGNALS.keyword_score      # キーワード分のみ
+
+
+# --- 手動入力（自動収集が禁止されているサイト用） -----------------------
+
+
+def test_manual_entry_does_not_fetch_the_page(db, monkeypatch) -> None:
+    """Zillow等は一切アクセスせず、人が入力した内容だけで候補化する。"""
+    from freming.collect import manual
+    from freming.net.client import HttpClient
+
+    def _boom(*_args, **_kwargs):  # pragma: no cover - 呼ばれたら失敗
+        raise AssertionError("手動入力でHTTPアクセスしてはいけない")
+
+    monkeypatch.setattr(HttpClient, "__init__", _boom)
+
+    property_id = manual.add_manual_entry(
+        CONFIG,
+        source_url="https://www.zillow.com/homedetails/123_Example_St/999_zpid/",
+        title="1920s firehouse conversion",
+        price="$2,400,000",
+        city="San Francisco",
+        country="United States",
+        conn=db,
+    )
+
+    row = db.execute("SELECT * FROM properties WHERE id = ?", (property_id,)).fetchone()
+    assert row["source"] == "zillow"          # ドメインからソースを推定
+    assert row["source_rank"] == "B"
+    assert row["price"] == "$2,400,000"
+    assert row["location_city"] == "San Francisco"
+    assert row["is_for_sale"] == 1            # 人が確認済み
+    assert "手動入力" in row["for_sale_evidence"]
+    assert row["status"] == "pending"
+    assert row["score"] is None               # スコアリングは通常どおり行う
+
+
+def test_manual_entry_is_not_duplicated(db) -> None:
+    from freming.collect import manual
+
+    url = "https://www.redfin.com/CA/San-Francisco/1-Main-St/home/12345"
+    manual.add_manual_entry(CONFIG, source_url=url, title="Loft", conn=db)
+    with pytest.raises(manual.AlreadyCollected):
+        manual.add_manual_entry(CONFIG, source_url=url, title="Loft（重複）", conn=db)

@@ -24,6 +24,11 @@ class Candidate:
     content_text: str | None = None
     for_sale_evidence: str | None = None
     signal_score: int | None = None
+    # 手動入力で人が直接与える項目（自動収集では未設定のままスコアリングに委ねる）
+    price: str | None = None
+    location_city: str | None = None
+    location_country: str | None = None
+    is_for_sale: int | None = None
     collected_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 

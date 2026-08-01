@@ -95,6 +95,64 @@ def ingest_url(config: Config, url: str, conn: sqlite3.Connection | None = None)
             conn.close()
 
 
+def add_manual_entry(
+    config: Config,
+    *,
+    source_url: str,
+    title: str,
+    price: str | None = None,
+    city: str | None = None,
+    country: str | None = None,
+    note: str | None = None,
+    thumbnail_url: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> int:
+    """ページを取得せず、人が見た内容を手で登録する。
+
+    Zillow / Redfin / Compass のように自動収集が禁止されているサイトのための
+    経路。こちらからは一切アクセスせず、人がブラウザで確認した情報だけを
+    受け取る。販売中かどうかは人が確認済みなので is_for_sale = 1 とする。
+    """
+    source_url = normalize_url(source_url)
+    owns_conn = conn is None
+    conn = conn or connect(config.app.db_path)
+    try:
+        existing = find_by_source_url(conn, source_url)
+        if existing is not None:
+            raise AlreadyCollected(source_url, existing["id"])
+
+        source_key, source_rank = guess_source(config, source_url)
+        evidence_parts = ["手動入力（人がページを確認して登録）"]
+        if price:
+            evidence_parts.append(f"価格: {price}")
+        if note:
+            evidence_parts.append(note)
+
+        candidate = Candidate(
+            source=source_key,
+            source_rank=source_rank,
+            source_url=source_url,
+            title=title,
+            price=price,
+            location_city=city,
+            location_country=country,
+            thumbnail_url=thumbnail_url,
+            is_for_sale=1,
+            for_sale_evidence=" / ".join(evidence_parts),
+            content_text=note,
+        )
+        property_id = insert_candidate(conn, candidate)
+        if property_id is None:  # 競合
+            row = find_by_source_url(conn, source_url)
+            raise AlreadyCollected(source_url, row["id"])
+        conn.commit()
+        log.info("手動入力で候補化しました: id=%d %s", property_id, source_url)
+        return property_id
+    finally:
+        if owns_conn:
+            conn.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="URLを1件だけ取得して候補化する")
     parser.add_argument("url")
@@ -109,6 +167,13 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     except RobotsDisallowed as exc:
         print(str(exc), file=sys.stderr)
+        print(
+            "\nこのサイトは自動取得が許可されていません。"
+            "ブラウザで内容を確認したうえで、add-manual で登録してください:\n"
+            f'  python -m freming.cli add-manual --url "{args.url}" '
+            '--title "..." --price "..." --city "..."',
+            file=sys.stderr,
+        )
         return 1
     print(f"OK: property_id={property_id}")
     return 0
