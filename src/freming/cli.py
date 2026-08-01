@@ -46,6 +46,52 @@ def _cmd_db(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_collect(args: argparse.Namespace) -> int:
+    from freming.collect.editorial import collect_source
+
+    cfg = load_config(args.config)
+    setup_logging(cfg.app.log_dir, cfg.app.log_level)
+    stats = collect_source(cfg, args.source, args.limit, args.dry_run)
+    print(stats.summary())
+    for url in stats.candidates:
+        print(f"  - {url}")
+    return 0
+
+
+def _cmd_ingest_url(args: argparse.Namespace) -> int:
+    from freming.collect.manual import AlreadyCollected, ingest_url
+    from freming.net.client import RobotsDisallowed
+
+    cfg = load_config(args.config)
+    setup_logging(cfg.app.log_dir, cfg.app.log_level)
+    try:
+        property_id = ingest_url(cfg, args.url)
+    except (AlreadyCollected, RobotsDisallowed) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(f"OK: property_id={property_id}")
+    return 0
+
+
+def _cmd_status(args: argparse.Namespace) -> int:
+    from freming.db.connection import connect
+    from freming.db.repository import count_by_status
+
+    cfg = load_config(args.config)
+    setup_logging(cfg.app.log_dir, cfg.app.log_level)
+    conn = connect(cfg.app.db_path)
+    try:
+        counts = count_by_status(conn)
+    finally:
+        conn.close()
+    if not counts:
+        print("候補はまだありません。")
+        return 0
+    for status in ("pending", "approved", "rejected", "delivered"):
+        print(f"  {status:<10} {counts.get(status, 0)}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="freming", description="FREMING CURATED パイプライン")
     parser.add_argument("--config", default=None, help="config.yaml のパス")
@@ -60,6 +106,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_db.add_argument("db_action", choices=["migrate", "status"])
     p_db.add_argument("--db", default=None)
     p_db.set_defaults(func=_cmd_db)
+
+    p_collect = sub.add_parser("collect", help="編集ソースから収集（経路B）")
+    p_collect.add_argument("--source", required=True, help="editorial_sources の key")
+    p_collect.add_argument("--limit", type=int, default=None)
+    p_collect.add_argument("--dry-run", action="store_true")
+    p_collect.set_defaults(func=_cmd_collect)
+
+    p_ingest = sub.add_parser("ingest-url", help="URLを1件だけ取得して候補化")
+    p_ingest.add_argument("url")
+    p_ingest.set_defaults(func=_cmd_ingest_url)
+
+    p_status = sub.add_parser("status", help="候補の件数をステータス別に表示")
+    p_status.set_defaults(func=_cmd_status)
 
     return parser
 

@@ -84,12 +84,13 @@ def run_preflight(
         return report
 
     report.account_email = client.account_hint
-    report.add(Check(f"認証（{config.auth_mode}）", True, f"認証成功: {client.account_hint}"))
+    auth_check = report.add(Check(f"認証（{config.auth_mode}）", True, "認証成功"))
 
     # 2. 保存容量 -------------------------------------------------------
     try:
         about = client.storage_quota()
         report.account_email = about.get("user", {}).get("emailAddress") or report.account_email
+        auth_check.detail = f"認証成功: {report.account_email}"
         quota = about.get("storageQuota", {})
         limit = quota.get("limit")
         usage = quota.get("usage", "0")
