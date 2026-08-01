@@ -101,6 +101,10 @@ class ForSaleSignals(BaseModel):
     price_score: int = 1
     listing_link_score: int = 2
     min_signal_score: int = 2
+    # 価格表記は、販売キーワードからこの文字数以内にあるものだけを加点対象にする。
+    # 建設費・事業費・チケット代などの金額を売出価格と取り違えないための制約。
+    # 0 にすると文中のあらゆる金額を加点対象にする（誤検出が増えるため非推奨）。
+    price_requires_keyword_within: int = 200
     keywords: list[str] = Field(default_factory=list)
     price_patterns: list[str] = Field(default_factory=list)
     listing_domains: list[str] = Field(default_factory=list)

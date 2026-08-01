@@ -42,6 +42,7 @@ class Explanation:
     keywords: list[str] = field(default_factory=list)
     prices: list[str] = field(default_factory=list)
     listing_links: list[str] = field(default_factory=list)
+    ignored_prices: list[str] = field(default_factory=list)
     text_head: str = ""
 
     def line(self) -> str:
@@ -52,6 +53,8 @@ class Explanation:
             found.append(f"price={','.join(self.prices[:2])}")
         if self.listing_links:
             found.append(f"listing={len(self.listing_links)}")
+        if self.ignored_prices:
+            found.append(f"除外price={len(self.ignored_prices)}")
         detail = " ".join(found) or "シグナルなし"
         origin = "feed" if self.from_feed_only else "記事"
         return f"  {self.score}点 [{origin} {self.text_chars:>5}字] {self.title[:48]:<48} {detail}"
@@ -282,6 +285,7 @@ class EditorialCollector:
                     keywords=list(result.keywords),
                     prices=list(result.prices),
                     listing_links=list(result.listing_links),
+                    ignored_prices=list(result.ignored_prices),
                     text_head=page.text[:160],
                 )
             )
@@ -335,6 +339,27 @@ def collect_source(
             return EditorialCollector(config, client, conn).collect(
                 source, limit, dry_run, explain
             )
+    finally:
+        conn.close()
+
+
+def probe_feed(config: Config, feed_url: str, limit: int | None = None) -> CollectStats:
+    """任意のフィードURLを試し、判定内訳だけを返す（DBには書き込まない）。
+
+    config.yaml に登録する前に、そのフィードが販売物件を扱っているか、
+    本文がどれくらい配信されているかを確かめるための調査用。
+    """
+    source = EditorialSource(
+        key="probe", name=feed_url, rank="B", enabled=True, feeds=[feed_url]
+    )
+    probe_config = config.model_copy(deep=True)
+    probe_config.collect.fetch_article_pages = False  # フィードの中身だけを見る
+
+    conn = connect(probe_config.app.db_path)
+    try:
+        with HttpClient(probe_config.http) as client:
+            collector = EditorialCollector(probe_config, client, conn)
+            return collector.collect(source, limit=limit, dry_run=True, explain=True)
     finally:
         conn.close()
 

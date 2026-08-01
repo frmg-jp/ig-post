@@ -28,10 +28,26 @@ class SignalResult:
     keywords: list[str] = field(default_factory=list)
     prices: list[str] = field(default_factory=list)
     listing_links: list[str] = field(default_factory=list)
+    ignored_prices: list[str] = field(default_factory=list)  # 文脈から売出価格でないと判断
     evidence: str = ""
 
     def is_candidate(self, threshold: int) -> bool:
         return self.score >= threshold
+
+
+def _near_keyword(
+    start: int, end: int, keyword_spans: list[tuple[int, int]], window: int
+) -> bool:
+    """価格表記が販売キーワードの近くにあるか。
+
+    window が 0 のときは距離を問わない（すべて加点対象）。
+    """
+    if window <= 0:
+        return True
+    return any(
+        start - window <= k_end and k_start <= end + window
+        for k_start, k_end in keyword_spans
+    )
 
 
 def _snippet(text: str, needle: str) -> str:
@@ -48,18 +64,34 @@ def detect(text: str, links: list[str], config: ForSaleSignals) -> SignalResult:
     result = SignalResult()
     lowered = text.lower()
 
+    keyword_spans: list[tuple[int, int]] = []
     for keyword in config.keywords:
-        if keyword.lower() in lowered:
-            result.keywords.append(keyword)
+        lowered_keyword = keyword.lower()
+        start = lowered.find(lowered_keyword)
+        if start < 0:
+            continue
+        result.keywords.append(keyword)
+        while start >= 0:
+            keyword_spans.append((start, start + len(lowered_keyword)))
+            start = lowered.find(lowered_keyword, start + 1)
 
+    window = config.price_requires_keyword_within
     for pattern in config.price_patterns:
         try:
-            for match in re.finditer(pattern, text, flags=re.IGNORECASE):
-                found = match.group(0).strip()
-                if found and found not in result.prices:
-                    result.prices.append(found)
+            matches = list(re.finditer(pattern, text, flags=re.IGNORECASE))
         except re.error:
             log.warning("price_patterns の正規表現が不正です: %s", pattern)
+            continue
+        for match in matches:
+            found = match.group(0).strip()
+            if not found:
+                continue
+            if _near_keyword(match.start(), match.end(), keyword_spans, window):
+                if found not in result.prices:
+                    result.prices.append(found)
+            elif found not in result.ignored_prices:
+                # 建設費・事業費など、売出価格ではない金額
+                result.ignored_prices.append(found)
 
     listing_domains = [d.lower() for d in config.listing_domains]
     for link in links:

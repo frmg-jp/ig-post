@@ -137,6 +137,10 @@ for_sale_signals:
   price_score: 1
   listing_link_score: 2
   min_signal_score: 2
+  # 価格は「販売キーワードの近くにあるもの」だけを加点対象にする。
+  # これがないと、建設費や事業費（例: €240 million の競技場）を売出価格として
+  # 誤検出する。0 にすると文中のあらゆる金額を拾う（非推奨）。
+  price_requires_keyword_within: 200
   keywords:
     - "for sale"
     - "on the market"

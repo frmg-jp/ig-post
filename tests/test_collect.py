@@ -152,3 +152,39 @@ def test_inserted_candidate_starts_as_pending_and_unscored(db) -> None:
     assert row["is_for_sale"] is None      # 販売可否の判断はスコアリングに委ねる
     assert row["signal_score"] == 2
     assert row["source_rank"] == "S"
+
+
+# --- 価格の文脈判定 ---------------------------------------------------
+
+
+def test_construction_budget_is_not_counted_as_an_asking_price() -> None:
+    """建設費・事業費の金額を売出価格と取り違えないこと。
+
+    Dezeen のスタジアム記事で €240 million などが誤検出された実例に対応。
+    """
+    text = (
+        "The €240 million stadium was completed in 2026. "
+        "The Glasgow School of Art rebuild is estimated at £62 million."
+    )
+    result = signals.detect(text, [], SIGNALS)
+    assert result.prices == []
+    assert result.ignored_prices          # 金額自体は検出しているが加点しない
+    assert result.score == 0
+    assert not result.is_candidate(SIGNALS.min_signal_score)
+
+
+def test_price_next_to_a_for_sale_keyword_is_counted() -> None:
+    text = "The converted firehouse is now for sale with an asking price of $2.4 million."
+    result = signals.detect(text, [], SIGNALS)
+    assert result.prices
+    assert result.score >= SIGNALS.min_signal_score
+
+
+def test_price_far_from_the_keyword_is_ignored() -> None:
+    """同じ記事内でも、キーワードから遠い金額は売出価格とみなさない。"""
+    filler = "word " * 100          # 約500字
+    text = f"This house is for sale. {filler} The nearby stadium cost €240 million."
+    result = signals.detect(text, [], SIGNALS)
+    assert "€240 million" in " ".join(result.ignored_prices)
+    assert result.prices == []
+    assert result.score == SIGNALS.keyword_score      # キーワード分のみ

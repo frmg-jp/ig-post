@@ -60,6 +60,17 @@ def _cmd_collect(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_probe_feed(args: argparse.Namespace) -> int:
+    from freming.collect.editorial import probe_feed
+
+    cfg = load_config(args.config)
+    setup_logging(cfg.app.log_dir, cfg.app.log_level)
+    stats = probe_feed(cfg, args.url, args.limit)
+    print(stats.summary())
+    print(stats.explain_report(top=args.top))
+    return 0
+
+
 def _cmd_ingest_url(args: argparse.Namespace) -> int:
     from freming.collect.manual import AlreadyCollected, ingest_url
     from freming.net.client import RobotsDisallowed
@@ -117,6 +128,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--explain", action="store_true", help="閾値未満も含めて判定内訳を表示（調整用）"
     )
     p_collect.set_defaults(func=_cmd_collect)
+
+    p_probe = sub.add_parser(
+        "probe-feed", help="任意のフィードURLを試して判定内訳だけ表示（DBに書き込まない）"
+    )
+    p_probe.add_argument("url")
+    p_probe.add_argument("--limit", type=int, default=None)
+    p_probe.add_argument("--top", type=int, default=15)
+    p_probe.set_defaults(func=_cmd_probe_feed)
 
     p_ingest = sub.add_parser("ingest-url", help="URLを1件だけ取得して候補化")
     p_ingest.add_argument("url")
