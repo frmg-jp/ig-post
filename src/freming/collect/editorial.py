@@ -57,7 +57,10 @@ class Explanation:
             found.append(f"除外price={len(self.ignored_prices)}")
         detail = " ".join(found) or "シグナルなし"
         origin = "feed" if self.from_feed_only else "記事"
-        return f"  {self.score}点 [{origin} {self.text_chars:>5}字] {self.title[:48]:<48} {detail}"
+        return (
+            f"  {self.score}点 [{origin} {self.text_chars:>5}字] {self.title[:40]:<40} "
+            f"{detail}\n        {self.url}"
+        )
 
 
 @dataclass
@@ -166,6 +169,7 @@ class EditorialCollector:
         limit: int | None = None,
         dry_run: bool = False,
         explain: bool = False,
+        ignore_known: bool = False,
     ) -> CollectStats:
         stats = CollectStats(source=source.key)
         self._apply_source_policy(source)
@@ -185,7 +189,9 @@ class EditorialCollector:
             for entry in self._feed_entries(feed_url, stats):
                 if stats.inserted >= max_items:
                     break
-                self._process_entry(entry, source, cutoff, stats, dry_run, explain)
+                self._process_entry(
+                    entry, source, cutoff, stats, dry_run, explain, ignore_known
+                )
 
         log.info(stats.summary())
         return stats
@@ -244,6 +250,7 @@ class EditorialCollector:
         stats: CollectStats,
         dry_run: bool,
         explain: bool = False,
+        ignore_known: bool = False,
     ) -> None:
         link = getattr(entry, "link", None)
         if not link:
@@ -260,7 +267,7 @@ class EditorialCollector:
             stats.skipped_old += 1
             return
 
-        if exists_source_url(self.conn, url):
+        if not ignore_known and exists_source_url(self.conn, url):
             stats.skipped_known += 1
             log.debug("取得済みのためスキップ: %s", url)
             return
@@ -377,13 +384,17 @@ def probe_feed(config: Config, feed_url: str, limit: int | None = None) -> Colle
         key="probe", name=feed_url, rank="B", enabled=True, feeds=[feed_url]
     )
     probe_config = config.model_copy(deep=True)
-    probe_config.collect.fetch_article_pages = False  # フィードの中身だけを見る
+    probe_config.collect.fetch_article_pages = False   # フィードの中身だけを見る
+    probe_config.collect.lookback_days = 36500         # 期間で切らず全件を見る
 
     conn = connect(probe_config.app.db_path)
     try:
         with HttpClient(probe_config.http) as client:
             collector = EditorialCollector(probe_config, client, conn)
-            return collector.collect(source, limit=limit, dry_run=True, explain=True)
+            # 調査用なので、取得済みかどうかに関係なくすべて表示する
+            return collector.collect(
+                source, limit=limit, dry_run=True, explain=True, ignore_known=True
+            )
     finally:
         conn.close()
 

@@ -446,3 +446,29 @@ def test_source_can_opt_out_of_article_fetching(config, conn, listing_source) ->
     assert client.requested == [FEED_URL]     # 記事ページは取りに行かない
     assert stats.inserted == 1
     assert stats.used_feed_only == 1
+
+
+def test_probe_shows_every_entry_regardless_of_state(config, conn, source) -> None:
+    """調査用の probe は、期間外・取得済みでも内訳を表示すること。"""
+    old = datetime.now(timezone.utc) - timedelta(days=config.collect.lookback_days + 100)
+    pages = {
+        FEED_URL: _feed([("Old entry", "https://www.dezeen.com/z1/", old)],
+                        description="<p>A house.</p>"),
+    }
+
+    # 通常の収集では期間外として弾かれる
+    normal, _ = _run(config, conn, pages, source)
+    assert normal.skipped_old == 1
+    assert normal.explanations == []
+
+    # 調査用の条件（期間無制限・取得済み無視）では内訳が出る
+    probe_config = config.model_copy(deep=True)
+    probe_config.collect.lookback_days = 36500
+    probe_config.collect.fetch_article_pages = False
+    client = FakeClient(pages)
+    stats = EditorialCollector(probe_config, client, conn).collect(
+        source, dry_run=True, explain=True, ignore_known=True
+    )
+    assert len(stats.explanations) == 1
+    assert "https://www.dezeen.com/z1" in stats.explanations[0].url
+    assert "https://www.dezeen.com/z1" in stats.explain_report()
