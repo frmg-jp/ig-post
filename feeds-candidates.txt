@@ -1,6 +1,7 @@
 # =====================================================================
 # 重点エリアの物件を取れるソース候補
-#   Los Angeles / San Francisco / Portland / Seattle / ポルトガル / スペイン / 台湾
+#   Los Angeles / San Francisco / Portland / Seattle / Chicago / Brooklyn(NY)
+#   / ポルトガル / スペイン / 台湾
 #
 # 使い方:
 #   python -m freming.cli probe-feed $(grep -v '^#' feeds-candidates.txt | grep .) 2>&1 | tail -40
@@ -59,7 +60,23 @@ https://www.urbnlivn.com/feed/
 https://jeffreynoldsseattle.com/feed/
 
 # =====================================================================
-# 6. ポルトガル / スペイン
+# 6. シカゴ（承認実績: 消防署コンバージョン）
+#    19世紀の消防署・倉庫・工場ストックが厚く adaptive_reuse の供給源
+# =====================================================================
+https://chicagoyimby.com/feed
+https://www.chicagoarchitecture.org/feed/
+https://www.dreamtown.com/blog/feed
+
+# =====================================================================
+# 7. ブルックリン / ニューヨーク（承認実績: Eagle Warehouse 時計塔）
+#    DUMBO / Williamsburg / Tribeca の倉庫転用
+# =====================================================================
+https://www.brownstoner.com/feed/
+https://www.6sqft.com/feed/
+https://newyorkyimby.com/feed
+
+# =====================================================================
+# 8. ポルトガル / スペイン
 # =====================================================================
 https://themodernspaces.com/feed/
 https://thesingular.space/feed/
@@ -67,7 +84,7 @@ https://www.metalocus.es/en/rss.xml
 https://www.plataformaarquitectura.cl/cl/rss/
 
 # =====================================================================
-# 7. 台湾
+# 9. 台湾
 #    英語圏の建築メディアで「販売中の物件」を扱うものは事実上存在しない。
 #    大手ポータル（591 / 信義房屋 / 永慶房屋）は自動収集の可否が不明なため
 #    ここには含めない。当面は add-manual での手動投入が現実的。

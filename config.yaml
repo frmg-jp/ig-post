@@ -192,11 +192,15 @@ for_sale_signals:
 # ---------------------------------------------------------------------
 # 重点エリア / 優先ジャンル
 # ---------------------------------------------------------------------
+# 承認実績（docs/approval-criteria.md）に Chicago / Brooklyn が含まれていたため、
+# 両都市を重点エリアに追加。district は承認実例のあった地区を明記している。
 focus_areas:
   - { country: "United States", city: "Los Angeles" }
   - { country: "United States", city: "San Francisco", districts: ["South Beach", "SOMA"] }
   - { country: "United States", city: "Portland", districts: ["Pearl District"] }
   - { country: "United States", city: "Seattle", districts: ["Pioneer Square"] }
+  - { country: "United States", city: "Chicago", districts: ["West Loop", "Wicker Park", "Logan Square"] }
+  - { country: "United States", city: "New York", districts: ["DUMBO", "Brooklyn", "Williamsburg", "Tribeca"] }
   - { country: "Portugal" }
   - { country: "Spain" }
   - { country: "Taiwan" }
@@ -260,7 +264,7 @@ scoring:
     - "時代・様式が特定できること。様式不明の現代建売・新築マンションは対象外"
     - "一点物であること。同一仕様が複数存在する物件は対象外"
     - "立地が物語の一部になっていること"
-    - "重点エリアは加点要素であり必須ではない。承認実績8件中2件は重点エリア外（Chicago / Brooklyn）"
+    - "重点エリアは加点要素であり足切り条件ではない。物語性が十分に強ければエリア外でも承認しうる（Chicago / Brooklyn は承認実績を受けて重点エリアに追加した経緯がある）"
   thresholds:
     min_to_persist: 30         # これ未満は保存はするが一覧デフォルト非表示
     highlight_above: 80

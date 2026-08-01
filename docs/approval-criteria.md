@@ -51,9 +51,16 @@ MCM、スパニッシュコロニアル、クラフツマン、19世紀の産業
 
 ### 5. エリア（重点エリアは加点、必須ではない）
 
-実例は LA周辺4 / SF 1 / Portland 1 / **Chicago 1 / Brooklyn 1**。
-**8件中2件は重点エリア外**であり、物語性が強ければエリア外でも承認されている。
-したがってエリアは加点要素であり、足切り条件にはしない。
+実例は LA周辺4 / SF 1 / Portland 1 / Chicago 1 / Brooklyn 1。
+
+当初 Chicago / Brooklyn は重点エリアに入っていなかったが、承認実績を受けて
+`focus_areas` に追加した（Chicago: West Loop / Wicker Park / Logan Square、
+New York: DUMBO / Brooklyn / Williamsburg / Tribeca）。いずれも 19世紀〜20世紀初頭の
+産業建築ストックが厚く、adaptive_reuse の供給源として LA / SF / Portland と同格に扱う。
+
+これで実例8件はすべて重点エリア内に収まったが、**エリアは加点要素であり
+足切り条件にはしない**方針は維持する。物語性が十分に強ければエリア外でも
+承認しうる（Chicago / Brooklyn 自体がその実例だった）。
 
 ## 画像を選ぶ基準（[4] 画像取得に効かせる）
 
