@@ -61,13 +61,40 @@ def _cmd_collect(args: argparse.Namespace) -> int:
 
 
 def _cmd_probe_feed(args: argparse.Namespace) -> int:
+    """候補のフィードURLをまとめて試し、使えるものを見つける。"""
     from freming.collect.editorial import probe_feed
 
     cfg = load_config(args.config)
     setup_logging(cfg.app.log_dir, cfg.app.log_level)
-    stats = probe_feed(cfg, args.url, args.limit)
-    print(stats.summary())
-    print(stats.explain_report(top=args.top))
+
+    results: list[tuple[str, str]] = []
+    for url in args.url:
+        try:
+            stats = probe_feed(cfg, url, args.limit)
+        except Exception as exc:  # noqa: BLE001 - 1つの失敗で残りを止めない
+            results.append((url, f"NG   {type(exc).__name__}: {str(exc)[:60]}"))
+            continue
+
+        if stats.feed_entries == 0:
+            results.append((url, "NG   フィードとして読めない/記事0件"))
+            continue
+
+        chars = sorted(e.text_chars for e in stats.explanations) or [0]
+        median = chars[len(chars) // 2]
+        results.append(
+            (
+                url,
+                f"OK   {stats.feed_entries:>3}件  本文中央値 {median:>5}字  "
+                f"候補 {stats.inserted}件",
+            )
+        )
+        if args.details and stats.explanations:
+            print(f"\n### {url}")
+            print(stats.explain_report(top=args.top))
+
+    print("\n=== フィード調査結果 ===")
+    for url, line in results:
+        print(f"{line}   {url}")
     return 0
 
 
@@ -132,9 +159,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_probe = sub.add_parser(
         "probe-feed", help="任意のフィードURLを試して判定内訳だけ表示（DBに書き込まない）"
     )
-    p_probe.add_argument("url")
+    p_probe.add_argument("url", nargs="+", help="調べるフィードURL（複数可）")
     p_probe.add_argument("--limit", type=int, default=None)
     p_probe.add_argument("--top", type=int, default=15)
+    p_probe.add_argument("--details", action="store_true", help="各フィードの判定内訳も表示")
     p_probe.set_defaults(func=_cmd_probe_feed)
 
     p_ingest = sub.add_parser("ingest-url", help="URLを1件だけ取得して候補化")

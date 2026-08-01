@@ -1,0 +1,18 @@
+# 調査するフィード候補（未検証。probe-feed で確認する）
+# 販売物件を扱う頻度が高い順。# 行はコメント。
+#
+# --- 販売物件の掲載が主目的 ---
+https://architectureforsale.com/status/for-sale/feed/
+https://architectureforsale.com/feed/
+https://www.wowhaus.co.uk/feed/
+https://circaoldhouses.com/feed/
+https://www.iconichouses.org/rss.xml
+#
+# --- 編集メディア（販売記事を含むことがある） ---
+https://www.dwell.com/feed
+https://www.dwell.com/rss
+https://www.architecturaldigest.com/feed/rss
+https://www.wallpaper.com/feed
+https://www.archdaily.com/rss/
+https://www.designboom.com/architecture/feed/
+https://www.dezeen.com/feed/
