@@ -154,12 +154,15 @@ def test_only_articles_with_for_sale_signals_become_candidates(config, conn, sou
 
 
 def test_editorial_article_linking_to_a_listing_site_is_picked_up(config, conn, source) -> None:
-    """「編集メディア掲載 かつ 販売中」を拾えること。これが Hidden Gem の正体。"""
+    """「編集メディア掲載 かつ 販売中」を拾えること。これが Hidden Gem の正体。
+
+    リンク単独では足りないので、販売キーワードと合わせて閾値に届く。
+    """
     now = datetime.now(timezone.utc)
     pages = {
         FEED_URL: _feed([("Loft", "https://www.dezeen.com/c/", now)]),
         "https://www.dezeen.com/c": _article(
-            "A rare SOMA loft.",
+            "A rare SOMA loft is now for sale.",
             links='<a href="https://www.sothebysrealty.com/id/999">listing</a>',
         ),
     }
@@ -170,6 +173,27 @@ def test_editorial_article_linking_to_a_listing_site_is_picked_up(config, conn, 
     row = conn.execute("SELECT * FROM properties").fetchone()
     assert "sothebysrealty.com" in row["for_sale_evidence"]
     assert row["signal_score"] >= config.for_sale_signals.min_signal_score
+
+
+def test_agent_profile_linking_to_a_brokerage_is_not_a_candidate(config, conn, source) -> None:
+    """エージェント紹介ページを物件として取り込まないこと。
+
+    CIRCA のフィードで実際に起きた誤検出。本人の Compass プロフィールへの
+    リンクがあるだけで候補化されていた。
+    """
+    now = datetime.now(timezone.utc)
+    pages = {
+        FEED_URL: _feed([("Ann Gluck", "https://www.dezeen.com/ann-gluck/", now)]),
+        "https://www.dezeen.com/ann-gluck": _article(
+            "ANN GLUCK Compass Pasadena, CA email: ann.gluck (at) compass (dot) com",
+            links='<a href="https://www.compass.com/agents/ann-gluck/">profile</a>',
+        ),
+    }
+
+    stats, _ = _run(config, conn, pages, source)
+
+    assert stats.inserted == 0
+    assert stats.no_signal == 1
 
 
 def test_articles_older_than_lookback_are_skipped(config, conn, source) -> None:

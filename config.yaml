@@ -46,14 +46,19 @@ editorial_sources:
   - key: circa_old_houses
     name: "CIRCA Old Houses"
     rank: B
-    enabled: true
-    assume_for_sale: true
-    # robots.txt が Crawl-delay: 60 を指定しているため、記事ページは取得せず
-    # フィード配信分（中央値973字）だけで判定する。リクエストはフィード1回のみ。
+    # 2026-08-01 の probe-feed --details で判明: このフィードは物件を配信して
+    # いない。12件の内訳はエージェント紹介ページ11件とコラム1件で、物件ページは
+    # 0件だった。URLも全て直下（/ann-gluck など）で、パスでの絞り込みもできない。
+    #
+    # assume_for_sale: true のままだとエージェント紹介ページを全て「売出中の
+    # 物件」として取り込むため、両方を false にして停止する。
+    # CIRCA の物件を扱うなら、物件専用のフィードを探すか手動投入で対応する:
+    #   python -m freming.cli discover-feed https://circaoldhouses.com/
+    enabled: false
+    assume_for_sale: false
+    # robots.txt が Crawl-delay: 60 を指定しているため、再開する場合も
+    # 記事ページは取得しない（1件あたり60秒待つことになる）。
     fetch_article_pages: false
-    # フィードにエージェント紹介ページが混ざるため、物件ページだけに絞る。
-    # 実際のURL構造を probe-feed --details で確認してから設定する。
-    url_exclude: []
     feeds:
       - "https://circaoldhouses.com/feed/"
   - key: modernlivingla
@@ -66,6 +71,15 @@ editorial_sources:
     # 記事に市況コラムが混ざっていた場合、全件が候補になってしまうため。
     feeds:
       - "https://modernlivingla.com/feed/"
+  - key: sixsqft
+    name: "6sqft"
+    rank: B
+    enabled: true
+    # 2026-08-01 の probe-feed: 10件 / 本文中央値4491字 / 候補2件。
+    # NY・Brooklyn の売出物件を継続的に扱う。重点エリア追加後に見つけた
+    # 中で最も歩留まりが良い。
+    feeds:
+      - "https://www.6sqft.com/feed/"
 
   # --- 編集メディア（販売記事は時々。ここが FREMING の独自性） ---
   - key: dezeen
@@ -88,8 +102,12 @@ editorial_sources:
   - key: wallpaper
     name: "Wallpaper*"
     rank: S
-    enabled: false
-    feeds: []
+    enabled: true
+    # フィードURLは discover-feed で判明（/architecture/feed という推測は外れ）。
+    # 2026-08-01: 50件 / 本文中央値4606字 / 候補0件。dezeen と同じく販売記事は
+    # 時々しか無いが、本文が厚いので出たときに拾える。
+    feeds:
+      - "https://www.wallpaper.com/feeds.xml"
   - key: archdaily
     name: "ArchDaily"
     rank: A
@@ -168,8 +186,12 @@ listing_sources:
 # ---------------------------------------------------------------------
 for_sale_signals:
   keyword_score: 1
+  # 仲介サイトへのリンクは「売出中」の裏付けとして弱い。2点にしていたところ、
+  # CIRCA のエージェント紹介ページ（本人の Compass のプロフィールへリンク）が
+  # それだけで候補化された（2026-08-01）。1点に下げ、リンク単独では
+  # min_signal_score に届かないようにしている。
+  listing_link_score: 1
   price_score: 1
-  listing_link_score: 2
   min_signal_score: 2
   # 価格は「販売キーワードの近くにあるもの」だけを加点対象にする。
   # これがないと、建設費や事業費（例: €240 million の競技場）を売出価格として

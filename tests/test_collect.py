@@ -48,14 +48,29 @@ def test_keyword_and_price_reaches_threshold() -> None:
     assert result.is_candidate(SIGNALS.min_signal_score)
 
 
-def test_listing_link_alone_reaches_threshold() -> None:
-    """不動産サイトへの外部リンクは単独で閾値に届く（重み2）。"""
+def test_listing_link_alone_does_not_reach_threshold() -> None:
+    """不動産サイトへのリンクだけでは候補にしない。
+
+    リンクは「売出中」の裏付けとして弱い。CIRCA のエージェント紹介ページが
+    本人の Compass プロフィールへリンクしているだけで候補化された実例が
+    あったため、単独では閾値に届かないようにしている。
+    """
     result = signals.detect(
         "A striking loft in SOMA.",
         ["https://www.sothebysrealty.com/id/abc123"],
         SIGNALS,
     )
     assert result.listing_links
+    assert not result.is_candidate(SIGNALS.min_signal_score)
+
+
+def test_listing_link_with_keyword_reaches_threshold() -> None:
+    """リンクに販売キーワードが伴えば候補になる。"""
+    result = signals.detect(
+        "A striking loft in SOMA is now for sale.",
+        ["https://www.sothebysrealty.com/id/abc123"],
+        SIGNALS,
+    )
     assert result.is_candidate(SIGNALS.min_signal_score)
 
 

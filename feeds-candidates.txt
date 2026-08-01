@@ -4,83 +4,92 @@
 #   / ポルトガル / スペイン / 台湾
 #
 # 使い方:
-#   1) フィードURLが分からないサイトは、まずトップページから探す
-#      python -m freming.cli discover-feed https://example.com/
-#   2) 見つかったフィードの中身を確かめる
-#      python -m freming.cli probe-feed $(grep -v '^#' feeds-candidates.txt | grep .)
+#   1) フィードURLが分からないサイトは、探して試すところまで一度に
+#      python -m freming.cli discover-feed --probe https://example.com/
+#   2) フィードURLが分かっているものは
+#      python -m freming.cli probe-feed <URL...>
 #   3) 「候補N件」が出たものを config.yaml の editorial_sources に登録する
 #
+#   まとめて走らせる: bash scripts/find_sources.sh
+#
 # probe-feed は robots.txt を尊重し、フィード1回のリクエストしか送りません。
-# NG の理由（404 / robots / フィード形式でない）は probe-feed が出力します。
 # =====================================================================
 
-# --- 採用中 -----------------------------------------------------------
-#  OK  10件 中央値5140字 候補6件  https://www.wowhaus.co.uk/feed/    ※英国中心
-#  OK  12件 中央値 973字          https://circaoldhouses.com/feed/   ※米国東海岸中心
+# =====================================================================
+# 採用中（config.yaml に登録済み）
+# =====================================================================
+#  OK  10件 中央値5140字 候補6件  https://www.wowhaus.co.uk/feed/     ※英国中心
 #  OK  50件 中央値4408字 候補0件  https://www.dezeen.com/feed/
 #  OK  10件 中央値5088字 候補0件  https://www.designboom.com/architecture/feed/
-
-# --- 2026-08-01 の調査で読めたもの（未登録） ---------------------------
-#  OK   9件 中央値1555字 候補2件  https://modernlivingla.com/feed/   ★LA・最有力
-#  OK  10件 中央値2313字 候補0件  https://portlandscondos.com/feed/  ※Portland
-#  OK  10件 中央値5277字 候補0件  https://themodernspaces.com/feed/
-#  OK  10件 中央値1357字 候補0件  https://www.metalocus.es/en/rss.xml
-#  OK  10件 中央値 240字 候補0件  https://thespaces.com/feed/
-#       └ 本文240字は要約のみ。記事ページを取得しないと判定材料が足りない
-
-# --- 2026-08-01 の調査で読めなかったもの -------------------------------
-# 下記は /feed/ 等の慣習からの推測URLで、いずれも読めませんでした。
-# discover-feed でトップページから正しいURLを探し直す対象です。
-#   https://themodernhouse.com/journal/feed/
-#   https://www.dirt.com/feed/
-#   https://www.mansionglobal.com/feeds/rss
-#   https://www.wallpaper.com/architecture/feed
-#   https://socalmodern.com/feed/
-#   https://beyondshelter.com/feed/
-#   https://architectureforsale.com/?feed=rss2
-#   https://jacksonfuller.com/feed/
-#   https://rebeccabrooks.com/blog/rss
-#   https://www.jeffmarples.com/feed/
-#   https://www.seanzbecker.com/feed/
-#   https://pearldistrictproperties.com/feed/
-#   https://www.urbnlivn.com/feed/
-#   https://jeffreynoldsseattle.com/feed/
-#   https://thesingular.space/feed/
-#   https://www.plataformaarquitectura.cl/cl/rss/
-#   https://taiwanhousing.tw/feed/   ← HTTP 404
+#  OK   9件 中央値1555字 候補2件  https://modernlivingla.com/feed/    ※LA
+#  OK  10件 中央値4491字 候補2件  https://www.6sqft.com/feed/         ※NY/Brooklyn
+#  OK  50件 中央値4606字 候補0件  https://www.wallpaper.com/feeds.xml
 
 # =====================================================================
-# 未検証（Chicago / Brooklyn を重点エリアに追加したことによる新規候補）
-#   いずれも推測URLを含みます。読めなければ discover-feed に回してください。
+# 停止したソース
 # =====================================================================
-
-# --- シカゴ（承認実績: 消防署コンバージョン） --------------------------
-#     19世紀の消防署・倉庫・工場ストックが厚く adaptive_reuse の供給源
-https://chicagoyimby.com/feed
-https://www.chicagoarchitecture.org/feed/
-https://www.dreamtown.com/blog/feed
-
-# --- ブルックリン / ニューヨーク（承認実績: Eagle Warehouse 時計塔） ---
-#     DUMBO / Williamsburg / Tribeca の倉庫転用
-https://www.brownstoner.com/feed/
-https://www.6sqft.com/feed/
-https://newyorkyimby.com/feed
+#  https://circaoldhouses.com/feed/
+#    2026-08-01: 12件すべてがエージェント紹介ページ（11件）とコラム（1件）で、
+#    物件ページは0件。URLも全て直下（/ann-gluck 等）でパスによる絞り込み不可。
+#    assume_for_sale: true のままだと紹介ページを全て売出物件として取り込むため
+#    enabled: false にした。物件専用フィードがあるか要確認:
+#      python -m freming.cli discover-feed https://circaoldhouses.com/
 
 # =====================================================================
-# discover-feed に渡すサイト（フィードURLが不明なもの）
-#   python -m freming.cli discover-feed \
-#     https://themodernhouse.com/ https://www.dirt.com/ ...
+# 調査済み・不採用（2026-08-01）
 # =====================================================================
-#   https://themodernhouse.com/
-#   https://www.dirt.com/
-#   https://www.mansionglobal.com/
-#   https://www.wallpaper.com/
-#   https://socalmodern.com/
-#   https://beyondshelter.com/
-#   https://architectureforsale.com/
-#   https://www.urbnlivn.com/
-#   https://www.plataformaarquitectura.cl/
-#   https://thesingular.space/
+# --- robots.txt が許可していない（回避はしない） ---
+#  https://www.mansionglobal.com/          Disallow
+#  https://architectureforsale.com/        robots.txt 自体が403 → fail-closed
+#  https://www.urbnlivn.com/               robots.txt 自体が403 → fail-closed
+#  https://www.archdaily.com/cl/feed       Disallow
+#
+# --- 技術的に到達できない ---
+#  https://www.chicagoarchitecture.org/feed/   SSL証明書のホスト名不一致（サイト側の設定）
+#  https://www.dreamtown.com/blog/feed         HTTP 500（3回再試行しても解消せず）
+#
+# --- フィードを宣言していない ---
+#  https://themodernhouse.com/
+#  https://socalmodern.com/
+#  https://beyondshelter.com/
+#  https://thesingular.space/
+#
+# --- 読めたが FREMING の基準に合わない ---
+#  10件 中央値 613字 候補0件  https://chicagoyimby.com/feed
+#   5件 中央値 614字 候補0件  https://newyorkyimby.com/feed
+#    └ YIMBY系は新築・開発計画のニュース。「前歴が残る一点物」とは逆方向
+#  10件 中央値 979字 候補0件  https://www.brownstoner.com/feed/
+#    └ Brooklyn の住宅は扱うが、配信本文が薄く販売シグナルが出ない
+#  24件 中央値 541字 候補0件  https://www.archdaily.cl/cl.xml
+#    └ スペイン語圏だがチリ。重点エリア（スペイン/ポルトガル）ではない
+
+# =====================================================================
+# 保留（本文が薄く、記事ページ取得が必要）
+#   dirt.com のトップページは Robb Report のフィードを宣言している（同系列）。
+#   配信本文が166〜199字しかないため、fetch_article_pages: true が前提。
+#   高級不動産は扱うが「著名人の家」寄りで、承認基準との相性は要検証。
+# =====================================================================
+# https://robbreport.com/shelter/feed/
+# https://robbreport.com/shelter/celebrity-homes/feed/
+
+# =====================================================================
+# 未調査（重点エリア。フィードURLが不明なものは discover-feed --probe へ）
+# =====================================================================
+https://thespaces.com/feed/
+https://themodernspaces.com/feed/
+https://www.metalocus.es/en/rss.xml
+https://portlandscondos.com/feed/
+
+# --- サンフランシスコ / ポートランド / シアトル（未確認） ---
+#   python -m freming.cli discover-feed --probe \
+#     https://jacksonfuller.com/ https://www.jeffmarples.com/ \
+#     https://www.seanzbecker.com/ https://pearldistrictproperties.com/ \
+#     https://jeffreynoldsseattle.com/
+
+# --- ポルトガル / スペイン（未確認） ---
+#   idealista は自動収集を行わない。編集メディア側から探す:
+#   python -m freming.cli discover-feed --probe \
+#     https://www.metalocus.es/ https://arquitecturaviva.com/
 
 # =====================================================================
 # 使わないソース（規約で自動収集が禁止、またはポータル型）
