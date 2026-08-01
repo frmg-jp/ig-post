@@ -48,7 +48,14 @@ class DriveAuthError(DriveError):
 
 
 class DrivePermissionError(DriveError):
-    """対象フォルダへの権限不足。サービスアカウントへの共有漏れが典型。"""
+    """対象フォルダへの権限不足。共有漏れが典型。"""
+
+
+class DriveApiDisabledError(DriveError):
+    """Cloud プロジェクトで Drive API が有効化されていない（accessNotConfigured）。
+
+    権限の問題と同じ 403 で返るが、対処はまったく別物なので分けて扱う。
+    """
 
 
 class DriveQuotaError(DriveError):
@@ -77,14 +84,25 @@ def _classify(exc: HttpError, context: str) -> DriveError:
     """HttpError を原因が分かる例外型に変換する。"""
     status = getattr(exc.resp, "status", None)
     reason = ""
+    message = ""
     try:
         payload = json.loads(exc.content.decode("utf-8"))
-        errors = payload.get("error", {}).get("errors", [])
-        reason = errors[0].get("reason", "") if errors else payload.get("error", {}).get(
-            "status", ""
-        )
+        error = payload.get("error", {})
+        errors = error.get("errors", [])
+        reason = errors[0].get("reason", "") if errors else error.get("status", "")
+        message = error.get("message", "")
     except Exception:  # noqa: BLE001 - エラー本文が読めなくても分類は続行
         reason = ""
+
+    if reason == "accessNotConfigured":
+        detail = f"\n  APIからの応答: {message}" if message else ""
+        return DriveApiDisabledError(
+            f"{context}: この Cloud プロジェクトで Google Drive API が有効になっていません "
+            f"({reason})。\n"
+            "  https://console.cloud.google.com/apis/library/drive.googleapis.com を開き、"
+            "OAuthクライアントを作成したプロジェクトを選んで「有効にする」を押してください。"
+            f"{detail}"
+        )
 
     if reason in {"storageQuotaExceeded", "quotaExceeded"} and status == 403:
         return DriveQuotaError(

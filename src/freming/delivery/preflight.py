@@ -106,7 +106,7 @@ def run_preflight(
         folder = client.get_folder_info(config.parent_folder_id)
     except DriveError as exc:
         report.add(Check("納品先フォルダの取得", False, str(exc),
-                         "フォルダIDが正しいか、サービスアカウントに共有されているか確認"))
+                         "フォルダIDが正しいか、認証したアカウントに共有されているか確認"))
         return report
 
     if folder.get("mimeType") != FOLDER_MIME:

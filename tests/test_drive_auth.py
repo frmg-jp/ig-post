@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
+from googleapiclient.errors import HttpError
 from pydantic import ValidationError
 
 from freming.config import DriveConfig
-from freming.delivery.drive import DriveAuthError, DriveClient, _browser_available
+from freming.delivery.drive import (
+    DriveApiDisabledError,
+    DriveAuthError,
+    DriveClient,
+    DriveError,
+    DrivePermissionError,
+    DriveQuotaError,
+    _browser_available,
+    _classify,
+)
 
 
 def _cfg(**kwargs) -> DriveConfig:
@@ -59,6 +71,50 @@ def test_broken_token_falls_back_to_client_secret_error(tmp_path) -> None:
     )
     with pytest.raises(DriveAuthError, match="OAuthクライアントシークレットが見つかりません"):
         DriveClient(cfg)
+
+
+class _FakeResponse:
+    """HttpError に渡す最小限のレスポンス。"""
+
+    def __init__(self, status: int) -> None:
+        self.status = status
+        self.reason = "error"
+
+
+def _http_error(status: int, reason: str, message: str = "") -> HttpError:
+    body = json.dumps(
+        {"error": {"code": status, "message": message, "errors": [{"reason": reason}]}}
+    ).encode("utf-8")
+    return HttpError(_FakeResponse(status), body)
+
+
+def test_api_not_enabled_is_distinguished_from_permission_error() -> None:
+    """403 でも accessNotConfigured は権限不足ではなく API 未有効化として扱う。"""
+    err = _classify(
+        _http_error(403, "accessNotConfigured", "Drive API has not been used in project 123"),
+        "files.get",
+    )
+    assert isinstance(err, DriveApiDisabledError)
+    assert not isinstance(err, DrivePermissionError)
+    assert "drive.googleapis.com" in str(err)
+    assert "project 123" in str(err)
+
+
+def test_storage_quota_error_points_to_shared_drive() -> None:
+    err = _classify(_http_error(403, "storageQuotaExceeded"), "アップロード")
+    assert isinstance(err, DriveQuotaError)
+    assert "共有ドライブ" in str(err)
+
+
+def test_plain_403_is_a_permission_error() -> None:
+    err = _classify(_http_error(403, "insufficientFilePermissions"), "files.get")
+    assert isinstance(err, DrivePermissionError)
+
+
+def test_404_reports_missing_target() -> None:
+    err = _classify(_http_error(404, "notFound"), "files.get")
+    assert isinstance(err, DriveError)
+    assert "見つかりません" in str(err)
 
 
 def test_browser_detection_reports_false_over_ssh(monkeypatch) -> None:
