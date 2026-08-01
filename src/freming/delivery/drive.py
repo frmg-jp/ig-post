@@ -16,7 +16,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, TypeVar
 
+import google.auth
+from google.auth.credentials import Credentials
+from google.auth.transport.requests import Request as AuthRequest
 from google.oauth2 import service_account
+from google.oauth2.credentials import Credentials as UserCredentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload, MediaInMemoryUpload
@@ -83,14 +87,13 @@ def _classify(exc: HttpError, context: str) -> DriveError:
     if reason in {"storageQuotaExceeded", "quotaExceeded"} and status == 403:
         return DriveQuotaError(
             f"{context}: 保存容量エラー ({reason})。"
-            "サービスアカウントはマイドライブに保存容量を持ちません。"
+            "サービスアカウントで認証している場合、マイドライブには保存容量がありません。"
             "納品先を共有ドライブ（Shared Drive）に変更してください。"
         )
     if status in (401, 403):
         return DrivePermissionError(
             f"{context}: 権限エラー (status={status}, reason={reason or 'unknown'})。"
-            "対象フォルダをサービスアカウントのメールアドレスに「編集者」として"
-            "共有しているか確認してください。"
+            "認証したアカウントが対象フォルダへの編集権限を持っているか確認してください。"
         )
     if status == 404:
         return DriveError(f"{context}: 対象が見つかりません (404)。フォルダIDを確認してください。")
@@ -102,30 +105,110 @@ class DriveClient:
 
     def __init__(self, config: DriveConfig) -> None:
         self.config = config
-        self._credentials = self._load_credentials(config.credentials_path)
+        self._credentials = self._load_credentials(config)
         self.service = build("drive", "v3", credentials=self._credentials, cache_discovery=False)
 
     # ------------------------------------------------------------------
     # 初期化
     # ------------------------------------------------------------------
+    @classmethod
+    def _load_credentials(cls, config: DriveConfig) -> Credentials:
+        mode = config.auth_mode
+        log.info("Drive 認証モード: %s", mode)
+        if mode == "service_account":
+            return cls._load_service_account(config.credentials_path)
+        if mode == "oauth":
+            return cls._load_oauth(config.oauth_client_secret_path, config.oauth_token_path)
+        return cls._load_adc()
+
     @staticmethod
-    def _load_credentials(path: Path) -> service_account.Credentials:
+    def _load_service_account(path: Path) -> Credentials:
         if not path.exists():
             raise DriveAuthError(
                 f"サービスアカウント鍵が見つかりません: {path.resolve()}\n"
-                "Google Cloud でサービスアカウントを作成し、JSON鍵をこのパスに置いてください。"
+                "組織ポリシーで鍵を作成できない場合は、config.yaml の "
+                "drive.auth_mode を oauth または adc にしてください。"
             )
         try:
-            return service_account.Credentials.from_service_account_file(
-                str(path), scopes=SCOPES
-            )
+            return service_account.Credentials.from_service_account_file(str(path), scopes=SCOPES)
         except Exception as exc:  # noqa: BLE001
             log.exception("サービスアカウント鍵の読み込みに失敗")
             raise DriveAuthError(f"サービスアカウント鍵が不正です: {path} ({exc})") from exc
 
+    @staticmethod
+    def _load_oauth(client_secret_path: Path, token_path: Path) -> Credentials:
+        """OAuthクライアントで人のアカウントとして認証する。
+
+        初回のみブラウザで同意画面が開き、以降は token_path のリフレッシュ
+        トークンを使うため対話は発生しない。鍵ファイルを扱わないため、
+        サービスアカウント鍵の作成を禁じる組織ポリシーの影響を受けない。
+        """
+        creds: UserCredentials | None = None
+        if token_path.exists():
+            try:
+                creds = UserCredentials.from_authorized_user_file(str(token_path), SCOPES)
+            except Exception:  # noqa: BLE001 - 壊れていれば取り直す
+                log.warning("保存済みトークンを読めませんでした。再認証します: %s", token_path)
+                creds = None
+
+        if creds and creds.valid:
+            return creds
+
+        if creds and creds.expired and creds.refresh_token:
+            try:
+                creds.refresh(AuthRequest())
+                _save_token(creds, token_path)
+                return creds
+            except Exception:  # noqa: BLE001 - リフレッシュ失敗時は再認証に落とす
+                log.warning("トークンの更新に失敗しました。再認証します。", exc_info=True)
+
+        if not client_secret_path.exists():
+            raise DriveAuthError(
+                f"OAuthクライアントシークレットが見つかりません: {client_secret_path.resolve()}\n"
+                "Google Cloud の「認証情報」→「OAuth クライアント ID」→ 種類「デスクトップアプリ」\n"
+                "で作成し、ダウンロードしたJSONをこのパスに置いてください。"
+            )
+
+        try:
+            from google_auth_oauthlib.flow import InstalledAppFlow
+        except ImportError as exc:  # pragma: no cover
+            raise DriveAuthError(
+                "google-auth-oauthlib が未インストールです: pip install -e ."
+            ) from exc
+
+        log.info("ブラウザで Google の同意画面を開きます（初回のみ）")
+        flow = InstalledAppFlow.from_client_secrets_file(str(client_secret_path), SCOPES)
+        creds = flow.run_local_server(port=0)
+        _save_token(creds, token_path)
+        return creds
+
+    @staticmethod
+    def _load_adc() -> Credentials:
+        """Application Default Credentials。
+
+        gcloud auth application-default login / Workload Identity 連携 /
+        サービスアカウントの権限借用（--impersonate-service-account）に対応する。
+        """
+        try:
+            creds, _project = google.auth.default(scopes=SCOPES)
+            return creds
+        except Exception as exc:  # noqa: BLE001
+            log.exception("ADC の取得に失敗")
+            raise DriveAuthError(
+                "Application Default Credentials を取得できませんでした。\n"
+                "  gcloud auth application-default login "
+                '--scopes="https://www.googleapis.com/auth/drive,'
+                'https://www.googleapis.com/auth/cloud-platform"\n'
+                f"を実行してください。({exc})"
+            ) from exc
+
     @property
-    def service_account_email(self) -> str:
-        return getattr(self._credentials, "service_account_email", "(不明)")
+    def account_hint(self) -> str:
+        """認証に使ったアカウント（判明する範囲で）。"""
+        email = getattr(self._credentials, "service_account_email", None)
+        if email:
+            return email
+        return f"({self.config.auth_mode} で認証)"
 
     # ------------------------------------------------------------------
     # 内部: リトライ
@@ -288,6 +371,17 @@ class DriveClient:
             f"削除({file_id})",
         )
         log.info("削除しました: id=%s", file_id)
+
+
+def _save_token(creds: UserCredentials, token_path: Path) -> None:
+    """リフレッシュトークンを保存する。鍵と同等の秘密なので権限を絞る。"""
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text(creds.to_json(), encoding="utf-8")
+    try:
+        token_path.chmod(0o600)
+    except OSError:  # pragma: no cover - Windows など
+        log.debug("トークンファイルの権限設定をスキップしました: %s", token_path)
+    log.info("認証トークンを保存しました: %s", token_path)
 
 
 def build_client(config: DriveConfig) -> DriveClient:

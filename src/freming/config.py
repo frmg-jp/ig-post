@@ -198,8 +198,16 @@ class DriveRetry(BaseModel):
 
 
 class DriveConfig(BaseModel):
+    # oauth           … OAuthクライアント（デスクトップアプリ）で人のアカウントとして認証。
+    #                   組織ポリシーでサービスアカウント鍵を作れない場合はこれを使う。
+    # service_account … サービスアカウントのJSON鍵（credentials_path）。
+    # adc             … Application Default Credentials。gcloud のログイン、
+    #                   Workload Identity 連携、サービスアカウントの権限借用に対応。
+    auth_mode: Literal["oauth", "service_account", "adc"] = "oauth"
     enabled: bool = True
     credentials_path: Path = Path("credentials/service-account.json")
+    oauth_client_secret_path: Path = Path("credentials/oauth_client.json")
+    oauth_token_path: Path = Path("credentials/token.json")
     parent_folder_id: str
     shared_drive_id: str | None = None
     folder_prefix: str = "frmg_ig"

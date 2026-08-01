@@ -15,7 +15,7 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
 cp .env.example .env          # ANTHROPIC_API_KEY を設定
-# credentials/service-account.json にサービスアカウント鍵を配置
+# Drive の認証情報を配置（下記「Drive の認証」を参照）
 
 python -m freming.cli db migrate     # [1] DBスキーマ
 python scripts/check_drive.py        # [2] Drive疎通確認（★ここが通るまで先へ進まない）
@@ -34,27 +34,52 @@ python scripts/check_drive.py        # [2] Drive疎通確認（★ここが通�
 
 設定値はすべて `config.yaml`。秘匿値のみ `.env`。
 
-## サービスアカウント鍵の用意
+## Drive の認証
 
-1. [Google Cloud Console](https://console.cloud.google.com/) で「APIとサービス」→「ライブラリ」
-   から **Google Drive API** を有効化
-2. 「認証情報」→「認証情報を作成」→「サービスアカウント」で作成（ロールの割り当ては不要。
-   Drive の権限は Drive 側の共有設定で決まる）
-3. 作成したサービスアカウント →「鍵」タブ →「鍵を追加」→「新しい鍵を作成」→ **JSON**
-   （ダウンロードは1回限り）
-4. ダウンロードした JSON を `credentials/service-account.json` にリネームして配置
+`config.yaml` の `drive.auth_mode` で3方式から選べます。**既定は `oauth`**。
 
-   ```bash
-   mv ~/Downloads/<プロジェクト名>-xxxxxxx.json credentials/service-account.json
-   python -c "import json; print(json.load(open('credentials/service-account.json'))['client_email'])"
-   ```
+| モード | 用途 |
+|---|---|
+| `oauth` | OAuthクライアントで人のアカウントとして認証。**サービスアカウント鍵の作成が組織ポリシーで禁止されている場合はこれ** |
+| `service_account` | サービスアカウントのJSON鍵。無人実行向けだが、鍵の作成が許可されている必要がある |
+| `adc` | gcloud のログイン / Workload Identity 連携 / サービスアカウントの権限借用 |
 
-5. **納品先の共有ドライブに、上で表示されたメールアドレスをメンバー追加し、役割を
-   「コンテンツ管理者」以上にする**（これを忘れるとフォルダは作れても画像が入らない）
-6. `python scripts/check_drive.py` で検証
+### oauth（既定）
 
-> 鍵はパスワードと同等です。`.gitignore` 済みですがコミット・共有しないでください。
-> 漏洩時は Cloud Console の「鍵」タブから削除して作り直せます。
+1. [Google Cloud Console](https://console.cloud.google.com/) →「APIとサービス」→「ライブラリ」
+   で **Google Drive API** を有効化
+2. 「OAuth 同意画面」を設定（User Type は組織内なら「内部」。スコープの事前追加は不要）
+3. 「認証情報」→「認証情報を作成」→「OAuth クライアント ID」→ アプリケーションの種類
+   **「デスクトップアプリ」**
+4. ダウンロードしたJSONを `credentials/oauth_client.json` に配置
+5. `python scripts/check_drive.py` を実行 → ブラウザで同意 → `credentials/token.json` が
+   自動生成される（以降は対話なしで動作）
+
+このモードではログインした本人としてファイルが作成されるため、保存容量は本人のもの
+が使われ、マイドライブ・共有ドライブのどちらでも動作します。
+
+### service_account
+
+1. 「認証情報」→「サービスアカウント」を作成（ロールの割り当ては不要）
+2. 「鍵」タブ →「鍵を追加」→ **JSON**（ダウンロードは1回限り）
+3. `credentials/service-account.json` に配置し、`auth_mode: service_account` に変更
+4. **納品先の共有ドライブにそのメールアドレスをメンバー追加し、「コンテンツ管理者」以上にする**
+
+> 「サービス アカウント キーの作成をブロックする組織ポリシーが適用されています」と出る
+> 場合、`iam.disableServiceAccountKeyCreation` が有効です。`oauth` か `adc` を使ってください。
+
+### adc
+
+```bash
+gcloud auth application-default login \
+  --scopes="https://www.googleapis.com/auth/drive,https://www.googleapis.com/auth/cloud-platform"
+```
+
+サービスアカウントとして動かしたいが鍵を作れない場合は、権限借用（`roles/iam.serviceAccountTokenCreator`）
+と組み合わせられます。
+
+> `credentials/` 配下（鍵・トークン）はパスワードと同等です。`.gitignore` 済みですが
+> コミット・共有しないでください。
 
 ## Drive 納品の設定（重要）
 

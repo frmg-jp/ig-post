@@ -43,7 +43,7 @@ class Check:
 @dataclass
 class PreflightReport:
     checks: list[Check] = field(default_factory=list)
-    service_account_email: str = ""
+    account_email: str = ""
 
     @property
     def ok(self) -> bool:
@@ -77,17 +77,17 @@ def run_preflight(config: DriveConfig, cleanup: bool = True) -> PreflightReport:
     try:
         client = DriveClient(config)
     except DriveError as exc:
-        report.add(Check("サービスアカウント認証", False, str(exc),
-                         "credentials/service-account.json を配置してください"))
+        report.add(Check(f"認証（{config.auth_mode}）", False, str(exc),
+                         "config.yaml の drive.auth_mode と認証情報の配置を確認してください"))
         return report
 
-    report.service_account_email = client.service_account_email
-    report.add(Check("サービスアカウント認証", True,
-                     f"認証成功: {client.service_account_email}"))
+    report.account_email = client.account_hint
+    report.add(Check(f"認証（{config.auth_mode}）", True, f"認証成功: {client.account_hint}"))
 
     # 2. 保存容量 -------------------------------------------------------
     try:
         about = client.storage_quota()
+        report.account_email = about.get("user", {}).get("emailAddress") or report.account_email
         quota = about.get("storageQuota", {})
         limit = quota.get("limit")
         usage = quota.get("usage", "0")
@@ -125,8 +125,8 @@ def run_preflight(config: DriveConfig, cleanup: bool = True) -> PreflightReport:
         "子要素の追加権限 (canAddChildren)",
         bool(caps.get("canAddChildren")),
         f"canAddChildren={caps.get('canAddChildren')}, canEdit={caps.get('canEdit')}",
-        remedy=(f"対象フォルダを {client.service_account_email} に「編集者」として"
-                "共有してください"),
+        remedy=(f"{report.account_email} に編集権限を与えてください"
+                "（共有ドライブならメンバーに追加して「コンテンツ管理者」以上）"),
     ))
 
     if drive_id:
@@ -142,6 +142,14 @@ def run_preflight(config: DriveConfig, cleanup: bool = True) -> PreflightReport:
                 remedy=f'config.yaml の drive.shared_drive_id を "{drive_id}" に設定してください',
                 fatal=False,
             ))
+    elif config.auth_mode != "service_account":
+        report.add(Check(
+            "共有ドライブ配下かどうか", True,
+            "マイドライブ配下ですが、人のアカウントとして認証しているため"
+            "そのアカウントの保存容量が使われます（サービスアカウント特有の"
+            "容量問題は発生しません）。",
+            fatal=False,
+        ))
     else:
         report.add(Check(
             "共有ドライブ配下かどうか", False,
@@ -178,7 +186,7 @@ def run_preflight(config: DriveConfig, cleanup: bool = True) -> PreflightReport:
         return report
     except DriveError as exc:
         report.add(Check("テキスト書き込みテスト", False, str(exc),
-                         remedy=f"フォルダを {client.service_account_email} に編集者で共有"))
+                         remedy=f"{report.account_email} に編集権限を与えてください"))
         return report
     finally:
         if cleanup and test_file_id:
@@ -253,8 +261,8 @@ def _safe_delete(client: DriveClient, file_id: str, report: PreflightReport) -> 
 def format_report(report: PreflightReport) -> str:
     """人が読む用のサマリ。"""
     lines = ["", "=" * 68, " Drive 疎通確認レポート", "=" * 68]
-    if report.service_account_email:
-        lines.append(f" サービスアカウント: {report.service_account_email}")
+    if report.account_email:
+        lines.append(f" 認証アカウント: {report.account_email}")
         lines.append("-" * 68)
     for check in report.checks:
         mark = "OK  " if check.ok else ("NG  " if check.fatal else "WARN")

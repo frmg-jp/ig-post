@@ -247,7 +247,15 @@ process:
 # ---------------------------------------------------------------------
 drive:
   enabled: true
-  credentials_path: "credentials/service-account.json"
+  # 認証方式:
+  #   oauth           … OAuthクライアント（デスクトップアプリ）で人のアカウントとして認証。
+  #                     組織ポリシーでサービスアカウント鍵を作れない場合はこれ。
+  #   service_account … サービスアカウントのJSON鍵（credentials_path）
+  #   adc             … gcloud のログイン / Workload Identity 連携 / 権限借用
+  auth_mode: oauth
+  oauth_client_secret_path: "credentials/oauth_client.json"
+  oauth_token_path: "credentials/token.json"     # 初回認証後に自動生成される
+  credentials_path: "credentials/service-account.json"   # auth_mode: service_account 用
   parent_folder_id: "1HrlJ9QFGlTEVl8M-HY8nxGTu3DvkCNV3"   # ig-post（共有ドライブ配下）
   shared_drive_id: null    # check_drive.py が検出した driveId をここに設定する
   folder_prefix: "frmg_ig"
