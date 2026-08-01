@@ -13,10 +13,24 @@
 {% endif %}
 
 {% if not rows %}
+  {# 空のときは、いまのタブで次に何をすれば表示されるかを出す #}
   <p class="empty">
-    表示できる候補がありません。<br>
-    <code>python -m freming.cli collect --source wowhaus</code> で収集し、
-    <code>python -m freming.cli score</code> で採点してください。
+    {% if series %}
+      この企画のラベルが付いた物件はまだありません。<br>
+      各カードのプルダウンで企画を選ぶとここに出ます。
+    {% elif status == "approved" %}
+      承認済みの物件はまだありません。<br>
+      <a href="/?status=pending">未審査</a> で承認するとここに移ります。
+    {% elif status == "rejected" %}
+      非承認にした物件はまだありません。
+    {% elif status == "delivered" %}
+      納品済みの物件はまだありません。<br>
+      承認したあと <code>python -m freming.cli deliver</code> を実行してください。
+    {% else %}
+      未審査の候補がありません。<br>
+      <code>python -m freming.cli collect --source sixsqft</code> で収集し、
+      <code>python -m freming.cli score</code> で採点してください。
+    {% endif %}
   </p>
 {% endif %}
 

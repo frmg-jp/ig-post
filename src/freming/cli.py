@@ -182,7 +182,12 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     setup_logging(cfg.app.log_dir, cfg.app.log_level)
     host = args.host or cfg.review_ui.host
     port = args.port or cfg.review_ui.port
-    print(f"審査UI: http://{host}:{port}")
+    print(f"審査UI:   http://{host}:{port}/")
+    print(f"  未審査  http://{host}:{port}/?status=pending")
+    print(f"  承認    http://{host}:{port}/?status=approved")
+    print(f"  非承認  http://{host}:{port}/?status=rejected")
+    print(f"  納品済  http://{host}:{port}/?status=delivered")
+    print("停止するには Ctrl+C")
     uvicorn.run(create_app(cfg), host=host, port=port, log_level=cfg.app.log_level.lower())
     return 0
 
@@ -424,9 +429,27 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# DBの列が揃っていないと動かないコマンド。列が足りないまま実行すると
+# 「no such column」で落ち、原因が分かりにくいので手前で止める。
+_NEEDS_MIGRATED_DB = frozenset({
+    "collect", "score", "serve", "deliver", "learn", "rules",
+    "ingest-url", "add-manual", "remove", "status",
+})
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.command in _NEEDS_MIGRATED_DB:
+        from freming.db.migrate import PendingMigrations, ensure_migrated
+
+        try:
+            ensure_migrated(load_config(args.config).app.db_path)
+        except PendingMigrations as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+
     return args.func(args)
 
 

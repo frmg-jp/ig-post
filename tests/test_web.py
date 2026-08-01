@@ -293,3 +293,20 @@ def test_list_can_filter_by_series(client, conn) -> None:
     assert "Picked loft" in body
     assert "Other loft" not in body
     assert other  # 未使用変数の警告避け
+
+
+def test_empty_approved_tab_explains_what_to_do(client) -> None:
+    """空の画面で、そのタブに出すための次の一手が分かること。"""
+    body = client.get("/?status=approved").text
+    assert "承認済みの物件はまだありません" in body
+    assert "未審査" in body
+
+
+def test_empty_pending_tab_suggests_collecting(client) -> None:
+    body = client.get("/?status=pending").text
+    assert "collect" in body and "score" in body
+
+
+def test_empty_series_filter_explains_labels(client) -> None:
+    body = client.get("/?status=pending&series=freming_pick").text
+    assert "この企画のラベル" in body

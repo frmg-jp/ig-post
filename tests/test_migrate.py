@@ -96,3 +96,22 @@ def test_images_record_source_url_and_credit(db) -> None:
             ("https://example.com/photo.jpg",),
         )
     conn.close()
+
+
+def test_pending_migrations_are_reported_before_use(tmp_path) -> None:
+    """列が足りないまま動かさず、何をすればよいかを出すこと。
+
+    migration を足したあと db migrate を忘れると、審査UIの全画面が
+    「no such column」で500になる。原因が分かりにくいので手前で止める。
+    """
+    from freming.db.migrate import PendingMigrations, ensure_migrated
+
+    missing = tmp_path / "not-created-yet.db"
+    with pytest.raises(PendingMigrations) as exc:
+        ensure_migrated(missing)
+    assert "db migrate" in str(exc.value)
+
+    # 適用済みなら通る
+    path = tmp_path / "ok.db"
+    migrate(path)
+    ensure_migrated(path)

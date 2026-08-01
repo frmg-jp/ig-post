@@ -96,6 +96,30 @@ def status(db_path: str | Path) -> list[tuple[str, bool]]:
         conn.close()
 
 
+class PendingMigrations(RuntimeError):
+    """未適用のマイグレーションがある。DBの列が足りない状態で動かさない。"""
+
+
+def ensure_migrated(db_path: str | Path) -> None:
+    """未適用のマイグレーションがあれば、動き出す前に止める。
+
+    列が足りないまま起動すると「no such column」で全画面が500になり、
+    原因が分かりにくい。先に何をすればよいかを出して止める。
+    """
+    if not Path(db_path).exists():
+        raise PendingMigrations(
+            f"DBがまだありません（{db_path}）。次を実行してください:\n"
+            "  python -m freming.cli db migrate"
+        )
+    pending = [version for version, applied in status(db_path) if not applied]
+    if pending:
+        raise PendingMigrations(
+            f"未適用のマイグレーションが {len(pending)} 件あります: {', '.join(pending)}\n"
+            "次を実行してください:\n"
+            "  python -m freming.cli db migrate"
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="DBマイグレーションの適用")
     parser.add_argument("--db", default=None, help="DBパス（省略時は config.yaml の app.db_path）")
