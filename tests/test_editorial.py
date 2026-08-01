@@ -472,3 +472,81 @@ def test_probe_shows_every_entry_regardless_of_state(config, conn, source) -> No
     assert len(stats.explanations) == 1
     assert "https://www.dezeen.com/z1" in stats.explanations[0].url
     assert "https://www.dezeen.com/z1" in stats.explain_report()
+
+
+def test_feed_failure_reason_is_specific(config, conn, source) -> None:
+    """読めなかった理由が「記事0件」で潰れず、原因ごとに残ること。
+
+    URLの誤り・robots による拒否・フィード形式でない、は対処が別なので
+    出力で区別できる必要がある。
+    """
+    # robots.txt による拒否
+    stats, _ = _run(config, conn, {}, source, disallowed={FEED_URL})
+    assert stats.skipped_robots == 1
+    assert "robots" in stats.feed_failures[0]
+
+    # フィードではないHTMLが返ってきた場合
+    stats, _ = _run(config, conn, {FEED_URL: "<html><body>not a feed</body></html>"}, source)
+    assert stats.feed_entries == 0
+    assert "フィード形式ではない" in stats.feed_failures[0]
+
+    # 取得そのものに失敗した場合
+    stats, _ = _run(config, conn, {}, source, forbidden={FEED_URL})
+    assert stats.fetch_failed == 1
+    assert stats.feed_failures
+
+
+def test_failure_reason_explains_http_status() -> None:
+    """HTTPステータスは、次に取るべき行動が分かる文言にすること。"""
+    import httpx
+
+    from freming.collect.editorial import failure_reason
+
+    request = httpx.Request("GET", "https://example.com/feed/")
+    for status, expected in ((404, "404"), (403, "403"), (429, "429")):
+        exc = httpx.HTTPStatusError(
+            "err", request=request, response=httpx.Response(status, request=request)
+        )
+        assert expected in failure_reason(exc)
+
+    assert "接続できない" in failure_reason(httpx.ConnectError("no host"))
+
+
+def test_discover_feeds_reads_declared_links(config, monkeypatch) -> None:
+    """トップページの <link rel=alternate> からフィードURLを拾うこと。
+
+    /feed/ のような推測に頼らないための機能なので、宣言されたURLを
+    そのまま（相対パスは絶対化して）返せることを確認する。
+    """
+    from freming.collect import editorial
+
+    html = (
+        "<html><head>"
+        "<link rel='alternate' type='application/rss+xml' title='Posts' href='/rss/posts'>"
+        "<link rel='alternate' type='application/atom+xml' href='https://cdn.example.com/atom'>"
+        "<link rel='alternate' type='text/html' href='/mobile'>"        # フィードではない
+        "<link rel='stylesheet' href='/style.css'>"
+        "</head><body></body></html>"
+    )
+
+    class _Resp:
+        text = html
+        url = "https://example.com/"
+
+    class _Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get(self, url, **_kwargs):
+            return _Resp()
+
+    monkeypatch.setattr(editorial, "HttpClient", lambda *_a, **_k: _Client())
+
+    feeds = editorial.discover_feeds(config, "https://example.com/")
+    assert [url for url, _ in feeds] == [
+        "https://example.com/rss/posts",
+        "https://cdn.example.com/atom",
+    ]

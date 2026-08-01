@@ -62,29 +62,34 @@ def _cmd_collect(args: argparse.Namespace) -> int:
 
 def _cmd_probe_feed(args: argparse.Namespace) -> int:
     """候補のフィードURLをまとめて試し、使えるものを見つける。"""
-    from freming.collect.editorial import probe_feed
+    from freming.collect.editorial import failure_reason, probe_feed
 
     cfg = load_config(args.config)
     setup_logging(cfg.app.log_dir, cfg.app.log_level)
 
-    results: list[tuple[str, str]] = []
+    # (使えるか, URL, 説明) の3つ組。失敗は原因まで出す。
+    # 「読めない」で一括りにすると、URLの誤りなのか robots による拒否なのか、
+    # 次に何をすべきかが分からなくなる。
+    results: list[tuple[bool, str, str]] = []
     for url in args.url:
         try:
             stats = probe_feed(cfg, url, args.limit)
         except Exception as exc:  # noqa: BLE001 - 1つの失敗で残りを止めない
-            results.append((url, f"NG   {type(exc).__name__}: {str(exc)[:60]}"))
+            results.append((False, url, failure_reason(exc)))
             continue
 
         if stats.feed_entries == 0:
-            results.append((url, "NG   フィードとして読めない/記事0件"))
+            reason = stats.feed_failures[0] if stats.feed_failures else "記事0件"
+            results.append((False, url, reason))
             continue
 
         chars = sorted(e.text_chars for e in stats.explanations) or [0]
         median = chars[len(chars) // 2]
         results.append(
             (
+                True,
                 url,
-                f"OK   {stats.feed_entries:>3}件  本文中央値 {median:>5}字  "
+                f"{stats.feed_entries:>3}件  本文中央値 {median:>5}字  "
                 f"候補 {stats.inserted}件",
             )
         )
@@ -92,9 +97,40 @@ def _cmd_probe_feed(args: argparse.Namespace) -> int:
             print(f"\n### {url}")
             print(stats.explain_report(top=args.top))
 
+    width = max((len(u) for _, u, _ in results), default=0)
+    usable = [r for r in results if r[0]]
     print("\n=== フィード調査結果 ===")
-    for url, line in results:
-        print(f"{line}   {url}")
+    for ok, url, detail in results:
+        print(f"{'OK' if ok else 'NG'}  {url:<{width}}  {detail}")
+    print(f"\n読めたフィード {len(usable)} / {len(results)} 件")
+    if usable:
+        print("候補が出たものを config.yaml の editorial_sources に登録してください。")
+    return 0
+
+
+def _cmd_discover_feed(args: argparse.Namespace) -> int:
+    """サイトのトップページから公開フィードURLを拾う（推測をやめるため）。"""
+    from freming.collect.editorial import discover_feeds, failure_reason
+
+    cfg = load_config(args.config)
+    setup_logging(cfg.app.log_dir, cfg.app.log_level)
+
+    total = 0
+    for site in args.url:
+        try:
+            feeds = discover_feeds(cfg, site)
+        except Exception as exc:  # noqa: BLE001 - 1件の失敗で残りを止めない
+            print(f"NG  {site}  {failure_reason(exc)}")
+            continue
+        if not feeds:
+            print(f"--  {site}  フィードの宣言なし（RSSを配信していない可能性）")
+            continue
+        print(f"OK  {site}")
+        for feed_url, label in feeds:
+            print(f"      {feed_url}   ({label})")
+            total += 1
+    if total:
+        print(f"\n{total} 件見つかりました。probe-feed に渡して中身を確認してください。")
     return 0
 
 
@@ -200,6 +236,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_probe.add_argument("--top", type=int, default=15)
     p_probe.add_argument("--details", action="store_true", help="各フィードの判定内訳も表示")
     p_probe.set_defaults(func=_cmd_probe_feed)
+
+    p_discover = sub.add_parser(
+        "discover-feed", help="サイトのトップページから公開フィードURLを探す"
+    )
+    p_discover.add_argument("url", nargs="+", help="調べるサイトのURL（複数可）")
+    p_discover.set_defaults(func=_cmd_discover_feed)
 
     p_ingest = sub.add_parser("ingest-url", help="URLを1件だけ取得して候補化")
     p_ingest.add_argument("url")

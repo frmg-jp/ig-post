@@ -16,6 +16,7 @@ import sqlite3
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urljoin
 
 import feedparser
 
@@ -78,6 +79,10 @@ class CollectStats:
     inserted: int = 0
     candidates: list[str] = field(default_factory=list)
     explanations: list[Explanation] = field(default_factory=list)
+    # フィードが読めなかった理由（URLごとに1つ）。「記事0件」で片付けると
+    # URLの打ち間違いなのか robots で拒否されたのかが分からないため、
+    # 対処の分かれる原因はここに残す。
+    feed_failures: list[str] = field(default_factory=list)
 
     def explain_report(self, top: int = 15) -> str:
         """判定内訳をスコア降順で表示する。フィード本文が薄いのか、
@@ -112,6 +117,26 @@ class CollectStats:
                 f"（記事ページの取得失敗 {self.article_fetch_failed} 件）"
             )
         return line
+
+
+def failure_reason(exc: Exception) -> str:
+    """フィード取得の例外を、次に取るべき行動が分かる日本語にする。"""
+    import httpx
+
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        if status == 404:
+            return "HTTP 404（このURLにフィードは無い。配信URLを確認する）"
+        if status in (401, 403):
+            return f"HTTP {status}（サーバーが拒否。自動取得を想定していない可能性）"
+        if status == 429:
+            return "HTTP 429（レート制限。時間を空けて再試行）"
+        return f"HTTP {status}"
+    if isinstance(exc, httpx.ConnectError):
+        return "接続できない（ドメインが存在しない可能性）"
+    if isinstance(exc, httpx.TimeoutException):
+        return "タイムアウト"
+    return f"{type(exc).__name__}: {str(exc)[:60]}"
 
 
 def _entry_published(entry) -> datetime | None:
@@ -203,15 +228,26 @@ class EditorialCollector:
             response = self.client.get(feed_url)
         except RobotsDisallowed:
             stats.skipped_robots += 1
+            stats.feed_failures.append("robots.txt が取得を許可していない")
             return []
-        except Exception:  # noqa: BLE001 - 1フィードの失敗で全体を止めない
+        except Exception as exc:  # noqa: BLE001 - 1フィードの失敗で全体を止めない
             log.exception("フィードの取得に失敗: %s", feed_url)
             stats.fetch_failed += 1
+            stats.feed_failures.append(failure_reason(exc))
             return []
 
         parsed = feedparser.parse(response.text)
-        if parsed.bozo and not parsed.entries:
-            log.error("フィードを解析できませんでした: %s (%s)", feed_url, parsed.bozo_exception)
+        if not parsed.entries:
+            # version が空なら RSS/Atom として認識できていない＝URLが違う。
+            # 認識できているのに0件なら、フィードそのものが空。対処が別なので分ける。
+            if not getattr(parsed, "version", ""):
+                log.error(
+                    "フィードを解析できませんでした: %s (%s)",
+                    feed_url, getattr(parsed, "bozo_exception", None),
+                )
+                stats.feed_failures.append("応答はあるがフィード形式ではない（URLが違う可能性）")
+            else:
+                stats.feed_failures.append("フィードは読めたが記事が0件")
             return []
         stats.feed_entries += len(parsed.entries)
         return parsed.entries
@@ -372,6 +408,41 @@ def collect_source(
             )
     finally:
         conn.close()
+
+
+def discover_feeds(config: Config, site_url: str) -> list[tuple[str, str]]:
+    """サイトのトップページから、そのサイトが公開しているフィードURLを拾う。
+
+    フィードURLを /feed/ などの慣習から推測すると外れが多く、外れたときに
+    「そのサイトにフィードが無い」のか「URLが違う」のかが区別できない。
+    HTML の <link rel="alternate"> は配信側が明示している情報なので、
+    ここを読めば推測せずに済む。
+
+    戻り値は (フィードURL, ラベル) の一覧。robots.txt は HttpClient が尊重する。
+    """
+    from bs4 import BeautifulSoup
+
+    with HttpClient(config.http) as client:
+        response = client.get(site_url)
+
+    soup = BeautifulSoup(response.text, "lxml")
+    found: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for link in soup.find_all("link", rel=True, href=True):
+        rels = link.get("rel")
+        if isinstance(rels, str):
+            rels = [rels]
+        if "alternate" not in [r.lower() for r in rels]:
+            continue
+        mime = (link.get("type") or "").lower()
+        if "rss" not in mime and "atom" not in mime:
+            continue
+        url = urljoin(str(response.url), link["href"].strip())
+        if url in seen:
+            continue
+        seen.add(url)
+        found.append((url, link.get("title") or mime))
+    return found
 
 
 def probe_feed(config: Config, feed_url: str, limit: int | None = None) -> CollectStats:

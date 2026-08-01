@@ -4,92 +4,83 @@
 #   / ポルトガル / スペイン / 台湾
 #
 # 使い方:
-#   python -m freming.cli probe-feed $(grep -v '^#' feeds-candidates.txt | grep .) 2>&1 | tail -40
+#   1) フィードURLが分からないサイトは、まずトップページから探す
+#      python -m freming.cli discover-feed https://example.com/
+#   2) 見つかったフィードの中身を確かめる
+#      python -m freming.cli probe-feed $(grep -v '^#' feeds-candidates.txt | grep .)
+#   3) 「候補N件」が出たものを config.yaml の editorial_sources に登録する
 #
 # probe-feed は robots.txt を尊重し、フィード1回のリクエストしか送りません。
-# 「候補N件」が多いものを config.yaml の editorial_sources に登録します。
-#
-# 注意: フィードURLは一般的な規約（WordPress の /feed/ など）からの推定を
-# 含みます。通らないものが混ざる前提で確認してください。
+# NG の理由（404 / robots / フィード形式でない）は probe-feed が出力します。
 # =====================================================================
 
-# --- 検証済み・採用中 ---------------------------------------------------
+# --- 採用中 -----------------------------------------------------------
 #  OK  10件 中央値5140字 候補6件  https://www.wowhaus.co.uk/feed/    ※英国中心
 #  OK  12件 中央値 973字          https://circaoldhouses.com/feed/   ※米国東海岸中心
 #  OK  50件 中央値4408字 候補0件  https://www.dezeen.com/feed/
 #  OK  10件 中央値5088字 候補0件  https://www.designboom.com/architecture/feed/
 
-# =====================================================================
-# 1. 国際・編集メディア（建築物件の売出を定期的に扱う）
-#    重点エリアを横断的にカバーできる可能性が最も高い層
-# =====================================================================
-https://thespaces.com/feed/
-https://themodernhouse.com/journal/feed/
-https://www.dirt.com/feed/
-https://www.mansionglobal.com/feeds/rss
-https://www.wallpaper.com/architecture/feed
+# --- 2026-08-01 の調査で読めたもの（未登録） ---------------------------
+#  OK   9件 中央値1555字 候補2件  https://modernlivingla.com/feed/   ★LA・最有力
+#  OK  10件 中央値2313字 候補0件  https://portlandscondos.com/feed/  ※Portland
+#  OK  10件 中央値5277字 候補0件  https://themodernspaces.com/feed/
+#  OK  10件 中央値1357字 候補0件  https://www.metalocus.es/en/rss.xml
+#  OK  10件 中央値 240字 候補0件  https://thespaces.com/feed/
+#       └ 本文240字は要約のみ。記事ページを取得しないと判定材料が足りない
+
+# --- 2026-08-01 の調査で読めなかったもの -------------------------------
+# 下記は /feed/ 等の慣習からの推測URLで、いずれも読めませんでした。
+# discover-feed でトップページから正しいURLを探し直す対象です。
+#   https://themodernhouse.com/journal/feed/
+#   https://www.dirt.com/feed/
+#   https://www.mansionglobal.com/feeds/rss
+#   https://www.wallpaper.com/architecture/feed
+#   https://socalmodern.com/feed/
+#   https://beyondshelter.com/feed/
+#   https://architectureforsale.com/?feed=rss2
+#   https://jacksonfuller.com/feed/
+#   https://rebeccabrooks.com/blog/rss
+#   https://www.jeffmarples.com/feed/
+#   https://www.seanzbecker.com/feed/
+#   https://pearldistrictproperties.com/feed/
+#   https://www.urbnlivn.com/feed/
+#   https://jeffreynoldsseattle.com/feed/
+#   https://thesingular.space/feed/
+#   https://www.plataformaarquitectura.cl/cl/rss/
+#   https://taiwanhousing.tw/feed/   ← HTTP 404
 
 # =====================================================================
-# 2. ロサンゼルス（建築専門の仲介・キュレーションメディア）
-#    Case Study House / ミッドセンチュリーを扱う専門業者が多い
+# 未検証（Chicago / Brooklyn を重点エリアに追加したことによる新規候補）
+#   いずれも推測URLを含みます。読めなければ discover-feed に回してください。
 # =====================================================================
-https://socalmodern.com/feed/
-https://beyondshelter.com/feed/
-https://modernlivingla.com/feed/
-https://architectureforsale.com/?feed=rss2
 
-# =====================================================================
-# 3. サンフランシスコ（SOMA / South Beach のウェアハウス転用）
-#    1988年の live/work 建築コード緩和以降、倉庫転用が集積する地域
-# =====================================================================
-https://jacksonfuller.com/feed/
-https://rebeccabrooks.com/blog/rss
-https://www.jeffmarples.com/feed/
-
-# =====================================================================
-# 4. ポートランド（Pearl District のロフト）
-# =====================================================================
-https://portlandscondos.com/feed/
-https://www.seanzbecker.com/feed/
-https://pearldistrictproperties.com/feed/
-
-# =====================================================================
-# 5. シアトル（Pioneer Square の歴史的ロフト）
-# =====================================================================
-https://www.urbnlivn.com/feed/
-https://jeffreynoldsseattle.com/feed/
-
-# =====================================================================
-# 6. シカゴ（承認実績: 消防署コンバージョン）
-#    19世紀の消防署・倉庫・工場ストックが厚く adaptive_reuse の供給源
-# =====================================================================
+# --- シカゴ（承認実績: 消防署コンバージョン） --------------------------
+#     19世紀の消防署・倉庫・工場ストックが厚く adaptive_reuse の供給源
 https://chicagoyimby.com/feed
 https://www.chicagoarchitecture.org/feed/
 https://www.dreamtown.com/blog/feed
 
-# =====================================================================
-# 7. ブルックリン / ニューヨーク（承認実績: Eagle Warehouse 時計塔）
-#    DUMBO / Williamsburg / Tribeca の倉庫転用
-# =====================================================================
+# --- ブルックリン / ニューヨーク（承認実績: Eagle Warehouse 時計塔） ---
+#     DUMBO / Williamsburg / Tribeca の倉庫転用
 https://www.brownstoner.com/feed/
 https://www.6sqft.com/feed/
 https://newyorkyimby.com/feed
 
 # =====================================================================
-# 8. ポルトガル / スペイン
+# discover-feed に渡すサイト（フィードURLが不明なもの）
+#   python -m freming.cli discover-feed \
+#     https://themodernhouse.com/ https://www.dirt.com/ ...
 # =====================================================================
-https://themodernspaces.com/feed/
-https://thesingular.space/feed/
-https://www.metalocus.es/en/rss.xml
-https://www.plataformaarquitectura.cl/cl/rss/
-
-# =====================================================================
-# 9. 台湾
-#    英語圏の建築メディアで「販売中の物件」を扱うものは事実上存在しない。
-#    大手ポータル（591 / 信義房屋 / 永慶房屋）は自動収集の可否が不明なため
-#    ここには含めない。当面は add-manual での手動投入が現実的。
-# =====================================================================
-https://taiwanhousing.tw/feed/
+#   https://themodernhouse.com/
+#   https://www.dirt.com/
+#   https://www.mansionglobal.com/
+#   https://www.wallpaper.com/
+#   https://socalmodern.com/
+#   https://beyondshelter.com/
+#   https://architectureforsale.com/
+#   https://www.urbnlivn.com/
+#   https://www.plataformaarquitectura.cl/
+#   https://thesingular.space/
 
 # =====================================================================
 # 使わないソース（規約で自動収集が禁止、またはポータル型）
