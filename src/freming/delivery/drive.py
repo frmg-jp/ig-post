@@ -220,6 +220,18 @@ class DriveClient:
                 f"認証用のポート {port} を使用できませんでした（{exc}）。"
                 "他のプロセスが使用していないか確認してください。"
             ) from exc
+        except Exception as exc:  # noqa: BLE001 - 同意画面での拒否などを分かる形にする
+            log.exception("OAuth 認証に失敗")
+            if "access_denied" in str(exc):
+                raise DriveAuthError(
+                    "同意画面でアクセスが拒否されました（access_denied）。\n"
+                    "  ・OAuth同意画面が「テスト中」の場合、ログインしたアカウントを\n"
+                    "    「テストユーザー」に追加する必要があります。\n"
+                    "  ・User Type が「内部」の場合、組織外のアカウント（@gmail.com など）は\n"
+                    "    使用できません。組織のアカウントでログインしてください。\n"
+                    "  ・納品先フォルダを操作できるアカウントでログインしているかも確認してください。"
+                ) from exc
+            raise DriveAuthError(f"OAuth 認証に失敗しました: {exc}") from exc
 
         _save_token(creds, token_path)
         return creds
