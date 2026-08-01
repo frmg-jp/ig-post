@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import io
 from dataclasses import dataclass, field
-from typing import Callable
 
 from freming.config import DriveConfig
 from freming.delivery.drive import (

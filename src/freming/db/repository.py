@@ -80,6 +80,50 @@ def recent_reject_reasons(conn: sqlite3.Connection, limit: int = 30) -> list[str
     return [row["reason"] for row in rows]
 
 
+def save_score(
+    conn: sqlite3.Connection,
+    property_id: int,
+    *,
+    score: float,
+    score_reason: str,
+    score_detail: str,
+    score_model: str,
+    summary: str,
+    genre: str | None,
+    architect: str | None,
+    year_built: str | None,
+    city: str | None,
+    country: str | None,
+    price: str | None,
+    provenance_visible: bool,
+) -> None:
+    """スコアと、判定の過程で分かった属性を書き戻す。
+
+    city / country / price は収集時に埋まっていることがあるので、
+    LLMが空を返した場合は既存の値を残す（COALESCE ではなく、
+    空文字を NULL に寄せてから既存値を優先する）。
+    """
+    conn.execute(
+        """
+        UPDATE properties SET
+            score = ?, score_reason = ?, score_detail = ?, score_model = ?,
+            summary = ?, genre = ?, architect = ?, year_built = ?,
+            location_city    = COALESCE(location_city, ?),
+            location_country = COALESCE(location_country, ?),
+            price            = COALESCE(price, ?),
+            provenance_visible = ?, scored_at = ?
+        WHERE id = ?
+        """,
+        (
+            score, score_reason, score_detail, score_model,
+            summary or None, genre or None, architect or None, year_built or None,
+            city or None, country or None, price or None,
+            1 if provenance_visible else 0, _now(), property_id,
+        ),
+    )
+    conn.commit()
+
+
 def delete_properties(
     conn: sqlite3.Connection, *, source: str | None = None, property_id: int | None = None
 ) -> int:

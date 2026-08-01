@@ -30,9 +30,14 @@ python scripts/check_drive.py        # [2] Drive疎通確認（★ここが通�
 | `python -m freming.cli db migrate` | マイグレーション適用（再実行は安全） |
 | `python -m freming.cli db status` | 適用状況の表示 |
 | `python -m freming.cli collect --source dezeen --limit 10 [--dry-run]` | 編集ソースから収集（経路B） |
+| `python -m freming.cli discover-feed <サイトURL>` | トップページから公開フィードURLを探す |
+| `python -m freming.cli probe-feed <フィードURL>` | フィードの中身を試す（DBに書き込まない） |
 | `python -m freming.cli ingest-url <URL>` | URLを1件だけ取得して候補化（Zillow等はこの経路のみ） |
+| `python -m freming.cli check-api` | スコアリングAPIの疎通確認 |
+| `python -m freming.cli score [--limit 20] [--dry-run]` | 未採点の候補をスコアリング（[2]） |
 | `python -m freming.cli status` | 候補の件数をステータス別に表示 |
 | `python -m freming.collect.editorial --source dezeen` | 同上（モジュール単体実行） |
+| `python -m freming.scoring.runner --limit 20` | 同上（モジュール単体実行） |
 | `python -m pytest tests/ -q` | テスト |
 
 設定値はすべて `config.yaml`。秘匿値のみ `.env`。
@@ -113,10 +118,31 @@ gcloud auth application-default login \
 - [x] 1. DBスキーマとマイグレーション
 - [x] 2. Drive疎通確認スクリプト
 - [x] 3. 収集モジュール（編集ソース1つ、RSS経由）
-- [ ] 4. スコアリング
+- [x] 4. スコアリング
 - [ ] 5. 審査UI
 - [ ] 6. 画像取得・加工・納品
 - [ ] 7. 学習ループ
+
+## スコアリングの仕組み
+
+最終スコアは6つの軸の加重和です。重みは `config.yaml` の `scoring.weights`。
+
+| 軸 | 決め方 |
+|---|---|
+| story | Claude が判定（前歴の可視性を最重要とする） |
+| source | 取得元のランク（S/A/B）から機械的に |
+| for_sale | 収集時のシグナル検出と Claude の読みの一致度 |
+| genre | `genres.priority` の順位から機械的に |
+| area | `focus_areas` との一致。外れても0点にはせず足切りしない |
+| price | 価格が判明しているか（金額の高低は見ない） |
+
+Claude に任せるのは story の判定と属性抽出だけで、合算は Python 側で行います。
+軸ごとの点数は `properties.score_detail` に JSON で残るため、重みを変えた場合は
+APIを呼び直さずに再計算できます。
+
+判定基準は `docs/approval-criteria.md`（承認済み8件の分析）が根拠で、その要点を
+`scoring.approved_examples` と `scoring.approval_notes` からプロンプトに載せています。
+基準を変えるときはコードではなく `config.yaml` を編集してください。
 
 ## アクセスポリシー
 

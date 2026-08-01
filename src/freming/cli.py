@@ -108,6 +108,30 @@ def _cmd_probe_feed(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_check_api(args: argparse.Namespace) -> int:
+    """スコアリングAPIの疎通確認。まとめて採点する前に鍵と契約を確かめる。"""
+    from freming.scoring.client import check_api
+
+    cfg = load_config(args.config)
+    setup_logging(cfg.app.log_dir, cfg.app.log_level)
+    ok, message = check_api(cfg)
+    print(message, file=sys.stdout if ok else sys.stderr)
+    return 0 if ok else 1
+
+
+def _cmd_score(args: argparse.Namespace) -> int:
+    from freming.db.connection import session
+    from freming.scoring.runner import score_pending
+
+    cfg = load_config(args.config)
+    setup_logging(cfg.app.log_dir, cfg.app.log_level)
+    with session(cfg.app.db_path) as conn:
+        stats = score_pending(cfg, conn, args.limit, args.dry_run)
+    print(stats.summary())
+    print(stats.report())
+    return 0
+
+
 def _cmd_discover_feed(args: argparse.Namespace) -> int:
     """サイトのトップページから公開フィードURLを拾う（推測をやめるため）。"""
     from freming.collect.editorial import discover_feeds, failure_reason
@@ -236,6 +260,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_probe.add_argument("--top", type=int, default=15)
     p_probe.add_argument("--details", action="store_true", help="各フィードの判定内訳も表示")
     p_probe.set_defaults(func=_cmd_probe_feed)
+
+    p_check_api = sub.add_parser("check-api", help="スコアリングAPIの疎通確認")
+    p_check_api.set_defaults(func=_cmd_check_api)
+
+    p_score = sub.add_parser("score", help="未採点の候補をスコアリング（[2]）")
+    p_score.add_argument("--limit", type=int, default=None)
+    p_score.add_argument("--dry-run", action="store_true", help="DBに書き込まず結果だけ表示")
+    p_score.set_defaults(func=_cmd_score)
 
     p_discover = sub.add_parser(
         "discover-feed", help="サイトのトップページから公開フィードURLを探す"
