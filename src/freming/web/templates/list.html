@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block body %}
+
+{% if not rows %}
+  <p class="empty">
+    表示できる候補がありません。<br>
+    <code>python -m freming.cli collect --source wowhaus</code> で収集し、
+    <code>python -m freming.cli score</code> で採点してください。
+  </p>
+{% endif %}
+
+{% for row in rows %}
+  {% include "_card.html" %}
+{% endfor %}
+
+{% if page > 1 or has_next %}
+  <p>
+    {% if page > 1 %}<a href="/?status={{ status }}&page={{ page - 1 }}">← 前</a>{% endif %}
+    {% if has_next %}<a href="/?status={{ status }}&page={{ page + 1 }}">次 →</a>{% endif %}
+  </p>
+{% endif %}
+
+<details class="manual">
+  <summary>手動でURLを登録する</summary>
+  <p class="note">
+    Zillow / Redfin / Compass は利用規約で自動収集が禁止されているため、この入口だけで扱います。
+    こちらからページを取得することはありません。人がブラウザで確認した内容を入力してください。
+  </p>
+  <form method="post" action="/manual">
+    <div class="grid">
+      <input type="text" name="url" placeholder="物件ページのURL（必須）" required>
+      <input type="text" name="title" placeholder="タイトル（必須）" required>
+      <input type="text" name="price" placeholder="価格">
+      <input type="text" name="city" placeholder="都市">
+      <input type="text" name="country" placeholder="国">
+      <input type="text" name="note" placeholder="メモ">
+    </div>
+    <p><button type="submit">登録する</button></p>
+  </form>
+</details>
+
+{% endblock %}

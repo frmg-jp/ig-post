@@ -108,6 +108,21 @@ def _cmd_probe_feed(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_serve(args: argparse.Namespace) -> int:
+    """審査UIを起動する（[3]）。ローカル利用前提で認証は持たない。"""
+    import uvicorn
+
+    from freming.web.app import create_app
+
+    cfg = load_config(args.config)
+    setup_logging(cfg.app.log_dir, cfg.app.log_level)
+    host = args.host or cfg.review_ui.host
+    port = args.port or cfg.review_ui.port
+    print(f"審査UI: http://{host}:{port}")
+    uvicorn.run(create_app(cfg), host=host, port=port, log_level=cfg.app.log_level.lower())
+    return 0
+
+
 def _cmd_check_api(args: argparse.Namespace) -> int:
     """スコアリングAPIの疎通確認。まとめて採点する前に鍵と契約を確かめる。"""
     from freming.scoring.client import check_api
@@ -260,6 +275,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_probe.add_argument("--top", type=int, default=15)
     p_probe.add_argument("--details", action="store_true", help="各フィードの判定内訳も表示")
     p_probe.set_defaults(func=_cmd_probe_feed)
+
+    p_serve = sub.add_parser("serve", help="審査UIを起動（[3]）")
+    p_serve.add_argument("--host", default=None)
+    p_serve.add_argument("--port", type=int, default=None)
+    p_serve.set_defaults(func=_cmd_serve)
 
     p_check_api = sub.add_parser("check-api", help="スコアリングAPIの疎通確認")
     p_check_api.set_defaults(func=_cmd_check_api)

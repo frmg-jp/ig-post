@@ -124,6 +124,85 @@ def save_score(
     conn.commit()
 
 
+def list_properties(
+    conn: sqlite3.Connection,
+    *,
+    status: str = "pending",
+    limit: int = 50,
+    offset: int = 0,
+    min_score: float | None = None,
+) -> list[sqlite3.Row]:
+    """審査UI用の一覧。未採点（score IS NULL）は末尾に回す。
+
+    採点前の候補を隠すと「収集したのに出てこない」ことになるため、
+    除外はせず順序だけ下げる。
+    """
+    sql = "SELECT * FROM properties WHERE 1=1"
+    params: list = []
+    if status != "all":
+        sql += " AND status = ?"
+        params.append(status)
+    if min_score is not None:
+        sql += " AND score >= ?"
+        params.append(min_score)
+    sql += " ORDER BY score IS NULL, score DESC, id DESC LIMIT ? OFFSET ?"
+    params += [limit, offset]
+    return conn.execute(sql, params).fetchall()
+
+
+def get_property(conn: sqlite3.Connection, property_id: int) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM properties WHERE id = ?", (property_id,)).fetchone()
+
+
+def approve_property(conn: sqlite3.Connection, property_id: int) -> bool:
+    """承認する。納品済みのものは触らない（再納品を防ぐ）。"""
+    cursor = conn.execute(
+        "UPDATE properties SET status = 'approved', reviewed_at = ?, reject_reason = NULL "
+        "WHERE id = ? AND status != 'delivered'",
+        (_now(), property_id),
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def reject_property(conn: sqlite3.Connection, property_id: int, reason: str) -> bool:
+    """非承認にし、理由を feedback に残す。
+
+    理由の蓄積が [7] 学習ループの入力になるので、理由なしの非承認は
+    受け付けない（呼び出し側で検証する）。
+    """
+    reason = reason.strip()
+    if not reason:
+        raise ValueError("非承認には理由が必要です")
+    cursor = conn.execute(
+        "UPDATE properties SET status = 'rejected', reviewed_at = ?, reject_reason = ? "
+        "WHERE id = ? AND status != 'delivered'",
+        (_now(), reason, property_id),
+    )
+    if cursor.rowcount == 0:
+        return False
+    conn.execute(
+        "INSERT INTO feedback (property_id, reason, created_at) VALUES (?, ?, ?)",
+        (property_id, reason, _now()),
+    )
+    conn.commit()
+    return True
+
+
+def reset_review(conn: sqlite3.Connection, property_id: int) -> bool:
+    """審査結果を取り消して pending に戻す（誤操作の復旧用）。
+
+    feedback は消さない。人が一度そう判断した事実は学習の材料として残す。
+    """
+    cursor = conn.execute(
+        "UPDATE properties SET status = 'pending', reviewed_at = NULL, reject_reason = NULL "
+        "WHERE id = ? AND status != 'delivered'",
+        (property_id,),
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
 def delete_properties(
     conn: sqlite3.Connection, *, source: str | None = None, property_id: int | None = None
 ) -> int:

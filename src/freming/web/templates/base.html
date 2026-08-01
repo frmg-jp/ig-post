@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}FREMING CURATED 審査{% endblock %}</title>
+<style>
+  :root {
+    --bg: #fbfbfa; --fg: #1c1b19; --muted: #6b6862;
+    --line: #e3e0da; --card: #ffffff;
+    --ok: #2f6f4f; --ng: #9c3b2e; --hi: #b07d2b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1917; --fg: #eceae5; --muted: #9a958c;
+      --line: #33312d; --card: #232120;
+      --ok: #6fbf95; --ng: #e08a7a; --hi: #d9b06a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.6 -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  }
+  header {
+    position: sticky; top: 0; z-index: 10; background: var(--bg);
+    border-bottom: 1px solid var(--line); padding: 12px 20px;
+    display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap;
+  }
+  header h1 { font-size: 15px; margin: 0; letter-spacing: .08em; }
+  nav a { color: var(--muted); text-decoration: none; margin-right: 12px; }
+  nav a.on { color: var(--fg); font-weight: 700; }
+  main { max-width: 1000px; margin: 0 auto; padding: 20px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 8px; padding: 16px; margin-bottom: 16px;
+    display: grid; grid-template-columns: 180px 1fr; gap: 16px;
+  }
+  .card.no-thumb { grid-template-columns: 1fr; }
+  .card img { width: 100%; border-radius: 4px; object-fit: cover; aspect-ratio: 1; }
+  .score { font-size: 26px; font-weight: 700; }
+  .score.hi { color: var(--hi); }
+  .title { font-size: 16px; font-weight: 700; margin: 2px 0 6px; }
+  .meta, .axes { color: var(--muted); font-size: 12px; }
+  .axes { font-family: ui-monospace, SFMono-Regular, monospace; margin-top: 6px; }
+  .tag {
+    display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px;
+    border: 1px solid var(--line); margin-right: 5px; color: var(--muted);
+  }
+  .tag.on { color: var(--ok); border-color: var(--ok); }
+  .tag.warn { color: var(--ng); border-color: var(--ng); }
+  .reason { margin: 8px 0; white-space: pre-wrap; font-size: 13px; }
+  form.actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  select, input[type=text], textarea {
+    font: inherit; padding: 6px 8px; border: 1px solid var(--line);
+    border-radius: 5px; background: var(--card); color: var(--fg);
+  }
+  button {
+    font: inherit; padding: 6px 14px; border-radius: 5px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--card); color: var(--fg);
+  }
+  button.ok { border-color: var(--ok); color: var(--ok); }
+  button.ng { border-color: var(--ng); color: var(--ng); }
+  details.manual { margin-top: 28px; border-top: 1px solid var(--line); padding-top: 16px; }
+  details.manual .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; max-width: 620px; }
+  .note { color: var(--muted); font-size: 12px; }
+  .empty { color: var(--muted); padding: 40px 0; text-align: center; }
+  @media (max-width: 640px) {
+    .card { grid-template-columns: 1fr; }
+    details.manual .grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>FREMING CURATED</h1>
+  <nav>
+    {% for key, label in [("pending","未審査"),("approved","承認"),("rejected","非承認"),("delivered","納品済"),("all","すべて")] %}
+      <a href="/?status={{ key }}" class="{{ 'on' if status == key else '' }}">
+        {{ label }}{% if counts and counts.get(key) %} {{ counts.get(key) }}{% endif %}
+      </a>
+    {% endfor %}
+  </nav>
+</header>
+<main>{% block body %}{% endblock %}</main>
+</body>
+</html>
