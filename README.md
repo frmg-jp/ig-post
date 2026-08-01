@@ -35,9 +35,12 @@ python scripts/check_drive.py        # [2] Drive疎通確認（★ここが通�
 | `python -m freming.cli ingest-url <URL>` | URLを1件だけ取得して候補化（Zillow等はこの経路のみ） |
 | `python -m freming.cli check-api` | スコアリングAPIの疎通確認 |
 | `python -m freming.cli score [--limit 20] [--dry-run]` | 未採点の候補をスコアリング（[2]） |
+| `python -m freming.cli serve` | 審査UIを起動（[3]） |
+| `python -m freming.cli deliver [--limit 5] [--dry-run]` | 承認済みを画像取得→加工→Drive納品（[4][5][6]） |
 | `python -m freming.cli status` | 候補の件数をステータス別に表示 |
 | `python -m freming.collect.editorial --source dezeen` | 同上（モジュール単体実行） |
 | `python -m freming.scoring.runner --limit 20` | 同上（モジュール単体実行） |
+| `python -m freming.delivery.deliver --dry-run` | 同上（モジュール単体実行） |
 | `python -m pytest tests/ -q` | テスト |
 
 設定値はすべて `config.yaml`。秘匿値のみ `.env`。
@@ -119,8 +122,8 @@ gcloud auth application-default login \
 - [x] 2. Drive疎通確認スクリプト
 - [x] 3. 収集モジュール（編集ソース1つ、RSS経由）
 - [x] 4. スコアリング
-- [ ] 5. 審査UI
-- [ ] 6. 画像取得・加工・納品
+- [x] 5. 審査UI
+- [x] 6. 画像取得・加工・納品
 - [ ] 7. 学習ループ
 
 ## スコアリングの仕組み

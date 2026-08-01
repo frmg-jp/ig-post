@@ -108,6 +108,22 @@ def _cmd_probe_feed(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_deliver(args: argparse.Namespace) -> int:
+    from freming.db.connection import session
+    from freming.delivery.deliver import deliver_approved
+
+    cfg = load_config(args.config)
+    setup_logging(cfg.app.log_dir, cfg.app.log_level)
+    if not cfg.drive.enabled and not args.dry_run:
+        print("drive.enabled が false です。", file=sys.stderr)
+        return 2
+    with session(cfg.app.db_path) as conn:
+        stats = deliver_approved(cfg, conn, args.limit, args.dry_run)
+    print(stats.summary())
+    print(stats.report())
+    return 0
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     """審査UIを起動する（[3]）。ローカル利用前提で認証は持たない。"""
     import uvicorn
@@ -275,6 +291,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_probe.add_argument("--top", type=int, default=15)
     p_probe.add_argument("--details", action="store_true", help="各フィードの判定内訳も表示")
     p_probe.set_defaults(func=_cmd_probe_feed)
+
+    p_deliver = sub.add_parser("deliver", help="承認済みを画像取得→加工→Drive納品（[4][5][6]）")
+    p_deliver.add_argument("--limit", type=int, default=None)
+    p_deliver.add_argument(
+        "--dry-run", action="store_true", help="Driveに書き込まず画像取得・加工まで実行"
+    )
+    p_deliver.set_defaults(func=_cmd_deliver)
 
     p_serve = sub.add_parser("serve", help="審査UIを起動（[3]）")
     p_serve.add_argument("--host", default=None)
