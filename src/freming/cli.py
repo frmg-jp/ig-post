@@ -56,6 +56,7 @@ def _cmd_collect(args: argparse.Namespace) -> int:
     for url in stats.candidates:
         print(f"  - {url}")
     if args.explain:
+        print(stats.url_pattern_report())
         print(stats.explain_report())
     return 0
 
@@ -93,8 +94,9 @@ def _cmd_probe_feed(args: argparse.Namespace) -> int:
                 f"候補 {stats.inserted}件",
             )
         )
-        if args.details and stats.explanations:
+        if args.details:
             print(f"\n### {url}")
+            print(stats.url_pattern_report())
             print(stats.explain_report(top=args.top))
 
     width = max((len(u) for _, u, _ in results), default=0)
@@ -217,6 +219,7 @@ def _cmd_discover_feed(args: argparse.Namespace) -> int:
     setup_logging(cfg.app.log_dir, cfg.app.log_level)
 
     total = 0
+    found: list[str] = []
     for site in args.url:
         try:
             feeds = discover_feeds(cfg, site)
@@ -229,10 +232,23 @@ def _cmd_discover_feed(args: argparse.Namespace) -> int:
         print(f"OK  {site}")
         for feed_url, label in feeds:
             print(f"      {feed_url}   ({label})")
+            found.append(feed_url)
             total += 1
-    if total:
-        print(f"\n{total} 件見つかりました。probe-feed に渡して中身を確認してください。")
-    return 0
+
+    if not total:
+        return 0
+    if not args.probe:
+        print(f"\n{total} 件見つかりました。probe-feed に渡して中身を確認してください:")
+        print("  python -m freming.cli probe-feed " + " ".join(found))
+        return 0
+
+    # 見つけたフィードをそのまま試す。フィード1回ずつのリクエストで済むので、
+    # 「URLを探す」と「中身を見る」を人が2回に分ける理由がない。
+    print(f"\n{total} 件を続けて調べます。")
+    probe_args = argparse.Namespace(
+        config=args.config, url=found, limit=None, top=15, details=args.details
+    )
+    return _cmd_probe_feed(probe_args)
 
 
 def _cmd_ingest_url(args: argparse.Namespace) -> int:
@@ -371,6 +387,12 @@ def build_parser() -> argparse.ArgumentParser:
         "discover-feed", help="サイトのトップページから公開フィードURLを探す"
     )
     p_discover.add_argument("url", nargs="+", help="調べるサイトのURL（複数可）")
+    p_discover.add_argument(
+        "--probe", action="store_true", help="見つけたフィードをそのまま probe-feed で試す"
+    )
+    p_discover.add_argument(
+        "--details", action="store_true", help="--probe 時に判定内訳とURLパターンも表示"
+    )
     p_discover.set_defaults(func=_cmd_discover_feed)
 
     p_ingest = sub.add_parser("ingest-url", help="URLを1件だけ取得して候補化")

@@ -550,3 +550,47 @@ def test_discover_feeds_reads_declared_links(config, monkeypatch) -> None:
         "https://example.com/rss/posts",
         "https://cdn.example.com/atom",
     ]
+
+
+def test_url_pattern_report_groups_by_path(config, conn, source) -> None:
+    """フィードに混ざるURLの種類が1回の取得で見えること。
+
+    CIRCA のように物件ページとエージェント紹介ページが同居するソースで、
+    url_exclude に何を書けばよいかを判断するための出力。
+    """
+    now = datetime.now(timezone.utc)
+    entries = [
+        ("House A", "https://www.dezeen.com/property/house-a/", now),
+        ("House B", "https://www.dezeen.com/property/house-b/", now),
+        ("Agent C", "https://www.dezeen.com/agent/carol/", now),
+    ]
+    pages = {FEED_URL: _feed(entries, description="<p>A house.</p>")}
+
+    probe_config = config.model_copy(deep=True)
+    probe_config.collect.fetch_article_pages = False
+    stats = EditorialCollector(probe_config, FakeClient(pages), conn).collect(
+        source, dry_run=True, explain=True, ignore_known=True
+    )
+
+    report = stats.url_pattern_report()
+    assert "/property/" in report
+    assert "/agent/" in report
+    assert "2件" in report and "1件" in report
+
+
+def test_excluded_urls_are_still_reported(config, conn, source) -> None:
+    """除外されたURLも記録すること。効きすぎているかを確認するため。"""
+    now = datetime.now(timezone.utc)
+    src = source.model_copy(deep=True)
+    src.url_exclude = [r"/agent/"]
+    pages = {
+        FEED_URL: _feed(
+            [("Agent C", "https://www.dezeen.com/agent/carol/", now)],
+            description="<p>A house.</p>",
+        )
+    }
+
+    stats = EditorialCollector(config, FakeClient(pages), conn).collect(src, dry_run=True)
+
+    assert stats.skipped_url_pattern == 1
+    assert "/agent/" in stats.url_pattern_report()

@@ -56,6 +56,16 @@ editorial_sources:
     url_exclude: []
     feeds:
       - "https://circaoldhouses.com/feed/"
+  - key: modernlivingla
+    name: "Modern Living LA"
+    rank: B
+    enabled: true
+    # 2026-08-01 の probe-feed: 9件 / 本文中央値1555字 / 候補2件。
+    # 重点エリア（LA）で唯一、実際に候補が出たフィード。
+    # 販売専門メディアの可能性が高いが未確認のため assume_for_sale は付けない。
+    # 記事に市況コラムが混ざっていた場合、全件が候補になってしまうため。
+    feeds:
+      - "https://modernlivingla.com/feed/"
 
   # --- 編集メディア（販売記事は時々。ここが FREMING の独自性） ---
   - key: dezeen

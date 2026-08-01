@@ -83,6 +83,40 @@ class CollectStats:
     # URLの打ち間違いなのか robots で拒否されたのかが分からないため、
     # 対処の分かれる原因はここに残す。
     feed_failures: list[str] = field(default_factory=list)
+    # フィードに載っていた記事URL（判定の可否に関わらず全件）。
+    # url_include / url_exclude を決めるには、実際にどんなURLが来るかを
+    # 見る必要がある。フィード1回のリクエストで分かる情報なので取っておく。
+    entry_urls: list[str] = field(default_factory=list)
+
+    def url_pattern_report(self, top: int = 8) -> str:
+        """記事URLをパスの第1階層でまとめて表示する。
+
+        CIRCA のように物件ページとエージェント紹介ページが同じフィードに
+        混ざるソースでは、ここを見れば url_exclude に書くべきパターンが
+        そのまま分かる。
+        """
+        if not self.entry_urls:
+            return ""
+        from collections import Counter
+        from urllib.parse import urlparse
+
+        groups: Counter[str] = Counter()
+        samples: dict[str, str] = {}
+        for url in self.entry_urls:
+            parts = [p for p in urlparse(url).path.split("/") if p]
+            key = f"/{parts[0]}/" if len(parts) > 1 else "/（直下）"
+            groups[key] += 1
+            samples.setdefault(key, url)
+
+        lines = ["", f"--- URLパターン（全 {len(self.entry_urls)} 件）---"]
+        for key, count in groups.most_common(top):
+            lines.append(f"  {count:>3}件  {key:<20} 例: {samples[key]}")
+        if len(groups) > 1:
+            lines.append(
+                "  ※ 物件ページ以外が混ざっている場合は、config.yaml の "
+                "url_include / url_exclude に上のパターンを指定してください"
+            )
+        return "\n".join(lines)
 
     def explain_report(self, top: int = 15) -> str:
         """判定内訳をスコア降順で表示する。フィード本文が薄いのか、
@@ -292,6 +326,9 @@ class EditorialCollector:
         if not link:
             return
         url = normalize_url(link)
+        # 除外されたURLも記録する。何が弾かれているかを見ないと、
+        # url_exclude が効きすぎているのか足りないのか判断できない。
+        stats.entry_urls.append(url)
 
         if not source.url_allowed(url):
             stats.skipped_url_pattern += 1
