@@ -138,24 +138,33 @@ def list_properties(
     採点前の候補を隠すと「収集したのに出てこない」ことになるため、
     除外はせず順序だけ下げる。
     """
-    sql = "SELECT * FROM properties WHERE 1=1"
+    # 納品済みから Drive のフォルダを開けるように、納品記録も一緒に引く
+    sql = (
+        "SELECT p.*, d.drive_folder_id, d.folder_name FROM properties p "
+        "LEFT JOIN deliveries d ON d.property_id = p.id WHERE 1=1"
+    )
     params: list = []
     if status != "all":
-        sql += " AND status = ?"
+        sql += " AND p.status = ?"
         params.append(status)
     if min_score is not None:
-        sql += " AND score >= ?"
+        sql += " AND p.score >= ?"
         params.append(min_score)
     if series:
-        sql += " AND series = ?"
+        sql += " AND p.series = ?"
         params.append(series)
-    sql += " ORDER BY score IS NULL, score DESC, id DESC LIMIT ? OFFSET ?"
+    sql += " ORDER BY p.score IS NULL, p.score DESC, p.id DESC LIMIT ? OFFSET ?"
     params += [limit, offset]
     return conn.execute(sql, params).fetchall()
 
 
 def get_property(conn: sqlite3.Connection, property_id: int) -> sqlite3.Row | None:
-    return conn.execute("SELECT * FROM properties WHERE id = ?", (property_id,)).fetchone()
+    """一覧と同じ列が揃うように、納品記録も一緒に引く。"""
+    return conn.execute(
+        "SELECT p.*, d.drive_folder_id, d.folder_name FROM properties p "
+        "LEFT JOIN deliveries d ON d.property_id = p.id WHERE p.id = ?",
+        (property_id,),
+    ).fetchone()
 
 
 def approve_property(conn: sqlite3.Connection, property_id: int) -> bool:

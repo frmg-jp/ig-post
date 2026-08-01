@@ -310,3 +310,49 @@ def test_empty_pending_tab_suggests_collecting(client) -> None:
 def test_empty_series_filter_explains_labels(client) -> None:
     body = client.get("/?status=pending&series=freming_pick").text
     assert "この企画のラベル" in body
+
+
+def test_delivered_card_links_to_drive(client, conn) -> None:
+    """納品済みから Drive のフォルダを直接開けること。"""
+    property_id = _add(conn)
+    conn.execute("UPDATE properties SET status = 'delivered' WHERE id = ?", (property_id,))
+    conn.execute(
+        "INSERT INTO deliveries (property_id, folder_name, image_count, drive_folder_id, "
+        "delivered_at) VALUES (?, 'frmg_ig001', 10, 'FOLDER123', datetime('now'))",
+        (property_id,),
+    )
+    conn.commit()
+
+    body = client.get("/?status=delivered").text
+    assert "https://drive.google.com/drive/folders/FOLDER123" in body
+    assert "frmg_ig001" in body
+
+
+def test_area_is_shown_next_to_the_score(client, conn) -> None:
+    """エリアは審査中に最も参照するので点数の隣に出す。"""
+    property_id = _add(conn)
+    conn.execute("UPDATE properties SET score = 88.4 WHERE id = ?", (property_id,))
+    conn.commit()
+
+    body = client.get("/").text
+    assert 'class="area"' in body
+    assert "San Francisco" in body
+
+
+def test_breakdown_is_collapsed(client, conn) -> None:
+    """内訳は畳んでおく（日々の審査で毎回読む情報ではない）。"""
+    property_id = _add(conn)
+    conn.execute(
+        "UPDATE properties SET score = 50, score_detail = ? WHERE id = ?",
+        ('{"axes": [{"key": "story", "raw": 90, "weight": 0.25, "reason": ""}]}', property_id),
+    )
+    conn.commit()
+
+    body = client.get("/").text
+    assert "<details class=\"axes\">" in body      # open 属性なし = 閉じている
+    assert "判定の内訳" in body
+
+
+def test_undelivered_card_has_no_drive_link(client, conn) -> None:
+    _add(conn)
+    assert "drive.google.com" not in client.get("/").text

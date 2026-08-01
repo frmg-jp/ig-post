@@ -4,11 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}FREMING CURATED 審査{% endblock %}</title>
+{# 英字は Inter を優先。日本語のグリフは持たないので自動的に Hiragino に落ちる。
+   取得できない環境ではフォントスタックの次以降が使われ、表示は崩れない。 #}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
     --bg: #fbfbfa; --fg: #1c1b19; --muted: #6b6862;
     --line: #e3e0da; --card: #ffffff;
     --ok: #2f6f4f; --ng: #9c3b2e; --hi: #b07d2b;
+    --sans: Inter, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -18,60 +25,96 @@
     }
   }
   * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--fg);
-    font: 15px/1.6 -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
-  }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.55 var(--sans); }
+
   header {
     position: sticky; top: 0; z-index: 10; background: var(--bg);
-    border-bottom: 1px solid var(--line); padding: 12px 20px;
+    border-bottom: 1px solid var(--line); padding: 10px 20px;
     display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap;
   }
-  header h1 { font-size: 15px; margin: 0; letter-spacing: .08em; }
+  header h1 { font-size: 14px; margin: 0; letter-spacing: .08em; }
   nav a { color: var(--muted); text-decoration: none; margin-right: 12px; }
   nav a.on { color: var(--fg); font-weight: 700; }
-  main { max-width: 1000px; margin: 0 auto; padding: 20px; }
+  .keys { margin-left: auto; color: var(--muted); font-size: 11px; }
+  .keys kbd {
+    font: 11px var(--mono); border: 1px solid var(--line);
+    border-radius: 3px; padding: 0 4px; margin: 0 1px;
+  }
+  main { max-width: 1000px; margin: 0 auto; padding: 16px 20px 60px; }
+
+  /* カードは1画面に多く入ることを優先する。審査は件数を捌く作業なので、
+     スクロール回数がそのまま所要時間になる。 */
   .card {
     background: var(--card); border: 1px solid var(--line);
-    border-radius: 8px; padding: 16px; margin-bottom: 16px;
-    display: grid; grid-template-columns: 180px 1fr; gap: 16px;
+    border-radius: 8px; padding: 12px; margin-bottom: 10px;
+    display: grid; grid-template-columns: 132px 1fr; gap: 14px;
   }
   .card.no-thumb { grid-template-columns: 1fr; }
-  .card img { width: 100%; border-radius: 4px; object-fit: cover; aspect-ratio: 1; }
-  .score { font-size: 26px; font-weight: 700; }
+  .card.sel { border-color: var(--hi); box-shadow: 0 0 0 2px var(--hi); }
+  .card img { width: 100%; border-radius: 4px; object-fit: cover; aspect-ratio: 1; display: block; }
+
+  .head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .score { font-size: 22px; font-weight: 700; line-height: 1; letter-spacing: -.01em; }
   .score.hi { color: var(--hi); }
-  .title { font-size: 16px; font-weight: 700; margin: 2px 0 6px; }
-  .meta, .axes { color: var(--muted); font-size: 12px; }
-  .axes { font-family: ui-monospace, SFMono-Regular, monospace; margin-top: 6px; }
+  .area { font-size: 13px; color: var(--muted); }
+  .title { font-size: 15px; font-weight: 600; margin: 4px 0 6px; }
+  .title a { color: inherit; }
+  .meta { color: var(--muted); font-size: 12px; }
+
   .tag {
     display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px;
-    border: 1px solid var(--line); margin-right: 5px; color: var(--muted);
+    border: 1px solid var(--line); margin: 0 4px 3px 0; color: var(--muted);
   }
   .tag.on { color: var(--ok); border-color: var(--ok); }
   .tag.warn { color: var(--ng); border-color: var(--ng); }
   .tag.series { color: var(--hi); border-color: var(--hi); font-weight: 700; }
-  .subnav { padding: 0 20px 10px; font-size: 12px; }
-  .subnav a { color: var(--muted); text-decoration: none; margin-right: 10px; }
-  .subnav a.on { color: var(--hi); font-weight: 700; }
-  .reason { margin: 8px 0; white-space: pre-wrap; font-size: 13px; }
-  form.actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  select, input[type=text], textarea {
-    font: inherit; padding: 6px 8px; border: 1px solid var(--line);
+
+  .summary { margin: 5px 0; }
+  details.axes { margin: 4px 0 8px; }
+  details.axes > summary {
+    cursor: pointer; color: var(--muted); font-size: 12px; list-style: none;
+  }
+  details.axes > summary::before { content: "▸ "; }
+  details.axes[open] > summary::before { content: "▾ "; }
+  details.axes .body {
+    font: 11px/1.7 var(--mono); color: var(--muted);
+    margin-top: 4px; white-space: pre-wrap;
+  }
+
+  /* 承認・非承認・企画を1行にまとめ、視線とマウスの移動を減らす */
+  .actions {
+    display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 8px;
+  }
+  .actions form { display: contents; }
+  select, input[type=text] {
+    font: inherit; font-size: 13px; padding: 5px 7px; border: 1px solid var(--line);
     border-radius: 5px; background: var(--card); color: var(--fg);
   }
+  input[type=text].free { flex: 1; min-width: 140px; }
   button {
-    font: inherit; padding: 6px 14px; border-radius: 5px; cursor: pointer;
-    border: 1px solid var(--line); background: var(--card); color: var(--fg);
+    font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 5px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--card); color: var(--fg); white-space: nowrap;
   }
-  button.ok { border-color: var(--ok); color: var(--ok); }
+  button.ok { border-color: var(--ok); color: var(--ok); font-weight: 600; }
   button.ng { border-color: var(--ng); color: var(--ng); }
-  details.manual { margin-top: 28px; border-top: 1px solid var(--line); padding-top: 16px; }
+
+  a.drive {
+    font-size: 13px; color: var(--hi); text-decoration: none;
+    border: 1px solid var(--hi); border-radius: 5px; padding: 4px 10px;
+  }
+
+  details.manual { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 14px; }
   details.manual .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; max-width: 620px; }
   .note { color: var(--muted); font-size: 12px; }
   .empty { color: var(--muted); padding: 40px 0; text-align: center; }
+  .subnav { padding: 0 20px 8px; font-size: 12px; }
+  .subnav a { color: var(--muted); text-decoration: none; margin-right: 10px; }
+  .subnav a.on { color: var(--hi); font-weight: 700; }
+
   @media (max-width: 640px) {
     .card { grid-template-columns: 1fr; }
     details.manual .grid { grid-template-columns: 1fr; }
+    .keys { display: none; }
   }
 </style>
 </head>
@@ -86,7 +129,40 @@
     {% endfor %}
     <a href="/rules" class="{{ 'on' if status == 'rules' else '' }}">ルール候補</a>
   </nav>
+  <span class="keys">
+    <kbd>J</kbd><kbd>K</kbd> 移動 <kbd>A</kbd> 承認 <kbd>R</kbd> 理由 <kbd>Enter</kbd> 元記事
+  </span>
 </header>
 <main>{% block body %}{% endblock %}</main>
+<script>
+// キーボードで審査を進める。件数を捌く作業なので、マウスに戻る回数を減らす。
+// 文字入力中は無効（理由の自由記入を邪魔しない）。
+(function () {
+  const cards = Array.from(document.querySelectorAll(".card[data-id]"));
+  if (!cards.length) return;
+  let i = 0;
+  const mark = () => cards.forEach((c, n) => c.classList.toggle("sel", n === i));
+  const show = () => cards[i].scrollIntoView({ block: "center", behavior: "smooth" });
+  mark();
+
+  document.addEventListener("keydown", (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const tag = (e.target.tagName || "").toUpperCase();
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+    const card = cards[i];
+    const key = e.key.toLowerCase();
+    if (key === "j") { i = Math.min(i + 1, cards.length - 1); mark(); show(); }
+    else if (key === "k") { i = Math.max(i - 1, 0); mark(); show(); }
+    else if (key === "a") { const f = card.querySelector("form.approve"); if (!f) return; f.submit(); }
+    else if (key === "r") { const s = card.querySelector("select[name=reason]"); if (!s) return; s.focus(); }
+    else if (e.key === "Enter") { const a = card.querySelector(".title a"); if (!a) return; window.open(a.href, "_blank", "noopener"); }
+    else return;
+    e.preventDefault();
+  });
+
+  cards.forEach((c, n) => c.addEventListener("click", () => { i = n; mark(); }));
+})();
+</script>
 </body>
 </html>

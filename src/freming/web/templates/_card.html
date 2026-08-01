@@ -1,15 +1,22 @@
 {# 1候補分の表示と操作。一覧と詳細で同じものを使う。 #}
-<div class="card {{ 'no-thumb' if not row['thumbnail_url'] else '' }}">
+{% set breakdown = row | axes %}
+<div class="card {{ 'no-thumb' if not row['thumbnail_url'] else '' }}" data-id="{{ row['id'] }}">
   {% if row["thumbnail_url"] %}
     <div>
-      <img src="{{ row['thumbnail_url'] }}" alt="" loading="lazy"
-           referrerpolicy="no-referrer">
+      <img src="{{ row['thumbnail_url'] }}" alt="" loading="lazy" referrerpolicy="no-referrer">
     </div>
   {% endif %}
   <div>
-    <div class="score {{ 'hi' if row['score'] and row['score'] >= highlight else '' }}">
-      {{ '%.1f'|format(row['score']) if row['score'] is not none else '未採点' }}
+    <div class="head">
+      <span class="score {{ 'hi' if row['score'] and row['score'] >= highlight else '' }}">
+        {{ '%.1f'|format(row['score']) if row['score'] is not none else '未採点' }}
+      </span>
+      {# エリアは審査中に最も参照する属性なので、点数の右に置く #}
+      <span class="area">
+        {{ [row["location_city"], row["location_country"]] | select | join(", ") or "所在地不明" }}
+      </span>
     </div>
+
     <div class="title">
       <a href="{{ row['source_url'] }}" target="_blank" rel="noopener noreferrer">
         {{ row["title"] or row["source_url"] }}
@@ -24,63 +31,67 @@
       {% endif %}
       {% if row["provenance_visible"] %}<span class="tag on">前歴あり</span>{% endif %}
       {% if row["genre"] %}<span class="tag">{{ row["genre"] }}</span>{% endif %}
-      {% if row["location_city"] or row["location_country"] %}
-        <span class="tag">{{ row["location_city"] or row["location_country"] }}</span>
-      {% endif %}
       {% if row["price"] %}<span class="tag">{{ row["price"] }}</span>{% endif %}
       {% if not row["is_for_sale"] %}<span class="tag warn">売出未確認</span>{% endif %}
       <span class="tag">{{ row["source"] }}{% if row["source_rank"] %}/{{ row["source_rank"] }}{% endif %}</span>
     </div>
 
-    {% if row["summary"] %}<div class="reason">{{ row["summary"] }}</div>{% endif %}
-    {% if row["score_reason"] %}<div class="meta reason">{{ row["score_reason"] }}</div>{% endif %}
+    {% if row["summary"] %}<div class="summary">{{ row["summary"] }}</div>{% endif %}
 
-    {% set breakdown = row | axes %}
-    {% if breakdown %}
-      <div class="axes">
-        {% for a in breakdown %}{{ a.key }}={{ '%.0f'|format(a.raw) }}×{{ '%.2f'|format(a.weight) }}{% if a.reason %}({{ a.reason }}){% endif %}{{ " / " if not loop.last }}{% endfor %}
-      </div>
+    {% if row["score_reason"] or breakdown %}
+      {# 内訳は重みを調整するときに見るもので、日々の審査では畳んでおく #}
+      <details class="axes">
+        <summary>判定の内訳</summary>
+        <div class="body">{% if row["score_reason"] %}{{ row["score_reason"] }}
+{% endif %}{% for a in breakdown %}{{ a.key }}={{ '%.0f'|format(a.raw) }}×{{ '%.2f'|format(a.weight) }}{% if a.reason %}（{{ a.reason }}）{% endif %}{{ " / " if not loop.last }}{% endfor %}</div>
+      </details>
     {% endif %}
 
     {% if row["reject_reason"] %}
-      <div class="meta reason">非承認理由: {{ row["reject_reason"] }}</div>
+      <div class="meta summary">非承認理由: {{ row["reject_reason"] }}</div>
     {% endif %}
 
-    {% if row["status"] != "delivered" and series_options %}
-      {# 連載企画は編集判断なので、スコアリングでは決めずここで人が選ぶ #}
-      <form class="actions" method="post" action="/p/{{ row['id'] }}/series">
-        <input type="hidden" name="status" value="{{ status }}">
-        <select name="series" onchange="this.form.submit()">
-          <option value="">企画なし</option>
-          {% for s in series_options %}
-            <option value="{{ s.key }}" {{ 'selected' if row["series"] == s.key }}>{{ s.label }}</option>
-          {% endfor %}
-        </select>
-        <noscript><button type="submit">企画を設定</button></noscript>
-      </form>
-    {% endif %}
+    <div class="actions">
+      {% if row["status"] != "delivered" and series_options %}
+        {# 連載企画は編集判断なので、スコアリングでは決めずここで人が選ぶ #}
+        <form method="post" action="/p/{{ row['id'] }}/series">
+          <input type="hidden" name="status" value="{{ status }}">
+          <select name="series" onchange="this.form.submit()">
+            <option value="">企画なし</option>
+            {% for s in series_options %}
+              <option value="{{ s.key }}" {{ 'selected' if row["series"] == s.key }}>{{ s.label }}</option>
+            {% endfor %}
+          </select>
+          <noscript><button type="submit">企画を設定</button></noscript>
+        </form>
+      {% endif %}
 
-    {% if row["status"] == "delivered" %}
-      <div class="note">納品済みのため操作できません。</div>
-    {% elif row["status"] == "pending" %}
-      <form class="actions" method="post" action="/p/{{ row['id'] }}/approve">
-        <input type="hidden" name="status" value="{{ status }}">
-        <button class="ok" type="submit">承認</button>
-      </form>
-      <form class="actions" method="post" action="/p/{{ row['id'] }}/reject">
-        <input type="hidden" name="status" value="{{ status }}">
-        <select name="reason">
-          <option value="">理由を選ぶ</option>
-          {% for p in presets %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
-        </select>
-        <input type="text" name="reason_free" placeholder="自由記入（具体的なほど学習に効く）" size="34">
-        <button class="ng" type="submit">非承認</button>
-      </form>
-    {% else %}
-      <form class="actions" method="post" action="/p/{{ row['id'] }}/reset">
-        <input type="hidden" name="status" value="{{ status }}">
-        <button type="submit">未審査に戻す</button>
-      </form>
-    {% endif %}
+      {% if row["status"] == "delivered" %}
+        <span class="note">納品済み（{{ row["folder_name"] or "" }}）</span>
+        {% if row["drive_folder_id"] %}
+          <a class="drive" href="https://drive.google.com/drive/folders/{{ row['drive_folder_id'] }}"
+             target="_blank" rel="noopener noreferrer">Drive で開く</a>
+        {% endif %}
+      {% elif row["status"] == "pending" %}
+        <form class="approve" method="post" action="/p/{{ row['id'] }}/approve">
+          <input type="hidden" name="status" value="{{ status }}">
+          <button class="ok" type="submit">承認</button>
+        </form>
+        <form method="post" action="/p/{{ row['id'] }}/reject">
+          <input type="hidden" name="status" value="{{ status }}">
+          <select name="reason">
+            <option value="">理由を選ぶ</option>
+            {% for p in presets %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+          </select>
+          <input class="free" type="text" name="reason_free" placeholder="自由記入（具体的なほど学習に効く）">
+          <button class="ng" type="submit">非承認</button>
+        </form>
+      {% else %}
+        <form method="post" action="/p/{{ row['id'] }}/reset">
+          <input type="hidden" name="status" value="{{ status }}">
+          <button type="submit">未審査に戻す</button>
+        </form>
+      {% endif %}
+    </div>
   </div>
 </div>
