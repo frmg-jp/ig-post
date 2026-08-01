@@ -71,6 +71,24 @@ def test_manual_only_sources_are_never_crawled() -> None:
         assert key not in crawlable
 
 
+def test_approval_criteria_are_available_to_scoring() -> None:
+    """承認実例と判断軸がプロンプトに渡せる状態で設定されていること。
+
+    docs/approval-criteria.md の内容を [2] スコアリングが参照する。
+    片方だけ空になっていると基準が伝わらないため両方を必須にする。
+    """
+    cfg = load_config(CONFIG_PATH)
+    assert cfg.scoring.approved_examples, "scoring.approved_examples が空"
+    assert cfg.scoring.approval_notes, "scoring.approval_notes が空"
+
+
+def test_priority_genres_all_have_keywords() -> None:
+    """priority に挙げたジャンルには必ず判定用キーワードがあること。"""
+    cfg = load_config(CONFIG_PATH)
+    for genre in cfg.genres.priority:
+        assert cfg.genres.keywords.get(genre), f"{genre} のキーワードが未定義"
+
+
 def test_source_rank_lookup() -> None:
     cfg = load_config(CONFIG_PATH)
     assert cfg.source_rank("dezeen") == "S"

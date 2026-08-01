@@ -182,6 +182,9 @@ class ScoringConfig(BaseModel):
     score_scale: int = 100
     weights: ScoringWeights
     source_rank_score: dict[str, float]
+    # 承認済みの実例と、そこから抽出した判断軸。プロンプトに含めて基準を揃える。
+    approved_examples: list[str] = Field(default_factory=list)
+    approval_notes: list[str] = Field(default_factory=list)
     thresholds: ScoringThresholds = Field(default_factory=ScoringThresholds)
     feedback: FeedbackConfig = Field(default_factory=FeedbackConfig)
 

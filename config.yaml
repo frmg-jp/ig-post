@@ -201,16 +201,27 @@ focus_areas:
   - { country: "Spain" }
   - { country: "Taiwan" }
 
+# 承認済み8物件の分析（docs/approval-criteria.md）に基づくキーワード。
+# 「前歴が目に見える形で残っている」ことが最も強い共通項だったため、
+# ゴーストサイン・用途固有の部材・露出構造を示す語を厚くしている。
 genres:
-  priority: [adaptive_reuse, loft, hidden_gem, penthouse, architect]
+  priority: [adaptive_reuse, loft, architect, hidden_gem, penthouse]
   keywords:
     adaptive_reuse:
       ["conversion", "converted", "adaptive reuse", "former factory", "former school",
-       "firehouse", "fire station", "warehouse conversion", "church conversion"]
-    loft: ["loft", "warehouse", "industrial space", "open plan"]
+       "firehouse", "fire station", "warehouse conversion", "church conversion",
+       "former warehouse", "clock tower", "ghost sign", "originally built as",
+       "once a", "repurposed", "power station", "grain silo", "schoolhouse"]
+    loft:
+      ["loft", "warehouse", "industrial space", "open plan", "live/work",
+       "exposed brick", "timber truss", "heavy timber", "cast iron column",
+       "tin ceiling", "pressed metal ceiling", "freight elevator"]
     penthouse: ["penthouse", "rooftop residence", "top floor"]
-    architect: ["designed by", "architect's own", "landmark home", "modernist"]
-    hidden_gem: ["rarely seen", "little-known", "hidden", "off market"]
+    architect:
+      ["designed by", "architect's own", "landmark home", "modernist",
+       "midcentury", "mid-century", "case study house", "spanish colonial",
+       "craftsman", "usonian", "post and beam", "butterfly roof"]
+    hidden_gem: ["rarely seen", "little-known", "hidden", "off market", "never listed"]
 
 # ---------------------------------------------------------------------
 # スコアリング（Claude API）
@@ -232,6 +243,24 @@ scoring:
     S: 1.0
     A: 0.7
     B: 0.4
+  # スコアリングのプロンプトに含める承認済みの実例（docs/approval-criteria.md）。
+  # 「なぜ承認されたか」を few-shot としてLLMに示し、判断基準を揃える。
+  approved_examples:
+    - "1868年の倉庫 Oriental Warehouse（SF South Beach）。壁面のゴーストサインとアーチ、木トラスが住居に残る"
+    - "電気設備会社 EOFF Electric Company の社屋（Portland Pearl District）。壁面広告がそのまま残る"
+    - "消防署のコンバージョン（Chicago）。赤いアーチ型の消防車扉が現役のまま玄関、ブリキ型押し天井"
+    - "Eagle Warehouse の時計塔（Brooklyn DUMBO）。巨大な時計文字盤がそのまま窓になっている"
+    - "花崗岩の山塊の直下に建つ砂漠のモダニズム住宅（東シエラ）。立地そのものが主題"
+    - "板張り天井と石積み暖炉のミッドセンチュリー住宅（LA丘陵）。時代の家具ごと残る"
+    - "素焼き瓦と白漆喰のスパニッシュコロニアル（LA）。庭と建物が一体"
+    - "深い軒と木の重なりを持つ和／クラフツマン住宅（LA近郊）。庭に鉄の産業遺物"
+  # 上の実例から抽出した、判断の軸（プロンプトに明示する）
+  approval_notes:
+    - "最重要は『前歴が目に見える形で残っている』こと。単に用途転換されただけでは足りず、転換前の正体が写真から読み取れること（ゴーストサイン、用途固有の部材、露出構造）"
+    - "時代・様式が特定できること。様式不明の現代建売・新築マンションは対象外"
+    - "一点物であること。同一仕様が複数存在する物件は対象外"
+    - "立地が物語の一部になっていること"
+    - "重点エリアは加点要素であり必須ではない。承認実績8件中2件は重点エリア外（Chicago / Brooklyn）"
   thresholds:
     min_to_persist: 30         # これ未満は保存はするが一覧デフォルト非表示
     highlight_above: 80
