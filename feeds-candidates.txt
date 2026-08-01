@@ -1,31 +1,87 @@
-# フィード候補（probe-feed で検証する）
-# 検証済みの結果は config.yaml に反映済み。ここは未確定分の調査用。
+# =====================================================================
+# 重点エリアの物件を取れるソース候補
+#   Los Angeles / San Francisco / Portland / Seattle / ポルトガル / スペイン / 台湾
 #
-# === 検証済み（2026-08-01） ===
-#  OK  10件 中央値5140字 候補4件  https://www.wowhaus.co.uk/feed/         → 採用
-#  OK  12件 中央値 973字 候補0件  https://circaoldhouses.com/feed/        → 採用（販売専門扱い）
-#  OK  50件 中央値4408字 候補0件  https://www.dezeen.com/feed/            → 採用（編集ソース）
-#  OK  10件 中央値5088字 候補0件  https://www.designboom.com/architecture/feed/ → 採用（編集ソース）
-#  OK  24件 中央値 466字 候補0件  https://www.archdaily.com/rss/          → 本文が薄い。保留
-#  OK  30件 中央値 154字 候補0件  https://www.architecturaldigest.com/feed/rss → 本文が薄い。保留
+# 使い方:
+#   python -m freming.cli probe-feed $(grep -v '^#' feeds-candidates.txt | grep .) 2>&1 | tail -40
 #
-# === 未確定: 別のパスを試す ===
-# Dwell（Real Estate セクションがあり期待値は高い）
-https://www.dwell.com/rss.xml
-https://www.dwell.com/feeds/all.rss
-https://www.dwell.com/channel/real-estate/rss
+# probe-feed は robots.txt を尊重し、フィード1回のリクエストしか送りません。
+# 「候補N件」が多いものを config.yaml の editorial_sources に登録します。
 #
-# Iconic Houses（icons for sale ページあり）
-https://www.iconichouses.org/feed
-https://www.iconichouses.org/blog/rss.xml
-https://www.iconichouses.org/rss
-#
-# Architecture For Sale（販売専門。WordPress なら /?feed=rss2 が通る）
-https://architectureforsale.com/?feed=rss2
-https://architectureforsale.com/listings/feed/
-https://architectureforsale.com/rss
-#
-# Wallpaper*
-https://www.wallpaper.com/rss
-https://www.wallpaper.com/feeds/all
+# 注意: フィードURLは一般的な規約（WordPress の /feed/ など）からの推定を
+# 含みます。通らないものが混ざる前提で確認してください。
+# =====================================================================
+
+# --- 検証済み・採用中 ---------------------------------------------------
+#  OK  10件 中央値5140字 候補6件  https://www.wowhaus.co.uk/feed/    ※英国中心
+#  OK  12件 中央値 973字          https://circaoldhouses.com/feed/   ※米国東海岸中心
+#  OK  50件 中央値4408字 候補0件  https://www.dezeen.com/feed/
+#  OK  10件 中央値5088字 候補0件  https://www.designboom.com/architecture/feed/
+
+# =====================================================================
+# 1. 国際・編集メディア（建築物件の売出を定期的に扱う）
+#    重点エリアを横断的にカバーできる可能性が最も高い層
+# =====================================================================
+https://thespaces.com/feed/
+https://themodernhouse.com/journal/feed/
+https://www.dirt.com/feed/
+https://www.mansionglobal.com/feeds/rss
 https://www.wallpaper.com/architecture/feed
+
+# =====================================================================
+# 2. ロサンゼルス（建築専門の仲介・キュレーションメディア）
+#    Case Study House / ミッドセンチュリーを扱う専門業者が多い
+# =====================================================================
+https://socalmodern.com/feed/
+https://beyondshelter.com/feed/
+https://modernlivingla.com/feed/
+https://architectureforsale.com/?feed=rss2
+
+# =====================================================================
+# 3. サンフランシスコ（SOMA / South Beach のウェアハウス転用）
+#    1988年の live/work 建築コード緩和以降、倉庫転用が集積する地域
+# =====================================================================
+https://jacksonfuller.com/feed/
+https://rebeccabrooks.com/blog/rss
+https://www.jeffmarples.com/feed/
+
+# =====================================================================
+# 4. ポートランド（Pearl District のロフト）
+# =====================================================================
+https://portlandscondos.com/feed/
+https://www.seanzbecker.com/feed/
+https://pearldistrictproperties.com/feed/
+
+# =====================================================================
+# 5. シアトル（Pioneer Square の歴史的ロフト）
+# =====================================================================
+https://www.urbnlivn.com/feed/
+https://jeffreynoldsseattle.com/feed/
+
+# =====================================================================
+# 6. ポルトガル / スペイン
+# =====================================================================
+https://themodernspaces.com/feed/
+https://thesingular.space/feed/
+https://www.metalocus.es/en/rss.xml
+https://www.plataformaarquitectura.cl/cl/rss/
+
+# =====================================================================
+# 7. 台湾
+#    英語圏の建築メディアで「販売中の物件」を扱うものは事実上存在しない。
+#    大手ポータル（591 / 信義房屋 / 永慶房屋）は自動収集の可否が不明なため
+#    ここには含めない。当面は add-manual での手動投入が現実的。
+# =====================================================================
+https://taiwanhousing.tw/feed/
+
+# =====================================================================
+# 使わないソース（規約で自動収集が禁止、またはポータル型）
+#   Zillow / Redfin / Compass          … mode: manual_only で実装済み
+#   Rightmove / JamesEdition           … ポータル。自動収集は行わない
+#   LuxuryEstate / Luxury Portfolio    … 同上
+#   idealista.pt / idealista.com       … 物件一覧の自動収集は行わない
+#   591房屋交易 / 信義房屋 / 永慶房屋   … 規約未確認。手動投入で対応
+#
+#   これらの物件を候補にしたい場合は add-manual を使う:
+#     python -m freming.cli add-manual --url "..." --title "..." --price "..."
+# =====================================================================
