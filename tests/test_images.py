@@ -267,3 +267,85 @@ def test_rejected_urls_are_remembered(config, conn, row) -> None:
     ).fetchall()
     assert [r["reason"] for r in skips] == ["too_small"]
     assert skips[0]["source_url"].endswith("tiny.jpg")
+
+
+def test_same_photo_in_different_sizes_is_taken_once() -> None:
+    """同じ写真のサイズ違いを2枚採らないこと。
+
+    WordPress系のサイトでは og:image が原寸、本文中がリサイズ版になり、
+    URL文字列は違うのに同じ写真、ということが起きる。実際に 01.jpg と
+    02.jpg が同じ写真になった。
+    """
+    html = """
+    <html><head>
+      <meta property="og:image" content="/wp-content/uploads/2026/01/hero.jpg">
+    </head><body><article>
+      <img src="/wp-content/uploads/2026/01/hero-1600x1067.jpg">
+      <img src="/wp-content/uploads/2026/01/interior.jpg">
+    </article></body></html>
+    """
+    urls = extract_image_urls(html, "https://www.6sqft.com/post/")
+    assert urls == [
+        "https://www.6sqft.com/wp-content/uploads/2026/01/hero.jpg",
+        "https://www.6sqft.com/wp-content/uploads/2026/01/interior.jpg",
+    ]
+
+
+def test_scaled_and_retina_variants_are_deduped() -> None:
+    """-scaled や @2x も同じ写真の別表現として扱うこと。"""
+    html = """
+    <article>
+      <img src="/uploads/facade.jpg">
+      <img src="/uploads/facade-scaled.jpg">
+      <img src="/uploads/facade@2x.jpg">
+      <img src="/uploads/facade.jpg?v=2">
+    </article>
+    """
+    urls = extract_image_urls(html, "https://example.com/")
+    assert urls == ["https://example.com/uploads/facade.jpg"]
+
+
+def test_numbered_photos_are_not_merged() -> None:
+    """連番の別写真まで同一視しないこと（-1 と -2 は別の写真）。"""
+    html = """
+    <article>
+      <img src="/uploads/room-1.jpg"><img src="/uploads/room-2.jpg">
+    </article>
+    """
+    urls = extract_image_urls(html, "https://example.com/")
+    assert len(urls) == 2
+
+
+def test_clear_images_allows_refetching(config, conn, row) -> None:
+    """抽出ルールを直したあと、取得済みを捨てて取り直せること。"""
+    from freming.db.repository import clear_images
+
+    fetch_images(config, conn, row, client=FakeClient(_pages()))
+    assert conn.execute(
+        "SELECT COUNT(*) AS n FROM images WHERE property_id = ?", (row["id"],)
+    ).fetchone()["n"] == 2
+
+    removed = clear_images(conn, int(row["id"]))
+    assert removed == 2
+    # 弾いたURLの記録も消える（消さないと同じ判定が繰り返される）
+    assert conn.execute(
+        "SELECT COUNT(*) AS n FROM image_skips WHERE property_id = ?", (row["id"],)
+    ).fetchone()["n"] == 0
+
+    second = FakeClient(_pages())
+    stats = fetch_images(config, conn, row, client=second)
+    assert stats.downloaded == 2
+
+
+def test_clear_images_refuses_delivered(config, conn, row) -> None:
+    """納品済みは取り直せない（Drive の中身と食い違うため）。"""
+    from freming.db.repository import clear_images
+
+    fetch_images(config, conn, row, client=FakeClient(_pages()))
+    conn.execute("UPDATE properties SET status = 'delivered' WHERE id = ?", (row["id"],))
+    conn.commit()
+
+    assert clear_images(conn, int(row["id"])) == 0
+    assert conn.execute(
+        "SELECT COUNT(*) AS n FROM images WHERE property_id = ?", (row["id"],)
+    ).fetchone()["n"] == 2

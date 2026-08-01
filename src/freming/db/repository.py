@@ -308,6 +308,24 @@ def approved_rules(conn: sqlite3.Connection) -> list[str]:
     return [row["proposal"] for row in rows if row["proposal"]]
 
 
+def clear_images(conn: sqlite3.Connection, property_id: int) -> int:
+    """取得済み画像の記録を消し、次回の納品で取り直せるようにする。
+
+    抽出ルールを直したあとにやり直すための操作。採用しなかったURLの
+    記録（image_skips）も一緒に消さないと、同じ判定が繰り返される。
+    納品済みは対象外（Drive の中身と食い違うため）。
+    """
+    row = conn.execute(
+        "SELECT status FROM properties WHERE id = ?", (property_id,)
+    ).fetchone()
+    if row is None or row["status"] == "delivered":
+        return 0
+    cursor = conn.execute("DELETE FROM images WHERE property_id = ?", (property_id,))
+    conn.execute("DELETE FROM image_skips WHERE property_id = ?", (property_id,))
+    conn.commit()
+    return cursor.rowcount
+
+
 def delete_properties(
     conn: sqlite3.Connection, *, source: str | None = None, property_id: int | None = None
 ) -> int:

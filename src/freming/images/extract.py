@@ -28,9 +28,33 @@ _EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
 _ARTICLE_SELECTORS = ("article", "main", "[itemprop='articleBody']", ".entry-content")
 
 
+# 同じ写真がURL違いで複数回出てくるパターン。WordPress系のサイトでは
+# アップロード時に複数サイズが生成され、og:image は原寸、本文中は
+# リサイズ版、ということが起きる。URL文字列の一致だけで重複を判定すると
+# 同じ写真を2枚納品してしまう。
+_SIZE_SUFFIX = re.compile(r"-\d{2,5}x\d{2,5}(?=\.[a-z]{3,4}$)", re.IGNORECASE)
+_SCALE_SUFFIX = re.compile(r"[@_-][23]x(?=\.[a-z]{3,4}$)", re.IGNORECASE)
+_WP_SCALED = re.compile(r"-scaled(?=\.[a-z]{3,4}$)", re.IGNORECASE)
+
+
 def _is_image_url(url: str) -> bool:
     path = urlparse(url).path.lower()
     return path.endswith(_EXTENSIONS)
+
+
+def _identity(url: str) -> tuple[str, str]:
+    """同じ写真なら同じ値になるキー。
+
+    サイズ違い（-1600x1067）、倍率違い（@2x）、WordPress の -scaled、
+    クエリ文字列、スキームの差を落とす。これらは同じ写真の別表現なので、
+    どれか1枚だけを採る。
+    """
+    parsed = urlparse(url)
+    path = parsed.path.lower()
+    path = _SIZE_SUFFIX.sub("", path)
+    path = _SCALE_SUFFIX.sub("", path)
+    path = _WP_SCALED.sub("", path)
+    return parsed.netloc.lower(), path
 
 
 def _largest_from_srcset(srcset: str, base_url: str) -> str | None:
@@ -74,16 +98,18 @@ def extract_image_urls(html: str, base_url: str, limit: int = 30) -> list[str]:
     scope = scope or soup
 
     urls: list[str] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, str]] = set()
 
     def _add(candidate: str | None) -> None:
         if not candidate or len(urls) >= limit:
             return
         if _NOISE.search(candidate) or not _is_image_url(candidate):
             return
-        if candidate in seen:
+        # URL文字列ではなく「同じ写真か」で重複を判定する
+        key = _identity(candidate)
+        if key in seen:
             return
-        seen.add(candidate)
+        seen.add(key)
         urls.append(candidate)
 
     # og:image は編集側が「代表」として指定した1枚なので先頭に置く

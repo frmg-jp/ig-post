@@ -39,6 +39,7 @@ python scripts/check_drive.py        # [2] Drive疎通確認（★ここが通�
 | `python -m freming.cli deliver [--limit 5] [--dry-run]` | 承認済みを画像取得→加工→Drive納品（[4][5][6]） |
 | `python -m freming.cli learn` | 非承認理由を分類しルール候補を作る（[7]） |
 | `python -m freming.cli rules list \| approve <タグ> \| dismiss <タグ>` | ルール候補の確認と承認（[7]） |
+| `python -m freming.cli reset-images --id <ID>` | 取得済み画像を捨てて取り直す（抽出ルールを直したとき） |
 | `python -m freming.cli status` | 候補の件数をステータス別に表示 |
 | `python -m freming.collect.editorial --source dezeen` | 同上（モジュール単体実行） |
 | `python -m freming.scoring.runner --limit 20` | 同上（モジュール単体実行） |

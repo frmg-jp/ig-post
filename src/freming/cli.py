@@ -307,6 +307,29 @@ def _cmd_remove(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_reset_images(args: argparse.Namespace) -> int:
+    """取得済み画像を捨てて取り直せるようにする（抽出ルールを直したとき用）。"""
+    import shutil
+    from pathlib import Path
+
+    from freming.db.connection import session
+    from freming.db.repository import clear_images
+
+    cfg = load_config(args.config)
+    setup_logging(cfg.app.log_dir, cfg.app.log_level)
+    with session(cfg.app.db_path) as conn:
+        removed = clear_images(conn, args.id)
+    if removed == 0:
+        print("対象がありません（存在しないIDか、納品済みです）", file=sys.stderr)
+        return 1
+
+    work_dir = Path(cfg.images.work_dir) / f"p{args.id:06d}"
+    if work_dir.exists():
+        shutil.rmtree(work_dir)
+    print(f"property_id={args.id} の画像 {removed} 件を消しました。deliver で取り直せます。")
+    return 0
+
+
 def _cmd_status(args: argparse.Namespace) -> int:
     from freming.db.connection import connect
     from freming.db.repository import count_by_status
@@ -423,6 +446,12 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument("--id", type=int, help="property_id")
     p_remove.set_defaults(func=_cmd_remove)
 
+    p_reset_img = sub.add_parser(
+        "reset-images", help="取得済み画像を捨てて取り直す（抽出ルールを直したとき）"
+    )
+    p_reset_img.add_argument("--id", type=int, required=True, help="property_id")
+    p_reset_img.set_defaults(func=_cmd_reset_images)
+
     p_status = sub.add_parser("status", help="候補の件数をステータス別に表示")
     p_status.set_defaults(func=_cmd_status)
 
@@ -433,7 +462,7 @@ def build_parser() -> argparse.ArgumentParser:
 # 「no such column」で落ち、原因が分かりにくいので手前で止める。
 _NEEDS_MIGRATED_DB = frozenset({
     "collect", "score", "serve", "deliver", "learn", "rules",
-    "ingest-url", "add-manual", "remove", "status",
+    "ingest-url", "add-manual", "remove", "reset-images", "status",
 })
 
 
