@@ -3,7 +3,12 @@
 <div class="card {{ 'no-thumb' if not row['thumbnail_url'] else '' }}" data-id="{{ row['id'] }}">
   {% if row["thumbnail_url"] %}
     <div>
-      <img src="{{ row['thumbnail_url'] }}" alt="" loading="lazy" referrerpolicy="no-referrer">
+      {# 画像そのものが元記事への入口。審査中は写真を見て「もっと見たい」と
+         思った瞬間にクリックするので、タイトルまで視線を戻さずに済む #}
+      <a href="{{ row['source_url'] }}" target="_blank" rel="noopener noreferrer"
+         title="元記事を開く">
+        <img src="{{ row['thumbnail_url'] }}" alt="" loading="lazy" referrerpolicy="no-referrer">
+      </a>
     </div>
   {% endif %}
   <div>

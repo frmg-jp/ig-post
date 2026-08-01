@@ -51,7 +51,11 @@
   }
   .card.no-thumb { grid-template-columns: 1fr; }
   .card.sel { border-color: var(--hi); box-shadow: 0 0 0 2px var(--hi); }
-  .card img { width: 100%; border-radius: 4px; object-fit: cover; aspect-ratio: 1; display: block; }
+  .card img {
+    width: 100%; border-radius: 4px; object-fit: cover; aspect-ratio: 1; display: block;
+    transition: opacity .12s;
+  }
+  .card a:hover img { opacity: .85; }
 
   .head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
   .score { font-size: 22px; font-weight: 700; line-height: 1; letter-spacing: -.01em; }
@@ -162,6 +166,21 @@
   });
 
   cards.forEach((c, n) => c.addEventListener("click", () => { i = n; mark(); }));
+})();
+
+// 画像が読めなかったカードは、空欄を残さず1カラムに畳む。
+// 記事側の画像は消えたりホットリンクを拒否したりする。
+(function () {
+  const collapse = (img) => {
+    const card = img.closest(".card");
+    const holder = img.closest(".card > div");
+    if (holder) holder.remove();
+    if (card) card.classList.add("no-thumb");
+  };
+  document.querySelectorAll(".card img").forEach((img) => {
+    if (img.complete && img.naturalWidth === 0) collapse(img);
+    else img.addEventListener("error", () => collapse(img));
+  });
 })();
 </script>
 </body>

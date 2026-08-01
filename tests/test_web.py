@@ -356,3 +356,16 @@ def test_breakdown_is_collapsed(client, conn) -> None:
 def test_undelivered_card_has_no_drive_link(client, conn) -> None:
     _add(conn)
     assert "drive.google.com" not in client.get("/").text
+
+
+def test_thumbnail_links_to_the_article(client, conn) -> None:
+    """サムネイルから元記事を開けること。"""
+    _add(conn, thumbnail_url="https://example.com/photos/hero.jpg")
+
+    body = client.get("/").text
+    # 画像が元記事へのリンクで包まれている
+    assert '<a href="https://example.com/loft/' in body
+    assert 'src="https://example.com/photos/hero.jpg"' in body
+    assert body.index('href="https://example.com/loft/') < body.index(
+        'src="https://example.com/photos/hero.jpg"'
+    )
