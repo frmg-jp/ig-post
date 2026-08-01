@@ -73,14 +73,16 @@ def next_folder_name(conn: sqlite3.Connection, config: Config) -> str:
     return f"{config.drive.folder_prefix}{last + 1:0{config.drive.sequence_digits}d}"
 
 
-def build_meta(row: sqlite3.Row, image_count: int) -> str:
+def build_meta(row: sqlite3.Row, image_count: int, series_label: str | None = None) -> str:
     """納品フォルダに同梱するテキスト。投稿時の下書きに使う。
 
     出典URLは必ず入れる。あとから素材の出どころを辿れないと使えない。
+    series は審査UIで人が付けた連載企画のラベル。
     """
     lines = [
         f"title: {row['title'] or ''}",
         f"summary: {row['summary'] or ''}",
+        f"series: {series_label or ''}",
         f"genre: {row['genre'] or ''}",
         f"location: {', '.join(x for x in (row['location_city'], row['location_country']) if x)}",
         f"architect: {row['architect'] or ''}",
@@ -136,7 +138,9 @@ def deliver_property(
     for path in processed.outputs:
         drive.upload_file(path, path.name, folder_id, mime_type="image/jpeg")
     drive.upload_bytes(
-        build_meta(row, len(processed.outputs)).encode("utf-8"),
+        build_meta(
+            row, len(processed.outputs), config.series_label(row["series"])
+        ).encode("utf-8"),
         config.drive.meta_filename,
         folder_id,
         mime_type="text/plain",

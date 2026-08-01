@@ -1,6 +1,17 @@
 {% extends "base.html" %}
 {% block body %}
 
+{% if series_options %}
+  <p class="subnav">
+    企画:
+    <a href="/?status={{ status }}" class="{{ '' if series else 'on' }}">すべて</a>
+    {% for s in series_options %}
+      <a href="/?status={{ status }}&series={{ s.key }}"
+         class="{{ 'on' if series == s.key else '' }}">{{ s.label }}</a>
+    {% endfor %}
+  </p>
+{% endif %}
+
 {% if not rows %}
   <p class="empty">
     表示できる候補がありません。<br>

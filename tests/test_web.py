@@ -230,3 +230,66 @@ def test_dismissing_a_rule_keeps_it_out_of_the_prompt(client, conn) -> None:
 
     client.post("/rules/area_mismatch/dismiss")
     assert approved_rules(conn) == []
+
+
+def test_series_is_applied_by_a_human(client, conn) -> None:
+    """連載企画は審査UIで人が付けること（スコアリングでは決めない）。"""
+    property_id = _add(conn)
+
+    body = client.get("/").text
+    assert "FREMING Pick" in body          # 選択肢が出ている
+
+    client.post(f"/p/{property_id}/series", data={"series": "freming_pick"})
+    row = conn.execute(
+        "SELECT series FROM properties WHERE id = ?", (property_id,)
+    ).fetchone()
+    assert row["series"] == "freming_pick"
+
+
+def test_series_can_be_cleared(client, conn) -> None:
+    property_id = _add(conn)
+    client.post(f"/p/{property_id}/series", data={"series": "hidden_gem"})
+    client.post(f"/p/{property_id}/series", data={"series": ""})
+
+    row = conn.execute(
+        "SELECT series FROM properties WHERE id = ?", (property_id,)
+    ).fetchone()
+    assert row["series"] is None
+
+
+def test_unknown_series_key_is_rejected(client, conn) -> None:
+    """config.yaml に無い企画キーは保存しない。"""
+    property_id = _add(conn)
+    client.post(f"/p/{property_id}/series", data={"series": "made_up_series"})
+
+    row = conn.execute(
+        "SELECT series FROM properties WHERE id = ?", (property_id,)
+    ).fetchone()
+    assert row["series"] is None
+
+
+def test_delivered_series_cannot_be_changed(client, conn) -> None:
+    """納品済みのラベルは変えない（meta.txt と食い違うため）。"""
+    property_id = _add(conn)
+    conn.execute(
+        "UPDATE properties SET status = 'delivered', series = 'hidden_gem' WHERE id = ?",
+        (property_id,),
+    )
+    conn.commit()
+
+    client.post(f"/p/{property_id}/series", data={"series": "freming_pick"})
+    row = conn.execute(
+        "SELECT series FROM properties WHERE id = ?", (property_id,)
+    ).fetchone()
+    assert row["series"] == "hidden_gem"
+
+
+def test_list_can_filter_by_series(client, conn) -> None:
+    picked = _add(conn, url="https://example.com/a/", title="Picked loft")
+    other = _add(conn, url="https://example.com/b/", title="Other loft")
+    client.post(f"/p/{picked}/series", data={"series": "freming_pick"})
+
+    body = client.get("/?status=pending&series=freming_pick").text
+    assert "Picked loft" in body
+    assert "Other loft" not in body
+    assert other  # 未使用変数の警告避け

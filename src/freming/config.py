@@ -138,6 +138,17 @@ class FocusArea(BaseModel):
     districts: list[str] = Field(default_factory=list)
 
 
+class SeriesLabel(BaseModel):
+    """連載企画のラベル。
+
+    key はDBに保存される値なので変更しない（既存の行が孤立する）。
+    label は表示名なので自由に変えてよい。
+    """
+
+    key: str
+    label: str
+
+
 class GenresConfig(BaseModel):
     priority: list[str] = Field(default_factory=list)
     keywords: dict[str, list[str]] = Field(default_factory=dict)
@@ -279,6 +290,7 @@ class Config(BaseModel):
     listing_sources: list[ListingSource] = Field(default_factory=list)
     for_sale_signals: ForSaleSignals = Field(default_factory=ForSaleSignals)
     focus_areas: list[FocusArea] = Field(default_factory=list)
+    series: list[SeriesLabel] = Field(default_factory=list)
     genres: GenresConfig = Field(default_factory=GenresConfig)
     scoring: ScoringConfig
     review_ui: ReviewUIConfig = Field(default_factory=ReviewUIConfig)
@@ -302,6 +314,20 @@ class Config(BaseModel):
 
     def listing_source(self, key: str) -> ListingSource | None:
         return next((s for s in self.listing_sources if s.key == key), None)
+
+    def series_label(self, key: str | None) -> str | None:
+        """保存されている key から表示名を引く。未知の key は key のまま返す。
+
+        config.yaml から企画を消しても、その企画で納品済みの行が
+        表示できなくなることはない。
+        """
+        if not key:
+            return None
+        found = next((s.label for s in self.series if s.key == key), None)
+        return found or key
+
+    def is_known_series(self, key: str) -> bool:
+        return any(s.key == key for s in self.series)
 
     def source_rank(self, source_key: str) -> str | None:
         src = self.editorial_source(source_key) or self.listing_source(source_key)

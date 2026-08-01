@@ -30,6 +30,7 @@ from freming.db.repository import (
     list_rule_candidates,
     reject_property,
     reset_review,
+    set_series,
 )
 from freming.logging_setup import get_logger, setup_logging
 
@@ -71,14 +72,19 @@ def create_app(config: Config | None = None) -> FastAPI:
         return connect(config.app.db_path)
 
     @app.get("/", response_class=HTMLResponse)
-    def index(request: Request, status: str | None = None, page: int = 1):
+    def index(
+        request: Request,
+        status: str | None = None,
+        page: int = 1,
+        series: str | None = None,
+    ):
         status = status or config.review_ui.default_filter
         page = max(page, 1)
         size = config.review_ui.page_size
         conn = _conn()
         try:
             rows = list_properties(
-                conn, status=status, limit=size, offset=(page - 1) * size
+                conn, status=status, limit=size, offset=(page - 1) * size, series=series
             )
             counts = count_by_status(conn)
         finally:
@@ -93,6 +99,8 @@ def create_app(config: Config | None = None) -> FastAPI:
                 "page": page,
                 "has_next": len(rows) == size,
                 "presets": REJECT_PRESETS,
+                "series_options": config.series,
+                "series": series,
                 "highlight": config.scoring.thresholds.highlight_above,
                 "thumb_px": config.review_ui.thumbnail_max_px,
             },
@@ -110,7 +118,7 @@ def create_app(config: Config | None = None) -> FastAPI:
         return templates.TemplateResponse(
             request,
             "detail.html",
-            {"row": row, "presets": REJECT_PRESETS},
+            {"row": row, "presets": REJECT_PRESETS, "series_options": config.series},
         )
 
     @app.post("/p/{property_id}/approve")
@@ -140,6 +148,22 @@ def create_app(config: Config | None = None) -> FastAPI:
         conn = _conn()
         try:
             reject_property(conn, property_id, text)
+        finally:
+            conn.close()
+        return RedirectResponse(f"/?status={status}", status_code=303)
+
+    @app.post("/p/{property_id}/series")
+    def assign_series(
+        property_id: int, series: str = Form(""), status: str = Form("pending")
+    ):
+        """連載企画のラベルを付ける。判定はせず、人が選んだものをそのまま保存する。"""
+        key = series.strip()
+        if key and not config.is_known_series(key):
+            log.warning("config.yaml に無い企画キーです: %s", key)
+            return RedirectResponse(f"/?status={status}", status_code=303)
+        conn = _conn()
+        try:
+            set_series(conn, property_id, key or None)
         finally:
             conn.close()
         return RedirectResponse(f"/?status={status}", status_code=303)

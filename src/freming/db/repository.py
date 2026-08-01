@@ -131,6 +131,7 @@ def list_properties(
     limit: int = 50,
     offset: int = 0,
     min_score: float | None = None,
+    series: str | None = None,
 ) -> list[sqlite3.Row]:
     """審査UI用の一覧。未採点（score IS NULL）は末尾に回す。
 
@@ -145,6 +146,9 @@ def list_properties(
     if min_score is not None:
         sql += " AND score >= ?"
         params.append(min_score)
+    if series:
+        sql += " AND series = ?"
+        params.append(series)
     sql += " ORDER BY score IS NULL, score DESC, id DESC LIMIT ? OFFSET ?"
     params += [limit, offset]
     return conn.execute(sql, params).fetchall()
@@ -187,6 +191,20 @@ def reject_property(conn: sqlite3.Connection, property_id: int, reason: str) -> 
     )
     conn.commit()
     return True
+
+
+def set_series(conn: sqlite3.Connection, property_id: int, series: str | None) -> bool:
+    """連載企画のラベルを付け外しする。None / 空文字で解除。
+
+    納品済みは触らない。meta.txt は納品時に書き出しているので、あとから
+    ラベルだけ変えると Drive の内容と食い違う。
+    """
+    cursor = conn.execute(
+        "UPDATE properties SET series = ? WHERE id = ? AND status != 'delivered'",
+        (series or None, property_id),
+    )
+    conn.commit()
+    return cursor.rowcount > 0
 
 
 def reset_review(conn: sqlite3.Connection, property_id: int) -> bool:

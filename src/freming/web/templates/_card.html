@@ -17,6 +17,11 @@
     </div>
 
     <div>
+      {% if row["series"] %}
+        <span class="tag series">
+          {{ (series_options | selectattr("key", "equalto", row["series"]) | map(attribute="label") | first) or row["series"] }}
+        </span>
+      {% endif %}
       {% if row["provenance_visible"] %}<span class="tag on">前歴あり</span>{% endif %}
       {% if row["genre"] %}<span class="tag">{{ row["genre"] }}</span>{% endif %}
       {% if row["location_city"] or row["location_country"] %}
@@ -39,6 +44,20 @@
 
     {% if row["reject_reason"] %}
       <div class="meta reason">非承認理由: {{ row["reject_reason"] }}</div>
+    {% endif %}
+
+    {% if row["status"] != "delivered" and series_options %}
+      {# 連載企画は編集判断なので、スコアリングでは決めずここで人が選ぶ #}
+      <form class="actions" method="post" action="/p/{{ row['id'] }}/series">
+        <input type="hidden" name="status" value="{{ status }}">
+        <select name="series" onchange="this.form.submit()">
+          <option value="">企画なし</option>
+          {% for s in series_options %}
+            <option value="{{ s.key }}" {{ 'selected' if row["series"] == s.key }}>{{ s.label }}</option>
+          {% endfor %}
+        </select>
+        <noscript><button type="submit">企画を設定</button></noscript>
+      </form>
     {% endif %}
 
     {% if row["status"] == "delivered" %}

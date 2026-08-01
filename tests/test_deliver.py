@@ -236,3 +236,22 @@ def test_meta_includes_source_url(config, conn) -> None:
     assert f"source_url: {ARTICLE_URL}" in meta
     assert "images: 10" in meta
     assert "1868年の倉庫を住居に" in meta
+
+
+def test_meta_includes_series_label(config, conn) -> None:
+    """meta.txt には key ではなく表示名を書く（人が読むため）。"""
+    property_id = _approved(conn)
+    conn.execute(
+        "UPDATE properties SET series = 'freming_pick' WHERE id = ?", (property_id,)
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM properties WHERE id = ?", (property_id,)).fetchone()
+
+    meta = build_meta(row, 10, config.series_label(row["series"]))
+    assert "series: FREMING Pick" in meta
+
+
+def test_meta_without_series_is_blank(config, conn) -> None:
+    property_id = _approved(conn)
+    row = conn.execute("SELECT * FROM properties WHERE id = ?", (property_id,)).fetchone()
+    assert "series: \n" in build_meta(row, 10, config.series_label(row["series"]))

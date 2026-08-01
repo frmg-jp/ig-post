@@ -237,6 +237,20 @@ focus_areas:
   - { country: "Spain" }
   - { country: "Taiwan" }
 
+# ---------------------------------------------------------------------
+# 連載企画のラベル
+#   どの企画に載せるかは編集判断であり、記事本文から機械的には決まらない。
+#   スコアリングでは判定せず、審査UIで人が付ける。
+#   key はDBに保存される値なので変更しない。label は表示名なので変更可。
+# ---------------------------------------------------------------------
+series:
+  - { key: freming_pick,          label: "FREMING Pick" }
+  - { key: hidden_gem,            label: "Hidden Gem" }
+  - { key: penthouse_of_the_week, label: "Penthouse of the Week" }
+  - { key: adaptive_reuse,        label: "Adaptive Reuse" }
+  - { key: warehouse_loft,        label: "Warehouse Loft" }
+  - { key: architects_house,      label: "Architect's House" }
+
 # 承認済み8物件の分析（docs/approval-criteria.md）に基づくキーワード。
 # 「前歴が目に見える形で残っている」ことが最も強い共通項だったため、
 # ゴーストサイン・用途固有の部材・露出構造を示す語を厚くしている。
