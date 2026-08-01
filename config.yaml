@@ -188,9 +188,9 @@ genres:
 # スコアリング（Claude API）
 # ---------------------------------------------------------------------
 scoring:
-  model: "claude-sonnet-4-6"   # 上位に切替可: claude-sonnet-5 / claude-opus-5
+  model: "claude-sonnet-5"     # 上位に切替可: claude-opus-5
   max_tokens: 2000
-  effort: medium               # low | medium | high | max
+  effort: medium               # low | medium | high | xhigh | max
   summary_max_chars: 80
   score_scale: 100             # 0-100
   weights:                     # 合計 1.0

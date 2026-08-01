@@ -144,9 +144,9 @@ class FeedbackConfig(BaseModel):
 
 
 class ScoringConfig(BaseModel):
-    model: str = "claude-sonnet-4-6"
+    model: str = "claude-sonnet-5"
     max_tokens: int = 2000
-    effort: Literal["low", "medium", "high", "max"] = "medium"
+    effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
     summary_max_chars: int = 80
     score_scale: int = 100
     weights: ScoringWeights
