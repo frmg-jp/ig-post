@@ -34,6 +34,28 @@ python scripts/check_drive.py        # [2] Drive疎通確認（★ここが通�
 
 設定値はすべて `config.yaml`。秘匿値のみ `.env`。
 
+## サービスアカウント鍵の用意
+
+1. [Google Cloud Console](https://console.cloud.google.com/) で「APIとサービス」→「ライブラリ」
+   から **Google Drive API** を有効化
+2. 「認証情報」→「認証情報を作成」→「サービスアカウント」で作成（ロールの割り当ては不要。
+   Drive の権限は Drive 側の共有設定で決まる）
+3. 作成したサービスアカウント →「鍵」タブ →「鍵を追加」→「新しい鍵を作成」→ **JSON**
+   （ダウンロードは1回限り）
+4. ダウンロードした JSON を `credentials/service-account.json` にリネームして配置
+
+   ```bash
+   mv ~/Downloads/<プロジェクト名>-xxxxxxx.json credentials/service-account.json
+   python -c "import json; print(json.load(open('credentials/service-account.json'))['client_email'])"
+   ```
+
+5. **納品先の共有ドライブに、上で表示されたメールアドレスをメンバー追加し、役割を
+   「コンテンツ管理者」以上にする**（これを忘れるとフォルダは作れても画像が入らない）
+6. `python scripts/check_drive.py` で検証
+
+> 鍵はパスワードと同等です。`.gitignore` 済みですがコミット・共有しないでください。
+> 漏洩時は Cloud Console の「鍵」タブから削除して作り直せます。
+
 ## Drive 納品の設定（重要）
 
 `scripts/check_drive.py` は次を順に実行します。
