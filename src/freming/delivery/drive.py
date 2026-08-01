@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import random
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -103,22 +104,24 @@ def _classify(exc: HttpError, context: str) -> DriveError:
 class DriveClient:
     """Drive v3 の薄いラッパ。"""
 
-    def __init__(self, config: DriveConfig) -> None:
+    def __init__(self, config: DriveConfig, open_browser: bool = True) -> None:
         self.config = config
-        self._credentials = self._load_credentials(config)
+        self._credentials = self._load_credentials(config, open_browser=open_browser)
         self.service = build("drive", "v3", credentials=self._credentials, cache_discovery=False)
 
     # ------------------------------------------------------------------
     # 初期化
     # ------------------------------------------------------------------
     @classmethod
-    def _load_credentials(cls, config: DriveConfig) -> Credentials:
+    def _load_credentials(cls, config: DriveConfig, open_browser: bool = True) -> Credentials:
         mode = config.auth_mode
         log.info("Drive 認証モード: %s", mode)
         if mode == "service_account":
             return cls._load_service_account(config.credentials_path)
         if mode == "oauth":
-            return cls._load_oauth(config.oauth_client_secret_path, config.oauth_token_path)
+            return cls._load_oauth(
+                config.oauth_client_secret_path, config.oauth_token_path, open_browser
+            )
         return cls._load_adc()
 
     @staticmethod
@@ -136,7 +139,9 @@ class DriveClient:
             raise DriveAuthError(f"サービスアカウント鍵が不正です: {path} ({exc})") from exc
 
     @staticmethod
-    def _load_oauth(client_secret_path: Path, token_path: Path) -> Credentials:
+    def _load_oauth(
+        client_secret_path: Path, token_path: Path, open_browser: bool = True
+    ) -> Credentials:
         """OAuthクライアントで人のアカウントとして認証する。
 
         初回のみブラウザで同意画面が開き、以降は token_path のリフレッシュ
@@ -176,9 +181,46 @@ class DriveClient:
                 "google-auth-oauthlib が未インストールです: pip install -e ."
             ) from exc
 
-        log.info("ブラウザで Google の同意画面を開きます（初回のみ）")
         flow = InstalledAppFlow.from_client_secrets_file(str(client_secret_path), SCOPES)
-        creds = flow.run_local_server(port=0)
+
+        if open_browser and not _browser_available():
+            log.warning("この環境では既定のブラウザを開けません。URLを表示します。")
+            open_browser = False
+
+        prompt = (
+            "\n"
+            + "=" * 68
+            + "\n Google の同意画面を開いてください（初回のみ）\n"
+            + "=" * 68
+            + "\n\n    {url}\n\n"
+            + ("  ブラウザが自動で開かない場合は、上のURLをコピーして開いてください。\n"
+               if open_browser
+               else "  上のURLを、このマシンのブラウザで開いてください。\n"
+                    "  リモートサーバーで実行している場合は、手元のPCから\n"
+                    "    ssh -L {port}:localhost:{port} <ユーザ>@<サーバ>\n"
+                    "  のようにポート転送してから開いてください。\n")
+            + "=" * 68
+            + "\n"
+        )
+
+        # ポートを固定しておくと、リモート実行時のポート転送を案内できる
+        port = 8765
+        log.info("認証待ち受けポート: %d", port)
+        try:
+            creds = flow.run_local_server(
+                port=port,
+                open_browser=open_browser,
+                authorization_prompt_message=prompt.replace("{port}", str(port)),
+                success_message=(
+                    "認証が完了しました。このタブを閉じてターミナルに戻ってください。"
+                ),
+            )
+        except OSError as exc:
+            raise DriveAuthError(
+                f"認証用のポート {port} を使用できませんでした（{exc}）。"
+                "他のプロセスが使用していないか確認してください。"
+            ) from exc
+
         _save_token(creds, token_path)
         return creds
 
@@ -371,6 +413,25 @@ class DriveClient:
             f"削除({file_id})",
         )
         log.info("削除しました: id=%s", file_id)
+
+
+def _browser_available() -> bool:
+    """既定のブラウザを起動できる環境か判定する。
+
+    SSH接続先やコンテナなど GUI のない環境では False。
+    """
+    import os
+    import webbrowser
+
+    if os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"):
+        return False
+    if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
+        return False
+    try:
+        webbrowser.get()
+        return True
+    except webbrowser.Error:
+        return False
 
 
 def _save_token(creds: UserCredentials, token_path: Path) -> None:

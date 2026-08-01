@@ -29,6 +29,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--no-cleanup", action="store_true", help="作成したテスト用ファイルを削除しない"
     )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="ブラウザを自動で開かず、認証URLを表示するだけにする",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -45,7 +50,9 @@ def main(argv: list[str] | None = None) -> int:
         print("drive.enabled が false のため確認をスキップしました。", file=sys.stderr)
         return 2
 
-    report = run_preflight(cfg.drive, cleanup=not args.no_cleanup)
+    report = run_preflight(
+        cfg.drive, cleanup=not args.no_cleanup, open_browser=not args.no_browser
+    )
     print(format_report(report))
     log.info("Drive 疎通確認の結果: %s", "OK" if report.ok else "NG")
     return 0 if report.ok else 1

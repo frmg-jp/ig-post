@@ -24,7 +24,9 @@ def _cmd_check_drive(args: argparse.Namespace) -> int:
     if not cfg.drive.enabled:
         print("drive.enabled が false です。", file=sys.stderr)
         return 2
-    report = run_preflight(cfg.drive, cleanup=not args.no_cleanup)
+    report = run_preflight(
+        cfg.drive, cleanup=not args.no_cleanup, open_browser=not args.no_browser
+    )
     print(format_report(report))
     return 0 if report.ok else 1
 
@@ -51,6 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_drive = sub.add_parser("check-drive", help="Drive 疎通確認")
     p_drive.add_argument("--no-cleanup", action="store_true")
+    p_drive.add_argument("--no-browser", action="store_true")
     p_drive.set_defaults(func=_cmd_check_drive)
 
     p_db = sub.add_parser("db", help="DB操作")

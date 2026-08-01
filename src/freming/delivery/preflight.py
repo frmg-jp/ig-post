@@ -69,13 +69,15 @@ def _make_test_jpeg() -> bytes:
     return buf.getvalue()
 
 
-def run_preflight(config: DriveConfig, cleanup: bool = True) -> PreflightReport:
+def run_preflight(
+    config: DriveConfig, cleanup: bool = True, open_browser: bool = True
+) -> PreflightReport:
     """Drive への書き込みを実際に試して結果を返す。"""
     report = PreflightReport()
 
     # 1. 認証 -----------------------------------------------------------
     try:
-        client = DriveClient(config)
+        client = DriveClient(config, open_browser=open_browser)
     except DriveError as exc:
         report.add(Check(f"認証（{config.auth_mode}）", False, str(exc),
                          "config.yaml の drive.auth_mode と認証情報の配置を確認してください"))
