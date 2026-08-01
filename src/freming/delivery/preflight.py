@@ -129,7 +129,20 @@ def run_preflight(config: DriveConfig, cleanup: bool = True) -> PreflightReport:
                 "共有してください"),
     ))
 
-    if not drive_id:
+    if drive_id:
+        report.add(Check(
+            "共有ドライブ配下かどうか", True,
+            f"共有ドライブ配下です（driveId={drive_id}）。保存容量はドライブ側が持つため、"
+            "サービスアカウントの容量制限を受けません。",
+        ))
+        if config.shared_drive_id != drive_id:
+            report.add(Check(
+                "config.yaml の shared_drive_id", False,
+                f"設定値 {config.shared_drive_id!r} が実際の driveId と一致しません。",
+                remedy=f'config.yaml の drive.shared_drive_id を "{drive_id}" に設定してください',
+                fatal=False,
+            ))
+    else:
         report.add(Check(
             "共有ドライブ配下かどうか", False,
             "納品先が個人のマイドライブ配下です。",

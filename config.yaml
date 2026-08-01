@@ -248,8 +248,8 @@ process:
 drive:
   enabled: true
   credentials_path: "credentials/service-account.json"
-  parent_folder_id: "1O30wu9cTz2mSXcWXQ8vvCbRo4HgH0W5z"   # ig-post
-  shared_drive_id: null
+  parent_folder_id: "1HrlJ9QFGlTEVl8M-HY8nxGTu3DvkCNV3"   # ig-post（共有ドライブ配下）
+  shared_drive_id: null    # check_drive.py が検出した driveId をここに設定する
   folder_prefix: "frmg_ig"
   sequence_digits: 3
   meta_filename: "meta.txt"
