@@ -12,6 +12,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
+from urllib.parse import urlparse
 
 from freming.config import Config
 from freming.images.extract import extract_image_urls
@@ -50,6 +51,20 @@ class FetchStats:
             f"候補URL {self.found_urls} → 採用 {self.downloaded} 枚"
             f"（小さすぎ {self.too_small} / 形式外 {self.wrong_type} / 失敗 {self.failed}）"
         )
+
+
+_SAFE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp"})
+
+
+def _suffix_of(url: str) -> str:
+    """保存するファイルの拡張子。クエリ文字列を含めない。
+
+    CDN配信のURLは `photo.jpg?w=2000&format=webp` のようにクエリが付く。
+    URL全体から拡張子を取ると `.jpg?w=2000&format=webp` がそのまま
+    ファイル名になり、扱いにくいうえ環境によっては保存できない。
+    """
+    suffix = Path(urlparse(url).path).suffix.lower()
+    return suffix if suffix in _SAFE_SUFFIXES else ".jpg"
 
 
 def _probe(data: bytes) -> tuple[int, int] | None:
@@ -162,8 +177,7 @@ def fetch_images(
                 continue
 
             position += 1
-            suffix = Path(url).suffix.lower() or ".jpg"
-            path = work_dir / f"{position:02d}{suffix}"
+            path = work_dir / f"{position:02d}{_suffix_of(url)}"
             path.write_bytes(response.content)
 
             conn.execute(

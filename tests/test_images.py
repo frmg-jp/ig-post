@@ -349,3 +349,36 @@ def test_clear_images_refuses_delivered(config, conn, row) -> None:
     assert conn.execute(
         "SELECT COUNT(*) AS n FROM images WHERE property_id = ?", (row["id"],)
     ).fetchone()["n"] == 2
+
+
+def test_saved_filename_ignores_query_string() -> None:
+    """CDN配信のクエリ付きURLでも、まともなファイル名で保存すること。
+
+    6sqft は photo.jpg?w=2000&format=webp の形で配信する。URL全体から
+    拡張子を取ると .jpg?w=2000&format=webp がファイル名になっていた。
+    """
+    from freming.images.fetch import _suffix_of
+
+    assert _suffix_of("https://x.com/a/photo.jpg?w=2000&format=webp") == ".jpg"
+    assert _suffix_of("https://x.com/a/photo.PNG") == ".png"
+    assert _suffix_of("https://x.com/a/photo.webp?v=1") == ".webp"
+    # 想定外の拡張子は .jpg に寄せる（中身はどのみち再エンコードする）
+    assert _suffix_of("https://x.com/a/photo") == ".jpg"
+    assert _suffix_of("https://x.com/a/photo.php?id=3") == ".jpg"
+
+
+def test_downloaded_files_have_clean_names(config, conn, row) -> None:
+    pages = {
+        ARTICLE_URL: _Response(
+            '<article><img src="/photos/a.jpg?w=2000&format=webp"></article>', "text/html"
+        ),
+        "https://example.com/photos/a.jpg?w=2000&format=webp": _Response(
+            _png(1600, 1200), "image/jpeg"
+        ),
+    }
+    fetch_images(config, conn, row, client=FakeClient(pages))
+
+    saved = conn.execute(
+        "SELECT local_path FROM images WHERE property_id = ?", (row["id"],)
+    ).fetchone()
+    assert Path(saved["local_path"]).name == "01.jpg"
