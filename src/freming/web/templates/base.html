@@ -80,6 +80,7 @@
         {{ label }}{% if counts and counts.get(key) %} {{ counts.get(key) }}{% endif %}
       </a>
     {% endfor %}
+    <a href="/rules" class="{{ 'on' if status == 'rules' else '' }}">ルール候補</a>
   </nav>
 </header>
 <main>{% block body %}{% endblock %}</main>

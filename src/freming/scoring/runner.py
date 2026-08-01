@@ -16,7 +16,12 @@ from dataclasses import dataclass, field
 
 from freming.config import Config, load_config
 from freming.db.connection import connect
-from freming.db.repository import recent_reject_reasons, save_score, unscored_properties
+from freming.db.repository import (
+    approved_rules,
+    recent_reject_reasons,
+    save_score,
+    unscored_properties,
+)
 from freming.logging_setup import get_logger, setup_logging
 from freming.scoring.client import ScoringClient, ScoringError
 from freming.scoring.prompt import build_system_prompt, build_user_prompt
@@ -79,8 +84,12 @@ def score_pending(
 
     if client is None:
         reasons = recent_reject_reasons(conn, config.scoring.feedback.recent_reasons_in_prompt)
-        log.info("直近の不承認理由 %d 件をプロンプトに含めます", len(reasons))
-        client = ScoringClient(config, build_system_prompt(config, reasons))
+        rules = approved_rules(conn)
+        log.info(
+            "直近の不承認理由 %d 件と、承認済みルール %d 件をプロンプトに含めます",
+            len(reasons), len(rules),
+        )
+        client = ScoringClient(config, build_system_prompt(config, reasons, rules))
 
     thresholds = config.scoring.thresholds
     for row in rows:

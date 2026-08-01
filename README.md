@@ -37,6 +37,8 @@ python scripts/check_drive.py        # [2] Drive疎通確認（★ここが通�
 | `python -m freming.cli score [--limit 20] [--dry-run]` | 未採点の候補をスコアリング（[2]） |
 | `python -m freming.cli serve` | 審査UIを起動（[3]） |
 | `python -m freming.cli deliver [--limit 5] [--dry-run]` | 承認済みを画像取得→加工→Drive納品（[4][5][6]） |
+| `python -m freming.cli learn` | 非承認理由を分類しルール候補を作る（[7]） |
+| `python -m freming.cli rules list \| approve <タグ> \| dismiss <タグ>` | ルール候補の確認と承認（[7]） |
 | `python -m freming.cli status` | 候補の件数をステータス別に表示 |
 | `python -m freming.collect.editorial --source dezeen` | 同上（モジュール単体実行） |
 | `python -m freming.scoring.runner --limit 20` | 同上（モジュール単体実行） |
@@ -124,7 +126,7 @@ gcloud auth application-default login \
 - [x] 4. スコアリング
 - [x] 5. 審査UI
 - [x] 6. 画像取得・加工・納品
-- [ ] 7. 学習ループ
+- [x] 7. 学習ループ
 
 ## スコアリングの仕組み
 
@@ -146,6 +148,22 @@ APIを呼び直さずに再計算できます。
 判定基準は `docs/approval-criteria.md`（承認済み8件の分析）が根拠で、その要点を
 `scoring.approved_examples` と `scoring.approval_notes` からプロンプトに載せています。
 基準を変えるときはコードではなく `config.yaml` を編集してください。
+
+## 学習ループ
+
+```
+不承認（理由必須） → feedback に蓄積 → learn でタグ分類
+    → 同じタグが N 件でルール候補として提示 → 人が承認 → 次回のプロンプトへ
+```
+
+ルールは**自動適用しません**。「3回同じ指摘が出た」ことと「今後それを恒久的に
+除外してよい」ことは別なので、審査UIの「ルール候補」画面か
+`freming rules approve <タグ>` で必ず人の承認を挟みます。却下したタグは
+件数が増えても再提案しません。
+
+タグの語彙は `config.yaml` の `scoring.feedback.tags`。表記のゆれを吸収して
+集計するための固定語彙で、どれにも当てはまらない理由は `other` に寄せます
+（`other` はまとめてルール化しません）。
 
 ## アクセスポリシー
 

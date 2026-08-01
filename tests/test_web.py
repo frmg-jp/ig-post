@@ -198,3 +198,35 @@ def test_broken_score_detail_does_not_break_the_page(client, conn) -> None:
     )
     conn.commit()
     assert client.get("/").status_code == 200
+
+
+def test_rules_page_needs_explicit_approval(client, conn) -> None:
+    """ルール候補は画面で承認するまで適用されないこと。"""
+    from freming.db.repository import approved_rules
+
+    conn.execute(
+        "INSERT INTO rule_candidates (reason_tag, hit_count, proposal, state, created_at) "
+        "VALUES ('no_visible_provenance', 4, '痕跡が残っていない物件は対象外とする', "
+        "'proposed', datetime('now'))"
+    )
+    conn.commit()
+
+    body = client.get("/rules").text
+    assert "痕跡が残っていない物件は対象外とする" in body
+    assert approved_rules(conn) == []
+
+    client.post("/rules/no_visible_provenance/approve")
+    assert approved_rules(conn) == ["痕跡が残っていない物件は対象外とする"]
+
+
+def test_dismissing_a_rule_keeps_it_out_of_the_prompt(client, conn) -> None:
+    from freming.db.repository import approved_rules
+
+    conn.execute(
+        "INSERT INTO rule_candidates (reason_tag, hit_count, proposal, state, created_at) "
+        "VALUES ('area_mismatch', 5, 'エリア外は対象外とする', 'proposed', datetime('now'))"
+    )
+    conn.commit()
+
+    client.post("/rules/area_mismatch/dismiss")
+    assert approved_rules(conn) == []

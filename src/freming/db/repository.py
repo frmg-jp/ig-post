@@ -203,6 +203,93 @@ def reset_review(conn: sqlite3.Connection, property_id: int) -> bool:
     return cursor.rowcount > 0
 
 
+def untagged_feedback(conn: sqlite3.Connection, limit: int = 10) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT id, reason FROM feedback WHERE reason_tag IS NULL ORDER BY id LIMIT ?",
+        (limit,),
+    ).fetchall()
+
+
+def set_feedback_tag(conn: sqlite3.Connection, feedback_id: int, tag: str) -> None:
+    conn.execute("UPDATE feedback SET reason_tag = ? WHERE id = ?", (tag, feedback_id))
+
+
+def tag_counts(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """タグ別の件数（多い順）。ルール候補を出すかどうかの判断に使う。"""
+    return conn.execute(
+        "SELECT reason_tag, COUNT(*) AS hits FROM feedback "
+        "WHERE reason_tag IS NOT NULL AND reason_tag != 'other' "
+        "GROUP BY reason_tag ORDER BY hits DESC"
+    ).fetchall()
+
+
+def reasons_for_tag(conn: sqlite3.Connection, tag: str, limit: int = 10) -> list[str]:
+    rows = conn.execute(
+        "SELECT reason FROM feedback WHERE reason_tag = ? ORDER BY id DESC LIMIT ?",
+        (tag, limit),
+    ).fetchall()
+    return [row["reason"] for row in rows]
+
+
+def upsert_rule_candidate(
+    conn: sqlite3.Connection, tag: str, hits: int, proposal: str
+) -> bool:
+    """ルール候補を登録・更新する。新規に提案したときだけ True。
+
+    一度 dismissed にした候補は、件数が増えても提案し直さない。
+    人が「これはルールにしない」と決めたものを蒸し返さないため。
+    """
+    existing = conn.execute(
+        "SELECT state FROM rule_candidates WHERE reason_tag = ?", (tag,)
+    ).fetchone()
+    if existing is None:
+        conn.execute(
+            "INSERT INTO rule_candidates (reason_tag, hit_count, proposal, state, created_at) "
+            "VALUES (?, ?, ?, 'proposed', ?)",
+            (tag, hits, proposal, _now()),
+        )
+        conn.commit()
+        return True
+    conn.execute(
+        "UPDATE rule_candidates SET hit_count = ? WHERE reason_tag = ?", (hits, tag)
+    )
+    conn.commit()
+    return False
+
+
+def list_rule_candidates(
+    conn: sqlite3.Connection, state: str | None = None
+) -> list[sqlite3.Row]:
+    if state is None:
+        return conn.execute(
+            "SELECT * FROM rule_candidates ORDER BY state, hit_count DESC"
+        ).fetchall()
+    return conn.execute(
+        "SELECT * FROM rule_candidates WHERE state = ? ORDER BY hit_count DESC", (state,)
+    ).fetchall()
+
+
+def decide_rule_candidate(conn: sqlite3.Connection, tag: str, state: str) -> bool:
+    """ルール候補を承認 / 却下する。自動適用はしない。"""
+    if state not in ("approved", "dismissed"):
+        raise ValueError("state は approved か dismissed のいずれか")
+    cursor = conn.execute(
+        "UPDATE rule_candidates SET state = ?, decided_at = ? WHERE reason_tag = ?",
+        (state, _now(), tag),
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def approved_rules(conn: sqlite3.Connection) -> list[str]:
+    """人が承認した除外ルール。スコアリングのプロンプトに載せる。"""
+    rows = conn.execute(
+        "SELECT proposal FROM rule_candidates WHERE state = 'approved' "
+        "ORDER BY hit_count DESC"
+    ).fetchall()
+    return [row["proposal"] for row in rows if row["proposal"]]
+
+
 def delete_properties(
     conn: sqlite3.Connection, *, source: str | None = None, property_id: int | None = None
 ) -> int:

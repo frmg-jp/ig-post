@@ -172,6 +172,18 @@ class FeedbackConfig(BaseModel):
     recent_reasons_in_prompt: int = 30
     tagging_batch_size: int = 10
     rule_candidate_min_hits: int = 3
+    # 非承認理由の分類先。表記のゆれを吸収して集計するための固定語彙。
+    tags: list[str] = Field(default_factory=lambda: ["other"])
+
+    @field_validator("tags")
+    @classmethod
+    def _must_have_other(cls, v: list[str]) -> list[str]:
+        if "other" not in v:
+            raise ValueError(
+                "scoring.feedback.tags には other を含めること"
+                "（どのタグにも当てはまらない理由の受け皿が必要）"
+            )
+        return v
 
 
 class ScoringConfig(BaseModel):

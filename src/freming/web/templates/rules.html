@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block body %}
+
+<h2>除外ルールの候補</h2>
+<p class="note">
+  同じ理由での不承認が繰り返されると、ここに候補として提示されます。
+  <strong>承認するまでスコアリングには一切影響しません。</strong>
+  承認したルールは次回以降のスコアリングのプロンプトに載ります。
+</p>
+
+{% if not rows %}
+  <p class="empty">
+    ルール候補はまだありません。<br>
+    審査で理由をつけて不承認にし、<code>python -m freming.cli learn</code> を実行すると提示されます。
+  </p>
+{% endif %}
+
+{% for row in rows %}
+  <div class="card no-thumb">
+    <div>
+      <div>
+        <span class="tag {{ 'on' if row['state'] == 'approved' else '' }}">
+          {{ {"proposed":"未決","approved":"適用中","dismissed":"却下"}.get(row["state"], row["state"]) }}
+        </span>
+        <span class="tag">{{ row["reason_tag"] }}</span>
+        <span class="tag">{{ row["hit_count"] }}件</span>
+      </div>
+      <div class="reason">{{ row["proposal"] }}</div>
+      {% if row["state"] != "approved" %}
+        <form class="actions" method="post" action="/rules/{{ row['reason_tag'] }}/approve">
+          <button class="ok" type="submit">このルールを適用する</button>
+        </form>
+      {% endif %}
+      {% if row["state"] == "proposed" %}
+        <form class="actions" method="post" action="/rules/{{ row['reason_tag'] }}/dismiss">
+          <button class="ng" type="submit">却下する（今後提案しない）</button>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+{% endfor %}
+
+{% endblock %}

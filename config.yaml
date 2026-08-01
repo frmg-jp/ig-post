@@ -272,6 +272,18 @@ scoring:
     recent_reasons_in_prompt: 30   # 直近N件の非承認理由をプロンプトに含める
     tagging_batch_size: 10         # N件溜まるごとに reason_tag を付与
     rule_candidate_min_hits: 3     # 同一タグがN回でルール候補として提示
+    # 非承認理由の分類先。表記のゆれを吸収して集計できるようにするための
+    # 固定語彙。どれにも当てはまらない理由は other に寄せ、頻出するようなら
+    # ここに新しいタグを足す。
+    tags:
+      - no_visible_provenance   # 前歴の痕跡が残っていない
+      - style_unclear           # 様式・築年が特定できない
+      - not_one_of_a_kind       # 一点物ではない（分譲・同一仕様）
+      - not_for_sale            # 売出中ではない
+      - image_quality           # 画像が足りない / 品質が低い
+      - duplicate               # 既出・類似を納品済み
+      - area_mismatch           # エリアが合わない
+      - other
 
 # ---------------------------------------------------------------------
 # 審査UI

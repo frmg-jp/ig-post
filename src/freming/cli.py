@@ -108,6 +108,52 @@ def _cmd_probe_feed(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_learn(args: argparse.Namespace) -> int:
+    """非承認理由を分類し、頻出する指摘をルール候補にする（[7]）。"""
+    from freming.db.connection import session
+    from freming.learning.loop import run_learning
+
+    cfg = load_config(args.config)
+    setup_logging(cfg.app.log_dir, cfg.app.log_level)
+    with session(cfg.app.db_path) as conn:
+        stats = run_learning(cfg, conn, args.limit)
+    print(stats.summary())
+    for line in stats.new_candidates:
+        print(f"  提案: {line}")
+    if stats.new_candidates:
+        print("\n採用するなら: python -m freming.cli rules approve <タグ>")
+    return 0
+
+
+def _cmd_rules(args: argparse.Namespace) -> int:
+    """ルール候補の確認と承認。自動適用はせず、必ずここを通す。"""
+    from freming.db.connection import session
+    from freming.db.repository import decide_rule_candidate, list_rule_candidates
+
+    cfg = load_config(args.config)
+    setup_logging(cfg.app.log_dir, cfg.app.log_level)
+    with session(cfg.app.db_path) as conn:
+        if args.rules_action == "list":
+            rows = list_rule_candidates(conn)
+            if not rows:
+                print("ルール候補はまだありません。")
+                return 0
+            for row in rows:
+                mark = {"proposed": "[ ]", "approved": "[x]", "dismissed": "[-]"}
+                print(
+                    f"{mark.get(row['state'], '[?]')} {row['reason_tag']} "
+                    f"({row['hit_count']}件)\n    {row['proposal']}"
+                )
+            return 0
+
+        state = "approved" if args.rules_action == "approve" else "dismissed"
+        if not decide_rule_candidate(conn, args.tag, state):
+            print(f"'{args.tag}' というルール候補はありません。", file=sys.stderr)
+            return 1
+    print(f"{args.tag} を {state} にしました。")
+    return 0
+
+
 def _cmd_deliver(args: argparse.Namespace) -> int:
     from freming.db.connection import session
     from freming.delivery.deliver import deliver_approved
@@ -291,6 +337,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_probe.add_argument("--top", type=int, default=15)
     p_probe.add_argument("--details", action="store_true", help="各フィードの判定内訳も表示")
     p_probe.set_defaults(func=_cmd_probe_feed)
+
+    p_learn = sub.add_parser("learn", help="非承認理由を分類しルール候補を作る（[7]）")
+    p_learn.add_argument("--limit", type=int, default=None, help="一度に分類する件数")
+    p_learn.set_defaults(func=_cmd_learn)
+
+    p_rules = sub.add_parser("rules", help="ルール候補の確認と承認（[7]）")
+    p_rules.add_argument("rules_action", choices=["list", "approve", "dismiss"])
+    p_rules.add_argument("tag", nargs="?", help="approve / dismiss で指定するタグ")
+    p_rules.set_defaults(func=_cmd_rules)
 
     p_deliver = sub.add_parser("deliver", help="承認済みを画像取得→加工→Drive納品（[4][5][6]）")
     p_deliver.add_argument("--limit", type=int, default=None)

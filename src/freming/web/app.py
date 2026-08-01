@@ -24,8 +24,10 @@ from freming.db.connection import connect
 from freming.db.repository import (
     approve_property,
     count_by_status,
+    decide_rule_candidate,
     get_property,
     list_properties,
+    list_rule_candidates,
     reject_property,
     reset_review,
 )
@@ -150,6 +152,34 @@ def create_app(config: Config | None = None) -> FastAPI:
         finally:
             conn.close()
         return RedirectResponse(f"/?status={status}", status_code=303)
+
+    @app.get("/rules", response_class=HTMLResponse)
+    def rules(request: Request):
+        """[7] のルール候補。自動適用しないので、ここが唯一の適用経路。"""
+        conn = _conn()
+        try:
+            rows = list_rule_candidates(conn)
+            counts = count_by_status(conn)
+        finally:
+            conn.close()
+        return templates.TemplateResponse(
+            request,
+            "rules.html",
+            {"rows": rows, "counts": counts, "status": "rules"},
+        )
+
+    @app.post("/rules/{tag}/{decision}")
+    def decide_rule(tag: str, decision: str):
+        if decision not in ("approve", "dismiss"):
+            return HTMLResponse("不正な操作です", status_code=400)
+        conn = _conn()
+        try:
+            decide_rule_candidate(
+                conn, tag, "approved" if decision == "approve" else "dismissed"
+            )
+        finally:
+            conn.close()
+        return RedirectResponse("/rules", status_code=303)
 
     @app.post("/manual")
     def manual(

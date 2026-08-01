@@ -27,6 +27,10 @@ _SYSTEM = """あなたは建築キュレーションメディア「FREMING CURAT
 
 {rejects}
 
+# 編集者が承認した恒久ルール
+
+{rules}
+
 # 守ること
 
 - 記事に書かれていない事実を補わないこと。不明な項目は空文字にする。
@@ -37,17 +41,24 @@ _SYSTEM = """あなたは建築キュレーションメディア「FREMING CURAT
 - summary は日本語80字以内。誇張しない。
 """
 
-_NO_REJECTS = "（まだ蓄積がありません）"
+_EMPTY = "（まだ蓄積がありません）"
 
 
-def build_system_prompt(config: Config, reject_reasons: list[str]) -> str:
+def build_system_prompt(
+    config: Config, reject_reasons: list[str], rules: list[str] | None = None
+) -> str:
+    """承認基準・直近の不承認理由・承認済みルールを1つのプロンプトにまとめる。
+
+    rules は [7] 学習ループで人が承認したもの。繰り返された指摘だけが
+    ここに昇格するので、直近の理由より強い指示として扱ってよい。
+    """
     notes = "\n".join(f"{i}. {n}" for i, n in enumerate(config.scoring.approval_notes, 1))
     examples = "\n".join(f"- {e}" for e in config.scoring.approved_examples)
-    rejects = "\n".join(f"- {r}" for r in reject_reasons) if reject_reasons else _NO_REJECTS
     return _SYSTEM.format(
         notes=notes or "（未設定）",
         examples=examples or "（未設定）",
-        rejects=rejects,
+        rejects="\n".join(f"- {r}" for r in reject_reasons) if reject_reasons else _EMPTY,
+        rules="\n".join(f"- {r}" for r in (rules or [])) if rules else _EMPTY,
     )
 
 
