@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import sys
 import threading
+from pathlib import Path
 
 from freming.config import load_config
 from freming.logging_setup import setup_logging
@@ -292,6 +293,24 @@ def _cmd_discover_feed(args: argparse.Namespace) -> int:
     return _cmd_probe_feed(probe_args)
 
 
+def _cmd_survey_sources(args: argparse.Namespace) -> int:
+    """収集候補の robots.txt をまとめて調べる。
+
+    確かめられるのは robots の層だけ。利用規約と掲載画像の権利は人が読んで
+    判断する。混同すると「robotsがOK＝収集してよい」と誤読されるので、
+    survey 側でも毎回その断りを出している。
+    """
+    from freming.collect.survey import main as survey_main
+
+    argv: list[str] = []
+    if args.file:
+        argv += ["--file", str(args.file)]
+    if args.csv:
+        argv += ["--csv", str(args.csv)]
+    argv += args.url
+    return survey_main(argv)
+
+
 def _cmd_ingest_url(args: argparse.Namespace) -> int:
     from freming.collect.manual import AlreadyCollected, ingest_url
     from freming.net.client import RobotsDisallowed
@@ -437,6 +456,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run", action="store_true", help="Driveに書き込まず画像取得・加工まで実行"
     )
     p_deliver.set_defaults(func=_cmd_deliver)
+
+    p_survey = sub.add_parser(
+        "survey-sources", help="収集候補の robots.txt をまとめて調べる"
+    )
+    p_survey.add_argument("url", nargs="*")
+    p_survey.add_argument("--file", type=Path, help="エリア/サイト名/URL のTSV")
+    p_survey.add_argument("--csv", type=Path, help="結果の書き出し先")
+    p_survey.set_defaults(func=_cmd_survey_sources)
 
     p_serve = sub.add_parser("serve", help="審査UIを起動（[3]）")
     p_serve.add_argument("--host", default=None)

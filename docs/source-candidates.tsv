@@ -1,0 +1,65 @@
+# 収集候補サイト（2026-08-03 に共有されたスプレッドシートより）
+# survey-sources の入力。robots.txt の実測はこのファイルを渡して行う:
+#   python -m freming.cli survey-sources --file docs/source-candidates.tsv --csv survey.csv
+エリア	サイト名	URL
+全米	Zillow	https://www.zillow.com
+全米	Realtor.com	https://www.realtor.com
+全米	Redfin	https://www.redfin.com
+全米	Homes.com	https://www.homes.com
+全米	Trulia	https://www.trulia.com
+全米	Compass	https://www.compass.com
+全米	Sotheby's International Realty	https://www.sothebysrealty.com
+全米	Christie's International Real Estate	https://www.christiesrealestate.com
+全米	Coldwell Banker	https://www.coldwellbanker.com
+全米	Century 21	https://www.century21.com
+全米	Keller Williams	https://www.kw.com
+全米	RE/MAX	https://www.remax.com
+全米	ERA Real Estate	https://www.era.com
+全米	Homes & Land	https://www.homesandland.com
+全米	LoopNet	https://www.loopnet.com
+全米	Crexi	https://www.crexi.com
+Los Angeles	The Agency	https://www.theagencyre.com
+Los Angeles	Hilton & Hyland	https://www.hiltonhyland.com
+Los Angeles	Rodeo Realty	https://www.rodeore.com
+Los Angeles	Beverly Hills Estates	https://www.thebeverlyhillsestates.com
+New York/Brooklyn	StreetEasy	https://streeteasy.com
+New York/Brooklyn	Corcoran	https://www.corcoran.com
+New York/Brooklyn	Brown Harris Stevens	https://www.bhsusa.com
+New York/Brooklyn	Nest Seekers	https://www.nestseekers.com
+Chicago	Baird & Warner	https://www.bairdwarner.com
+Chicago	Dream Town Realty	https://www.dreamtown.com
+Chicago	@properties Christie's	https://www.atproperties.com
+San Francisco	Vanguard Properties	https://vanguardproperties.com
+San Francisco	Intero	https://www.interorealestate.com
+San Francisco	Corcoran Icon	https://www.corcoranicon.com
+Portland	Living Room Realty	https://www.livingroomre.com
+Portland	Premiere Property Group	https://www.ppghomes.com
+Portland	John L. Scott	https://www.johnlscott.com
+Seattle	Windermere	https://www.windermere.com
+Seattle	Realogics Sotheby's	https://www.rsir.com
+Seattle	Coldwell Banker Bain	https://www.cbbain.com
+ポルトガル	Idealista Portugal	https://www.idealista.pt
+ポルトガル	Casa Sapo	https://www.casasapo.pt
+ポルトガル	Imovirtual	https://www.imovirtual.com
+ポルトガル	SuperCasa	https://www.supercasa.pt
+ポルトガル	PortugalProperty	https://www.portugalproperty.com
+ポルトガル	Green-Acres Portugal	https://www.green-acres.pt
+スペイン	Idealista Spain	https://www.idealista.com
+スペイン	Fotocasa	https://www.fotocasa.es
+スペイン	Habitaclia	https://www.habitaclia.com
+スペイン	Yaencontre	https://www.yaencontre.com
+スペイン	Pisos	https://www.pisos.com
+スペイン	Kyero	https://www.kyero.com
+台湾	591房屋交易網	https://www.591.com.tw
+台湾	樂屋網	https://www.rakuya.com.tw
+台湾	HouseFun	https://www.housefun.com.tw
+台湾	信義房屋	https://www.sinyi.com.tw
+台湾	永慶房屋	https://www.yungching.com.tw
+台湾	住商不動產	https://www.hbhousing.com.tw
+台湾	台灣房屋	https://www.twhg.com.tw
+台湾	有巢氏房屋	https://www.u-trust.com.tw
+台湾	中信房屋	https://www.cthouse.com.tw
+台湾	21世紀不動產	https://www.century21.com.tw
+グローバル・日本語対応	SEKAI PROPERTY	https://ja.sekaiproperty.com
+グローバル・日本語対応	オープンハウス	https://openhouse-group.com
+グローバル・日本語対応	ステイジアキャピタル	https://stasia.jp

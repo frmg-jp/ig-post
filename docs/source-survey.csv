@@ -1,0 +1,62 @@
+﻿エリア,サイト名,URL,自動収集,理由,区分,手動URL投入,robots実測
+全米,Zillow,https://www.zillow.com,×,利用規約で自動収集を禁止。プロジェクト方針で既に手動のみと決定済み,A 大手ポータル,可,未実施
+全米,Realtor.com,https://www.realtor.com,×,利用規約で自動収集を明示的に禁止。写真は掲載ブローカー帰属,A 大手ポータル,可,未実施
+全米,Redfin,https://www.redfin.com,×,利用規約で自動収集を禁止。プロジェクト方針で既に手動のみと決定済み,A 大手ポータル,可,未実施
+全米,Homes.com,https://www.homes.com,×,利用規約で自動収集を明示的に禁止。写真は掲載ブローカー帰属（CoStar運営）,A 大手ポータル,可,未実施
+全米,Trulia,https://www.trulia.com,×,Zillow Group。利用規約はZillowと同系統。config に manual_only として追加が要る,A 大手ポータル,可,未実施
+全米,Compass,https://www.compass.com,×,利用規約で自動収集を禁止。プロジェクト方針で既に手動のみと決定済み,A 大手ポータル,可,未実施
+全米,Sotheby's International Realty,https://www.sothebysrealty.com,×,掲載物件はMLSからIDXで供給される。IDX参加規約が再配布・スクレイピング・写真の再利用を禁止。自社専任物件と機械的に分離できない,C 仲介・地域ブローカー（IDX）,可,未実施
+全米,Christie's International Real Estate,https://www.christiesrealestate.com,×,掲載物件はMLSからIDXで供給される。IDX参加規約が再配布・スクレイピング・写真の再利用を禁止。自社専任物件と機械的に分離できない,C 仲介・地域ブローカー（IDX）,可,未実施
+全米,Coldwell Banker,https://www.coldwellbanker.com,×,掲載物件はMLSからIDXで供給される。IDX参加規約が再配布・スクレイピング・写真の再利用を禁止。自社専任物件と機械的に分離できない,C 仲介・地域ブローカー（IDX）,可,未実施
+全米,Century 21,https://www.century21.com,×,掲載物件はMLSからIDXで供給される。IDX参加規約が再配布・スクレイピング・写真の再利用を禁止。自社専任物件と機械的に分離できない,C 仲介・地域ブローカー（IDX）,可,未実施
+全米,Keller Williams,https://www.kw.com,×,掲載物件はMLSからIDXで供給される。IDX参加規約が再配布・スクレイピング・写真の再利用を禁止。自社専任物件と機械的に分離できない,C 仲介・地域ブローカー（IDX）,可,未実施
+全米,RE/MAX,https://www.remax.com,×,掲載物件はMLSからIDXで供給される。IDX参加規約が再配布・スクレイピング・写真の再利用を禁止。自社専任物件と機械的に分離できない,C 仲介・地域ブローカー（IDX）,可,未実施
+全米,ERA Real Estate,https://www.era.com,×,掲載物件はMLSからIDXで供給される。IDX参加規約が再配布・スクレイピング・写真の再利用を禁止。自社専任物件と機械的に分離できない,C 仲介・地域ブローカー（IDX）,可,未実施
+全米,Homes & Land,https://www.homesandland.com,×,掲載は広告主の提供素材。再配布不可,A 大手ポータル,可,未実施
+全米,LoopNet,https://www.loopnet.com,×,CoStar系。スクレイピングへの法的措置の実績あり。商業用で編集方針からも外れる,B 商業用不動産,可,未実施
+全米,Crexi,https://www.crexi.com,×,CoStar系。スクレイピングへの法的措置の実績あり。商業用で編集方針からも外れる,B 商業用不動産,可,未実施
+Los Angeles,The Agency,https://www.theagencyre.com,×,掲載物件はMLSからIDXで供給される。IDX参加規約が再配布・スクレイピング・写真の再利用を禁止。自社専任物件と機械的に分離できない,C 仲介・地域ブローカー（IDX）,可,未実施
+Los Angeles,Hilton & Hyland,https://www.hiltonhyland.com,×,掲載物件はMLSからIDXで供給される。IDX参加規約が再配布・スクレイピング・写真の再利用を禁止。自社専任物件と機械的に分離できない,C 仲介・地域ブローカー（IDX）,可,未実施
+Los Angeles,Rodeo Realty,https://www.rodeore.com,×,掲載物件はMLSからIDXで供給される。IDX参加規約が再配布・スクレイピング・写真の再利用を禁止。自社専任物件と機械的に分離できない,C 仲介・地域ブローカー（IDX）,可,未実施
+Los Angeles,Beverly Hills Estates,https://www.thebeverlyhillsestates.com,×,掲載物件はMLSからIDXで供給される。IDX参加規約が再配布・スクレイピング・写真の再利用を禁止。自社専任物件と機械的に分離できない,C 仲介・地域ブローカー（IDX）,可,未実施
+New York/Brooklyn,StreetEasy,https://streeteasy.com,×,Zillow Group。利用規約はZillowと同系統。config に manual_only として追加が要る,A 大手ポータル,可,未実施
+New York/Brooklyn,Corcoran,https://www.corcoran.com,×,掲載物件はMLSからIDXで供給される。IDX参加規約が再配布・スクレイピング・写真の再利用を禁止。自社専任物件と機械的に分離できない,C 仲介・地域ブローカー（IDX）,可,未実施
+New York/Brooklyn,Brown Harris Stevens,https://www.bhsusa.com,×,掲載物件はMLSからIDXで供給される。IDX参加規約が再配布・スクレイピング・写真の再利用を禁止。自社専任物件と機械的に分離できない,C 仲介・地域ブローカー（IDX）,可,未実施
+New York/Brooklyn,Nest Seekers,https://www.nestseekers.com,×,掲載物件はMLSからIDXで供給される。IDX参加規約が再配布・スクレイピング・写真の再利用を禁止。自社専任物件と機械的に分離できない,C 仲介・地域ブローカー（IDX）,可,未実施
+Chicago,Baird & Warner,https://www.bairdwarner.com,×,掲載物件はMLSからIDXで供給される。IDX参加規約が再配布・スクレイピング・写真の再利用を禁止。自社専任物件と機械的に分離できない,C 仲介・地域ブローカー（IDX）,可,未実施
+Chicago,Dream Town Realty,https://www.dreamtown.com,×,掲載物件はMLSからIDXで供給される。IDX参加規約が再配布・スクレイピング・写真の再利用を禁止。自社専任物件と機械的に分離できない,C 仲介・地域ブローカー（IDX）,可,未実施
+Chicago,@properties Christie's,https://www.atproperties.com,×,掲載物件はMLSからIDXで供給される。IDX参加規約が再配布・スクレイピング・写真の再利用を禁止。自社専任物件と機械的に分離できない,C 仲介・地域ブローカー（IDX）,可,未実施
+San Francisco,Vanguard Properties,https://vanguardproperties.com,×,掲載物件はMLSからIDXで供給される。IDX参加規約が再配布・スクレイピング・写真の再利用を禁止。自社専任物件と機械的に分離できない,C 仲介・地域ブローカー（IDX）,可,未実施
+San Francisco,Intero,https://www.interorealestate.com,×,掲載物件はMLSからIDXで供給される。IDX参加規約が再配布・スクレイピング・写真の再利用を禁止。自社専任物件と機械的に分離できない,C 仲介・地域ブローカー（IDX）,可,未実施
+San Francisco,Corcoran Icon,https://www.corcoranicon.com,×,掲載物件はMLSからIDXで供給される。IDX参加規約が再配布・スクレイピング・写真の再利用を禁止。自社専任物件と機械的に分離できない,C 仲介・地域ブローカー（IDX）,可,未実施
+Portland,Living Room Realty,https://www.livingroomre.com,×,掲載物件はMLSからIDXで供給される。IDX参加規約が再配布・スクレイピング・写真の再利用を禁止。自社専任物件と機械的に分離できない,C 仲介・地域ブローカー（IDX）,可,未実施
+Portland,Premiere Property Group,https://www.ppghomes.com,×,掲載物件はMLSからIDXで供給される。IDX参加規約が再配布・スクレイピング・写真の再利用を禁止。自社専任物件と機械的に分離できない,C 仲介・地域ブローカー（IDX）,可,未実施
+Portland,John L. Scott,https://www.johnlscott.com,×,掲載物件はMLSからIDXで供給される。IDX参加規約が再配布・スクレイピング・写真の再利用を禁止。自社専任物件と機械的に分離できない,C 仲介・地域ブローカー（IDX）,可,未実施
+Seattle,Windermere,https://www.windermere.com,×,掲載物件はMLSからIDXで供給される。IDX参加規約が再配布・スクレイピング・写真の再利用を禁止。自社専任物件と機械的に分離できない,C 仲介・地域ブローカー（IDX）,可,未実施
+Seattle,Realogics Sotheby's,https://www.rsir.com,×,掲載物件はMLSからIDXで供給される。IDX参加規約が再配布・スクレイピング・写真の再利用を禁止。自社専任物件と機械的に分離できない,C 仲介・地域ブローカー（IDX）,可,未実施
+Seattle,Coldwell Banker Bain,https://www.cbbain.com,×,掲載物件はMLSからIDXで供給される。IDX参加規約が再配布・スクレイピング・写真の再利用を禁止。自社専任物件と機械的に分離できない,C 仲介・地域ブローカー（IDX）,可,未実施
+ポルトガル,Idealista Portugal,https://www.idealista.pt,×,規約で自動収集を禁止。bot対策が強固。公式APIはパートナー限定,D 欧州ポータル,可,未実施
+ポルトガル,Casa Sapo,https://www.casasapo.pt,×,ポータル規約で自動収集を禁止。写真は代理店・売主帰属,D 欧州ポータル,可,未実施
+ポルトガル,Imovirtual,https://www.imovirtual.com,×,ポータル規約で自動収集を禁止。写真は代理店・売主帰属,D 欧州ポータル,可,未実施
+ポルトガル,SuperCasa,https://www.supercasa.pt,×,ポータル規約で自動収集を禁止。写真は代理店・売主帰属,D 欧州ポータル,可,未実施
+ポルトガル,PortugalProperty,https://www.portugalproperty.com,×,代理店物件の集約サイト。写真は代理店帰属。規約の個別確認は可能だが結論は覆りにくい,D 欧州ポータル,可,未実施
+ポルトガル,Green-Acres Portugal,https://www.green-acres.pt,×,代理店物件の集約サイト。写真は代理店帰属。規約の個別確認は可能だが結論は覆りにくい,D 欧州ポータル,可,未実施
+スペイン,Idealista Spain,https://www.idealista.com,×,規約で自動収集を禁止。bot対策が強固。公式APIはパートナー限定,D 欧州ポータル,可,未実施
+スペイン,Fotocasa,https://www.fotocasa.es,×,ポータル規約で自動収集を禁止。写真は代理店・売主帰属,D 欧州ポータル,可,未実施
+スペイン,Habitaclia,https://www.habitaclia.com,×,ポータル規約で自動収集を禁止。写真は代理店・売主帰属,D 欧州ポータル,可,未実施
+スペイン,Yaencontre,https://www.yaencontre.com,×,ポータル規約で自動収集を禁止。写真は代理店・売主帰属,D 欧州ポータル,可,未実施
+スペイン,Pisos,https://www.pisos.com,×,ポータル規約で自動収集を禁止。写真は代理店・売主帰属,D 欧州ポータル,可,未実施
+スペイン,Kyero,https://www.kyero.com,×,代理店物件の集約サイト。写真は代理店帰属。規約の個別確認は可能だが結論は覆りにくい,D 欧州ポータル,可,未実施
+台湾,591房屋交易網,https://www.591.com.tw,×,ポータル規約で自動収集を禁止。bot対策あり,E 台湾,可,未実施
+台湾,樂屋網,https://www.rakuya.com.tw,×,掲載写真は加盟店・売主帰属。規約(中文)は未読だが権利構造はIDX系と同じ,E 台湾,可,未実施
+台湾,HouseFun,https://www.housefun.com.tw,×,掲載写真は加盟店・売主帰属。規約(中文)は未読だが権利構造はIDX系と同じ,E 台湾,可,未実施
+台湾,信義房屋,https://www.sinyi.com.tw,×,掲載写真は加盟店・売主帰属。規約(中文)は未読だが権利構造はIDX系と同じ,E 台湾,可,未実施
+台湾,永慶房屋,https://www.yungching.com.tw,×,掲載写真は加盟店・売主帰属。規約(中文)は未読だが権利構造はIDX系と同じ,E 台湾,可,未実施
+台湾,住商不動產,https://www.hbhousing.com.tw,×,掲載写真は加盟店・売主帰属。規約(中文)は未読だが権利構造はIDX系と同じ,E 台湾,可,未実施
+台湾,台灣房屋,https://www.twhg.com.tw,×,掲載写真は加盟店・売主帰属。規約(中文)は未読だが権利構造はIDX系と同じ,E 台湾,可,未実施
+台湾,有巢氏房屋,https://www.u-trust.com.tw,×,掲載写真は加盟店・売主帰属。規約(中文)は未読だが権利構造はIDX系と同じ,E 台湾,可,未実施
+台湾,中信房屋,https://www.cthouse.com.tw,×,掲載写真は加盟店・売主帰属。規約(中文)は未読だが権利構造はIDX系と同じ,E 台湾,可,未実施
+台湾,21世紀不動產,https://www.century21.com.tw,×,掲載写真は加盟店・売主帰属。規約(中文)は未読だが権利構造はIDX系と同じ,E 台湾,可,未実施
+グローバル・日本語対応,SEKAI PROPERTY,https://ja.sekaiproperty.com,×,自社サイトのため写真の権利は自社の可能性。ただし投資用新築が中心で、承認基準（前歴が残る一点物）と交わらない,F 日本語対応,可,未実施
+グローバル・日本語対応,オープンハウス,https://openhouse-group.com,×,自社サイトのため写真の権利は自社の可能性。ただし投資用新築が中心で、承認基準（前歴が残る一点物）と交わらない,F 日本語対応,可,未実施
+グローバル・日本語対応,ステイジアキャピタル,https://stasia.jp,×,自社サイトのため写真の権利は自社の可能性。ただし投資用新築が中心で、承認基準（前歴が残る一点物）と交わらない,F 日本語対応,可,未実施

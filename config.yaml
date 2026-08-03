@@ -140,18 +140,24 @@ editorial_sources:
 #   mode: manual_only  … 自動クロールを一切行わず、管理画面のURL投入のみ
 # ---------------------------------------------------------------------
 listing_sources:
+  # 仲介ネットワークは掲載物件をMLSからIDXで受けており、IDX参加規約が
+  # 再配布・スクレイピング・写真の再利用を禁じる。自社専任物件とIDX由来を
+  # サイト上で機械的に分離できないため、robots.txt の内容によらず自動収集不可。
+  # 調査の詳細は docs/source-survey.md（2026-08-03）。
   - key: sothebys
     name: "Sotheby's International Realty"
     rank: A
-    mode: crawl
-    enabled: false          # robots.txt 確認後に有効化
+    mode: manual_only
+    enabled: true
     base_url: "https://www.sothebysrealty.com"
+    note: "IDX規約により自動収集不可。手動URL投入のみ"
   - key: christies
     name: "Christie's International Real Estate"
     rank: A
-    mode: crawl
-    enabled: false
+    mode: manual_only
+    enabled: true
     base_url: "https://www.christiesrealestate.com"
+    note: "IDX規約により自動収集不可。手動URL投入のみ"
   - key: architecture_for_sale
     name: "Architecture For Sale"
     rank: A
@@ -178,6 +184,29 @@ listing_sources:
     mode: manual_only
     enabled: true
     base_url: "https://www.compass.com"
+    note: "利用規約で自動収集禁止。手動URL投入のみ"
+  # Trulia と StreetEasy は Zillow Group。Zillow と同じ扱いにする。
+  # ここに書いていないと「未検討だから試してよい」と読まれる余地が残る。
+  - key: trulia
+    name: "Trulia"
+    rank: B
+    mode: manual_only
+    enabled: true
+    base_url: "https://www.trulia.com"
+    note: "Zillow Group。利用規約で自動収集禁止。手動URL投入のみ"
+  - key: streeteasy
+    name: "StreetEasy"
+    rank: B
+    mode: manual_only
+    enabled: true
+    base_url: "https://streeteasy.com"
+    note: "Zillow Group。利用規約で自動収集禁止。手動URL投入のみ"
+  - key: realtor
+    name: "Realtor.com"
+    rank: B
+    mode: manual_only
+    enabled: true
+    base_url: "https://www.realtor.com"
     note: "利用規約で自動収集禁止。手動URL投入のみ"
 
 # ---------------------------------------------------------------------
