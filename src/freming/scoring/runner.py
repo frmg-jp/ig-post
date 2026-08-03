@@ -10,12 +10,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import sqlite3
 import sys
 from dataclasses import dataclass, field
 
 from freming.config import Config, load_config
-from freming.db.connection import connect
+from freming.db.connection import DbConnection, Row, connect
 from freming.db.repository import (
     approved_rules,
     recent_reject_reasons,
@@ -56,7 +55,7 @@ class ScoreStats:
         return "\n".join(self.lines)
 
 
-def _line(row: sqlite3.Row, result: ScoreResult) -> str:
+def _line(row: Row, result: ScoreResult) -> str:
     flags = []
     if result.assessment.provenance_visible:
         flags.append("前歴◎")
@@ -73,7 +72,7 @@ def _line(row: sqlite3.Row, result: ScoreResult) -> str:
 
 def score_pending(
     config: Config,
-    conn: sqlite3.Connection,
+    conn: DbConnection,
     limit: int | None = None,
     dry_run: bool = False,
     client: ScoringClient | None = None,
@@ -156,7 +155,7 @@ def main(argv: list[str] | None = None) -> int:
 
     config = load_config()
     setup_logging(config.app.log_dir, config.app.log_level)
-    conn = connect(config.app.db_path)
+    conn = connect(config.app.target())
     try:
         stats = score_pending(config, conn, args.limit, args.dry_run)
     finally:

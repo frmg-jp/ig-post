@@ -28,6 +28,8 @@ python scripts/check_drive.py        # [2] Drive疎通確認（★ここが通�
 | `python scripts/check_drive.py` | Drive の書き込み権限を実際に検証（テストファイルを作成→削除） |
 | `python -m freming.cli check-drive` | 同上 |
 | `python -m freming.cli db migrate` | マイグレーション適用（再実行は安全） |
+| `python -m freming.db.transfer --from data/freming.db --to "$DATABASE_URL"` | SQLite の中身を PostgreSQL へ移す（1回きり） |
+| `python -m freming.cli sources [--enabled] [--verbose]` | 編集ソースの key を並べる（定期実行用） |
 | `python -m freming.cli db status` | 適用状況の表示 |
 | `python -m freming.cli collect --source dezeen --limit 10 [--dry-run]` | 編集ソースから収集（経路B） |
 | `python -m freming.cli discover-feed <サイトURL>` | トップページから公開フィードURLを探す |
@@ -49,6 +51,19 @@ python scripts/check_drive.py        # [2] Drive疎通確認（★ここが通�
 | `python -m pytest tests/ -q` | テスト |
 
 設定値はすべて `config.yaml`。秘匿値のみ `.env`。
+
+## データベース
+
+既定は SQLite（`data/freming.db`）。`.env` に `DATABASE_URL` を設定すると
+PostgreSQL（Supabase）に切り替わる。設定手順と定期実行は
+[docs/scheduled-run.md](docs/scheduled-run.md) を参照。
+
+```
+DATABASE_URL=postgresql://postgres.xxxx:パスワード@....supabase.com:5432/postgres
+```
+
+接続文字列はパスワードを含むので `config.yaml` には置かない。
+PostgreSQL に繋ぐときは `pip install -e ".[postgres]"` が要る。
 
 ## 承認から納品までの自動化
 

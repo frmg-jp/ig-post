@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from pathlib import Path
 
 from contextlib import asynccontextmanager
@@ -22,7 +21,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from freming.config import Config, load_config
-from freming.db.connection import connect
+from freming.db.connection import DbConnection, Row, connect
 from freming.db.repository import (
     approve_property,
     count_by_status,
@@ -55,7 +54,7 @@ REJECT_PRESETS = [
 ]
 
 
-def _axes(row: sqlite3.Row) -> list[dict]:
+def _axes(row: Row) -> list[dict]:
     """score_detail から軸ごとの内訳を取り出す。未採点なら空。"""
     raw = row["score_detail"]
     if not raw:
@@ -90,8 +89,8 @@ def create_app(
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     templates.env.filters["axes"] = _axes
 
-    def _conn() -> sqlite3.Connection:
-        return connect(config.app.db_path)
+    def _conn() -> DbConnection:
+        return connect(config.app.target())
 
     @app.get("/", response_class=HTMLResponse)
     def index(

@@ -14,12 +14,12 @@
 from __future__ import annotations
 
 import argparse
-import sqlite3
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 from freming.config import Config, load_config
-from freming.db.connection import connect
+from freming.db.connection import DbConnection, Row, connect
 from freming.delivery.drive import DriveClient, DriveError, build_client
 from freming.images.fetch import NoImagesFound, fetch_images
 from freming.images.process import process_property_images
@@ -58,7 +58,7 @@ class DeliverStats:
         )
 
 
-def next_folder_name(conn: sqlite3.Connection, config: Config) -> str:
+def next_folder_name(conn: DbConnection, config: Config) -> str:
     """frmg_ig001 形式の次の連番。
 
     連番は deliveries の件数ではなく最大値から採る。途中の納品を
@@ -73,7 +73,7 @@ def next_folder_name(conn: sqlite3.Connection, config: Config) -> str:
     return f"{config.drive.folder_prefix}{last + 1:0{config.drive.sequence_digits}d}"
 
 
-def build_meta(row: sqlite3.Row, image_count: int, series_label: str | None = None) -> str:
+def build_meta(row: Row, image_count: int, series_label: str | None = None) -> str:
     """納品フォルダに同梱するテキスト。投稿時の下書きに使う。
 
     出典URLは必ず入れる。あとから素材の出どころを辿れないと使えない。
@@ -98,7 +98,7 @@ def build_meta(row: sqlite3.Row, image_count: int, series_label: str | None = No
     return "\n".join(lines) + "\n"
 
 
-def already_delivered(conn: sqlite3.Connection, property_id: int) -> bool:
+def already_delivered(conn: DbConnection, property_id: int) -> bool:
     return (
         conn.execute(
             "SELECT 1 FROM deliveries WHERE property_id = ? LIMIT 1", (property_id,)
@@ -109,8 +109,8 @@ def already_delivered(conn: sqlite3.Connection, property_id: int) -> bool:
 
 def deliver_property(
     config: Config,
-    conn: sqlite3.Connection,
-    row: sqlite3.Row,
+    conn: DbConnection,
+    row: Row,
     drive: DriveClient,
     http: HttpClient,
     dry_run: bool = False,
@@ -150,8 +150,11 @@ def deliver_property(
     # 次回やり直せるようにする（重複より取りこぼしを検知しやすい）。
     conn.execute(
         "INSERT INTO deliveries (property_id, folder_name, image_count, drive_folder_id, "
-        "delivered_at) VALUES (?, ?, ?, ?, datetime('now'))",
-        (property_id, folder_name, len(processed.outputs), folder_id),
+        "delivered_at) VALUES (?, ?, ?, ?, ?)",
+        (
+            property_id, folder_name, len(processed.outputs), folder_id,
+            datetime.now(timezone.utc).isoformat(),
+        ),
     )
     conn.execute("UPDATE properties SET status = 'delivered' WHERE id = ?", (property_id,))
     conn.commit()
@@ -161,7 +164,7 @@ def deliver_property(
 
 def deliver_approved(
     config: Config,
-    conn: sqlite3.Connection,
+    conn: DbConnection,
     limit: int | None = None,
     dry_run: bool = False,
     drive: DriveClient | None = None,
@@ -216,7 +219,7 @@ def main(argv: list[str] | None = None) -> int:
 
     config = load_config()
     setup_logging(config.app.log_dir, config.app.log_level)
-    conn = connect(config.app.db_path)
+    conn = connect(config.app.target())
     try:
         stats = deliver_approved(config, conn, args.limit, args.dry_run)
     finally:

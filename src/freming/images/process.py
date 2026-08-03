@@ -8,11 +8,11 @@
 
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from freming.config import Config, ProcessConfig
+from freming.db.connection import DbConnection
 from freming.logging_setup import get_logger
 
 log = get_logger(__name__)
@@ -68,7 +68,7 @@ def to_square(source: Path, dest: Path, config: ProcessConfig) -> str:
 
 
 def process_property_images(
-    config: Config, conn: sqlite3.Connection, property_id: int
+    config: Config, conn: DbConnection, property_id: int
 ) -> ProcessStats:
     """1物件分の画像を position 順に 01.jpg … として書き出す。"""
     stats = ProcessStats(property_id=property_id)

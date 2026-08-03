@@ -27,6 +27,15 @@ class AppConfig(BaseModel):
     log_dir: Path = Path("logs")
     log_level: str = "INFO"
 
+    def target(self) -> str | Path:
+        """接続先。DATABASE_URL があれば PostgreSQL、無ければ SQLite。
+
+        接続文字列はパスワードを含むので config.yaml には置かず、.env と
+        実行環境の秘匿値からのみ読む。定期実行（GitHub Actions）と
+        審査UIが同じDBを見るために、本番は PostgreSQL を使う。
+        """
+        return os.environ.get("DATABASE_URL") or self.db_path
+
 
 class HttpConfig(BaseModel):
     user_agent: str

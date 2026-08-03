@@ -8,8 +8,8 @@
 
 from __future__ import annotations
 
-import sqlite3
 
+from freming.db.connection import Row
 from freming.config import Config
 
 _SYSTEM = """あなたは建築キュレーションメディア「FREMING CURATED」の編集者です。
@@ -63,7 +63,7 @@ def build_system_prompt(
     )
 
 
-def build_user_prompt(row: sqlite3.Row, max_chars: int = 6000) -> str:
+def build_user_prompt(row: Row, max_chars: int = 6000) -> str:
     """1物件分の入力。収集時に保存した本文を使い、記事を再取得しない。"""
     text = (row["content_text"] or "").strip()
     truncated = text[:max_chars]

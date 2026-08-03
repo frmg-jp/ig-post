@@ -7,13 +7,13 @@ LLMに任せるのは story だけで、残りの軸はこちらが持ってい�
 
 from __future__ import annotations
 
-import sqlite3
 
+from freming.db.connection import Row
 from freming.config import Config
 from freming.scoring.schema import Assessment, ScoreAxis, ScoreResult
 
 
-def _area_axis(config: Config, assessment: Assessment, row: sqlite3.Row) -> ScoreAxis:
+def _area_axis(config: Config, assessment: Assessment, row: Row) -> ScoreAxis:
     """重点エリアとの一致。加点要素であり、外れても0点止まりで足切りはしない。
 
     承認実績8件のうち2件は当初エリア外だった（docs/approval-criteria.md）。
@@ -53,14 +53,14 @@ def _genre_axis(config: Config, assessment: Assessment) -> ScoreAxis:
     return ScoreAxis("genre", raw, weight, genre)
 
 
-def _source_rank_axis(config: Config, row: sqlite3.Row) -> ScoreAxis:
+def _source_rank_axis(config: Config, row: Row) -> ScoreAxis:
     weight = config.scoring.weights.source_rank
     rank = row["source_rank"] or ""
     ratio = config.scoring.source_rank_score.get(rank, 0.0)
     return ScoreAxis("source", ratio * 100.0, weight, f"{row['source']}({rank or '不明'})")
 
 
-def _for_sale_axis(config: Config, assessment: Assessment, row: sqlite3.Row) -> ScoreAxis:
+def _for_sale_axis(config: Config, assessment: Assessment, row: Row) -> ScoreAxis:
     """販売中であることの確からしさ。
 
     収集時のシグナル検出（機械的）とLLMの読み（文脈）の両方を見る。
@@ -79,7 +79,7 @@ def _for_sale_axis(config: Config, assessment: Assessment, row: sqlite3.Row) -> 
     return ScoreAxis("for_sale", 0.0, weight, "販売の裏付けなし")
 
 
-def _price_axis(config: Config, assessment: Assessment, row: sqlite3.Row) -> ScoreAxis:
+def _price_axis(config: Config, assessment: Assessment, row: Row) -> ScoreAxis:
     """価格が判明しているか。金額の高低ではなく、掲載の有無を見る。
 
     価格が書かれていない記事は、売出中かどうかも曖昧なことが多い。
@@ -93,7 +93,7 @@ def _price_axis(config: Config, assessment: Assessment, row: sqlite3.Row) -> Sco
 
 
 def build_result(
-    config: Config, assessment: Assessment, row: sqlite3.Row, model: str
+    config: Config, assessment: Assessment, row: Row, model: str
 ) -> ScoreResult:
     """LLMの判定と手元の事実から、最終スコアを組み立てる。"""
     weights = config.scoring.weights

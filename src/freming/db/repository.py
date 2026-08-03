@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from freming.collect.base import Candidate
+from freming.db.connection import DbConnection, Row
 from freming.logging_setup import get_logger
 
 log = get_logger(__name__)
@@ -15,20 +15,22 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def insert_candidate(conn: sqlite3.Connection, candidate: Candidate) -> int | None:
+def insert_candidate(conn: DbConnection, candidate: Candidate) -> int | None:
     """候補を登録する。source_url が既にあれば何もせず None を返す。
 
-    再実行しても重複登録されないことを、UNIQUE制約と INSERT OR IGNORE の
-    両方で担保する。
+    再実行しても重複登録されないことを、UNIQUE制約と ON CONFLICT DO NOTHING の
+    両方で担保する。RETURNING を使うのは lastrowid が PostgreSQL に無いため。
     """
     cursor = conn.execute(
         """
-        INSERT OR IGNORE INTO properties (
+        INSERT INTO properties (
             source, source_rank, source_url, title, thumbnail_url,
             content_text, for_sale_evidence, signal_score,
             price, location_city, location_country, is_for_sale,
             status, collected_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+        ON CONFLICT (source_url) DO NOTHING
+        RETURNING id
         """,
         (
             candidate.source,
@@ -46,25 +48,24 @@ def insert_candidate(conn: sqlite3.Connection, candidate: Candidate) -> int | No
             candidate.collected_at,
         ),
     )
-    if cursor.rowcount == 0:
-        return None
-    return int(cursor.lastrowid)
+    row = cursor.fetchone()
+    return int(row["id"]) if row else None
 
 
-def exists_source_url(conn: sqlite3.Connection, source_url: str) -> bool:
+def exists_source_url(conn: DbConnection, source_url: str) -> bool:
     row = conn.execute(
         "SELECT 1 FROM properties WHERE source_url = ? LIMIT 1", (source_url,)
     ).fetchone()
     return row is not None
 
 
-def find_by_source_url(conn: sqlite3.Connection, source_url: str) -> sqlite3.Row | None:
+def find_by_source_url(conn: DbConnection, source_url: str) -> Row | None:
     return conn.execute(
         "SELECT * FROM properties WHERE source_url = ?", (source_url,)
     ).fetchone()
 
 
-def unscored_properties(conn: sqlite3.Connection, limit: int = 50) -> list[sqlite3.Row]:
+def unscored_properties(conn: DbConnection, limit: int = 50) -> list[Row]:
     return conn.execute(
         "SELECT * FROM properties WHERE score IS NULL AND status = 'pending' "
         "ORDER BY id LIMIT ?",
@@ -72,7 +73,7 @@ def unscored_properties(conn: sqlite3.Connection, limit: int = 50) -> list[sqlit
     ).fetchall()
 
 
-def recent_reject_reasons(conn: sqlite3.Connection, limit: int = 30) -> list[str]:
+def recent_reject_reasons(conn: DbConnection, limit: int = 30) -> list[str]:
     """スコアリングのプロンプトに含める直近の非承認理由。"""
     rows = conn.execute(
         "SELECT reason FROM feedback ORDER BY id DESC LIMIT ?", (limit,)
@@ -81,7 +82,7 @@ def recent_reject_reasons(conn: sqlite3.Connection, limit: int = 30) -> list[str
 
 
 def save_score(
-    conn: sqlite3.Connection,
+    conn: DbConnection,
     property_id: int,
     *,
     score: float,
@@ -125,14 +126,14 @@ def save_score(
 
 
 def list_properties(
-    conn: sqlite3.Connection,
+    conn: DbConnection,
     *,
     status: str = "pending",
     limit: int = 50,
     offset: int = 0,
     min_score: float | None = None,
     series: str | None = None,
-) -> list[sqlite3.Row]:
+) -> list[Row]:
     """審査UI用の一覧。未採点（score IS NULL）は末尾に回す。
 
     採点前の候補を隠すと「収集したのに出てこない」ことになるため、
@@ -158,7 +159,7 @@ def list_properties(
     return conn.execute(sql, params).fetchall()
 
 
-def get_property(conn: sqlite3.Connection, property_id: int) -> sqlite3.Row | None:
+def get_property(conn: DbConnection, property_id: int) -> Row | None:
     """一覧と同じ列が揃うように、納品記録も一緒に引く。"""
     return conn.execute(
         "SELECT p.*, d.drive_folder_id, d.folder_name FROM properties p "
@@ -167,7 +168,7 @@ def get_property(conn: sqlite3.Connection, property_id: int) -> sqlite3.Row | No
     ).fetchone()
 
 
-def approve_property(conn: sqlite3.Connection, property_id: int) -> bool:
+def approve_property(conn: DbConnection, property_id: int) -> bool:
     """承認する。納品済みのものは触らない（再納品を防ぐ）。
 
     納品の試行記録も消す。一度失敗した候補を審査UIで承認し直したときに、
@@ -183,7 +184,7 @@ def approve_property(conn: sqlite3.Connection, property_id: int) -> bool:
     return cursor.rowcount > 0
 
 
-def reject_property(conn: sqlite3.Connection, property_id: int, reason: str) -> bool:
+def reject_property(conn: DbConnection, property_id: int, reason: str) -> bool:
     """非承認にし、理由を feedback に残す。
 
     理由の蓄積が [7] 学習ループの入力になるので、理由なしの非承認は
@@ -207,7 +208,7 @@ def reject_property(conn: sqlite3.Connection, property_id: int, reason: str) -> 
     return True
 
 
-def set_series(conn: sqlite3.Connection, property_id: int, series: str | None) -> bool:
+def set_series(conn: DbConnection, property_id: int, series: str | None) -> bool:
     """連載企画のラベルを付け外しする。None / 空文字で解除。
 
     納品済みは触らない。meta.txt は納品時に書き出しているので、あとから
@@ -221,7 +222,7 @@ def set_series(conn: sqlite3.Connection, property_id: int, series: str | None) -
     return cursor.rowcount > 0
 
 
-def reset_review(conn: sqlite3.Connection, property_id: int) -> bool:
+def reset_review(conn: DbConnection, property_id: int) -> bool:
     """審査結果を取り消して pending に戻す（誤操作の復旧用）。
 
     feedback は消さない。人が一度そう判断した事実は学習の材料として残す。
@@ -240,12 +241,12 @@ def reset_review(conn: sqlite3.Connection, property_id: int) -> bool:
 # 自動納品のキュー
 # ----------------------------------------------------------------------
 def delivery_queue(
-    conn: sqlite3.Connection,
+    conn: DbConnection,
     *,
     limit: int,
     max_attempts: int,
     retry_after_sec: float,
-) -> list[sqlite3.Row]:
+) -> list[Row]:
     """自動納品が次に処理すべき承認済み候補を返す。
 
     除外するもの:
@@ -255,33 +256,37 @@ def delivery_queue(
     未試行を先に、次に古い試行から処理する。新しく承認したものが
     失敗続きの候補の後ろで待たされないようにするため。
     """
+    # 待ち時間の判定は Python 側で刻む。SQL の datetime('now', ...) は
+    # SQLite にしか無く、書式も _now() の ISO と食い違う（比較が常に偽になる）。
+    cutoff = (
+        datetime.now(timezone.utc) - timedelta(seconds=max(retry_after_sec, 0))
+    ).isoformat()
     return conn.execute(
         "SELECT * FROM properties WHERE status = 'approved' "
         "AND delivery_attempts < ? "
-        "AND (delivery_attempted_at IS NULL "
-        "     OR delivery_attempted_at <= datetime('now', ?)) "
-        "ORDER BY delivery_attempts, delivery_attempted_at IS NOT NULL, "
+        "AND (delivery_attempted_at IS NULL OR delivery_attempted_at <= ?) "
+        "ORDER BY delivery_attempts, "
+        "         CASE WHEN delivery_attempted_at IS NULL THEN 0 ELSE 1 END, "
         "         delivery_attempted_at, score DESC, id "
         "LIMIT ?",
-        (max_attempts, f"-{max(retry_after_sec, 0):.0f} seconds", limit),
+        (max_attempts, cutoff, limit),
     ).fetchall()
 
 
 def record_delivery_failure(
-    conn: sqlite3.Connection, property_id: int, message: str
+    conn: DbConnection, property_id: int, message: str
 ) -> int:
     """納品の失敗を記録し、その時点の試行回数を返す。
 
     status は approved のまま置く。失敗を別ステータスにすると
     「承認したのに一覧から消えた」ことになり、追跡できなくなる。
     """
-    # 時刻は datetime('now') で入れる。delivery_queue が SQL 側の
-    # datetime('now', '-N seconds') と文字列比較するため、書式を揃える必要がある
-    # （_now() の ISO 形式だと区切りが T になり、比較が常に偽になる）。
+    # 時刻は必ず _now() の ISO で入れる。delivery_queue が同じ形式の
+    # カットオフと文字列比較するため、書式を1つに揃える必要がある。
     conn.execute(
         "UPDATE properties SET delivery_attempts = delivery_attempts + 1, "
-        "delivery_error = ?, delivery_attempted_at = datetime('now') WHERE id = ?",
-        (message[:500], property_id),
+        "delivery_error = ?, delivery_attempted_at = ? WHERE id = ?",
+        (message[:500], _now(), property_id),
     )
     conn.commit()
     row = conn.execute(
@@ -290,7 +295,7 @@ def record_delivery_failure(
     return int(row["delivery_attempts"]) if row else 0
 
 
-def retry_delivery(conn: sqlite3.Connection, property_id: int) -> bool:
+def retry_delivery(conn: DbConnection, property_id: int) -> bool:
     """試行回数を戻して、自動納品の対象に復帰させる（審査UIの再試行）。"""
     cursor = conn.execute(
         "UPDATE properties SET delivery_attempts = 0, delivery_error = NULL, "
@@ -301,7 +306,7 @@ def retry_delivery(conn: sqlite3.Connection, property_id: int) -> bool:
     return cursor.rowcount > 0
 
 
-def delivery_queue_size(conn: sqlite3.Connection, max_attempts: int) -> int:
+def delivery_queue_size(conn: DbConnection, max_attempts: int) -> int:
     """まだ自動納品に拾われる見込みのある件数（待ち時間中のものも含む）。"""
     row = conn.execute(
         "SELECT COUNT(*) AS n FROM properties WHERE status = 'approved' "
@@ -311,18 +316,18 @@ def delivery_queue_size(conn: sqlite3.Connection, max_attempts: int) -> int:
     return int(row["n"]) if row else 0
 
 
-def untagged_feedback(conn: sqlite3.Connection, limit: int = 10) -> list[sqlite3.Row]:
+def untagged_feedback(conn: DbConnection, limit: int = 10) -> list[Row]:
     return conn.execute(
         "SELECT id, reason FROM feedback WHERE reason_tag IS NULL ORDER BY id LIMIT ?",
         (limit,),
     ).fetchall()
 
 
-def set_feedback_tag(conn: sqlite3.Connection, feedback_id: int, tag: str) -> None:
+def set_feedback_tag(conn: DbConnection, feedback_id: int, tag: str) -> None:
     conn.execute("UPDATE feedback SET reason_tag = ? WHERE id = ?", (tag, feedback_id))
 
 
-def tag_counts(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+def tag_counts(conn: DbConnection) -> list[Row]:
     """タグ別の件数（多い順）。ルール候補を出すかどうかの判断に使う。"""
     return conn.execute(
         "SELECT reason_tag, COUNT(*) AS hits FROM feedback "
@@ -331,7 +336,7 @@ def tag_counts(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     ).fetchall()
 
 
-def reasons_for_tag(conn: sqlite3.Connection, tag: str, limit: int = 10) -> list[str]:
+def reasons_for_tag(conn: DbConnection, tag: str, limit: int = 10) -> list[str]:
     rows = conn.execute(
         "SELECT reason FROM feedback WHERE reason_tag = ? ORDER BY id DESC LIMIT ?",
         (tag, limit),
@@ -340,7 +345,7 @@ def reasons_for_tag(conn: sqlite3.Connection, tag: str, limit: int = 10) -> list
 
 
 def upsert_rule_candidate(
-    conn: sqlite3.Connection, tag: str, hits: int, proposal: str
+    conn: DbConnection, tag: str, hits: int, proposal: str
 ) -> bool:
     """ルール候補を登録・更新する。新規に提案したときだけ True。
 
@@ -366,8 +371,8 @@ def upsert_rule_candidate(
 
 
 def list_rule_candidates(
-    conn: sqlite3.Connection, state: str | None = None
-) -> list[sqlite3.Row]:
+    conn: DbConnection, state: str | None = None
+) -> list[Row]:
     if state is None:
         return conn.execute(
             "SELECT * FROM rule_candidates ORDER BY state, hit_count DESC"
@@ -377,7 +382,7 @@ def list_rule_candidates(
     ).fetchall()
 
 
-def decide_rule_candidate(conn: sqlite3.Connection, tag: str, state: str) -> bool:
+def decide_rule_candidate(conn: DbConnection, tag: str, state: str) -> bool:
     """ルール候補を承認 / 却下する。自動適用はしない。"""
     if state not in ("approved", "dismissed"):
         raise ValueError("state は approved か dismissed のいずれか")
@@ -389,7 +394,7 @@ def decide_rule_candidate(conn: sqlite3.Connection, tag: str, state: str) -> boo
     return cursor.rowcount > 0
 
 
-def approved_rules(conn: sqlite3.Connection) -> list[str]:
+def approved_rules(conn: DbConnection) -> list[str]:
     """人が承認した除外ルール。スコアリングのプロンプトに載せる。"""
     rows = conn.execute(
         "SELECT proposal FROM rule_candidates WHERE state = 'approved' "
@@ -398,7 +403,7 @@ def approved_rules(conn: sqlite3.Connection) -> list[str]:
     return [row["proposal"] for row in rows if row["proposal"]]
 
 
-def clear_images(conn: sqlite3.Connection, property_id: int) -> int:
+def clear_images(conn: DbConnection, property_id: int) -> int:
     """取得済み画像の記録を消し、次回の納品で取り直せるようにする。
 
     抽出ルールを直したあとにやり直すための操作。採用しなかったURLの
@@ -417,7 +422,7 @@ def clear_images(conn: sqlite3.Connection, property_id: int) -> int:
 
 
 def delete_properties(
-    conn: sqlite3.Connection, *, source: str | None = None, property_id: int | None = None
+    conn: DbConnection, *, source: str | None = None, property_id: int | None = None
 ) -> int:
     """誤って取り込んだ候補を消す。納品済みのものは対象外にする。"""
     if property_id is not None:
@@ -433,7 +438,7 @@ def delete_properties(
     return cursor.rowcount
 
 
-def count_by_status(conn: sqlite3.Connection) -> dict[str, int]:
+def count_by_status(conn: DbConnection) -> dict[str, int]:
     rows = conn.execute(
         "SELECT status, COUNT(*) AS n FROM properties GROUP BY status"
     ).fetchall()

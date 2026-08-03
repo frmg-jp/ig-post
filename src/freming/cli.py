@@ -38,7 +38,7 @@ def _cmd_db(args: argparse.Namespace) -> int:
 
     cfg = load_config(args.config)
     setup_logging(cfg.app.log_dir, cfg.app.log_level)
-    db_path = args.db or cfg.app.db_path
+    db_path = args.db or cfg.app.target()
     if args.db_action == "status":
         for version, applied in migrate_mod.status(db_path):
             print(f"{'[x]' if applied else '[ ]'} {version}")
@@ -60,6 +60,25 @@ def _cmd_collect(args: argparse.Namespace) -> int:
     if args.explain:
         print(stats.url_pattern_report())
         print(stats.explain_report())
+    return 0
+
+
+def _cmd_sources(args: argparse.Namespace) -> int:
+    """編集ソースの key を並べる。
+
+    定期実行のスクリプトから「いま有効なソース」を取るために使う。
+    config.yaml を shell 側で解釈させると、設定の持ち方を変えたときに
+    ワークフローが黙って壊れる。
+    """
+    cfg = load_config(args.config)
+    for source in cfg.editorial_sources:
+        if args.enabled and not source.enabled:
+            continue
+        if args.verbose:
+            state = "有効" if source.enabled else "無効"
+            print(f"{source.key:<18} {state}  {source.rank}  {source.name}")
+        else:
+            print(source.key)
     return 0
 
 
@@ -119,7 +138,7 @@ def _cmd_learn(args: argparse.Namespace) -> int:
 
     cfg = load_config(args.config)
     setup_logging(cfg.app.log_dir, cfg.app.log_level)
-    with session(cfg.app.db_path) as conn:
+    with session(cfg.app.target()) as conn:
         stats = run_learning(cfg, conn, args.limit)
     print(stats.summary())
     for line in stats.new_candidates:
@@ -136,7 +155,7 @@ def _cmd_rules(args: argparse.Namespace) -> int:
 
     cfg = load_config(args.config)
     setup_logging(cfg.app.log_dir, cfg.app.log_level)
-    with session(cfg.app.db_path) as conn:
+    with session(cfg.app.target()) as conn:
         if args.rules_action == "list":
             rows = list_rule_candidates(conn)
             if not rows:
@@ -172,7 +191,7 @@ def _cmd_deliver(args: argparse.Namespace) -> int:
             print("--watch と --dry-run は同時に使えません。", file=sys.stderr)
             return 2
         return _watch_deliveries(cfg)
-    with session(cfg.app.db_path) as conn:
+    with session(cfg.app.target()) as conn:
         stats = deliver_approved(cfg, conn, args.limit, args.dry_run)
     print(stats.summary())
     print(stats.report())
@@ -246,7 +265,7 @@ def _cmd_score(args: argparse.Namespace) -> int:
 
     cfg = load_config(args.config)
     setup_logging(cfg.app.log_dir, cfg.app.log_level)
-    with session(cfg.app.db_path) as conn:
+    with session(cfg.app.target()) as conn:
         stats = score_pending(cfg, conn, args.limit, args.dry_run)
     print(stats.summary())
     print(stats.report())
@@ -356,7 +375,7 @@ def _cmd_remove(args: argparse.Namespace) -> int:
 
     cfg = load_config(args.config)
     setup_logging(cfg.app.log_dir, cfg.app.log_level)
-    with session(cfg.app.db_path) as conn:
+    with session(cfg.app.target()) as conn:
         removed = delete_properties(conn, source=args.source, property_id=args.id)
     print(f"{removed} 件削除しました")
     return 0
@@ -372,7 +391,7 @@ def _cmd_reset_images(args: argparse.Namespace) -> int:
 
     cfg = load_config(args.config)
     setup_logging(cfg.app.log_dir, cfg.app.log_level)
-    with session(cfg.app.db_path) as conn:
+    with session(cfg.app.target()) as conn:
         removed = clear_images(conn, args.id)
     if removed == 0:
         print("対象がありません（存在しないIDか、納品済みです）", file=sys.stderr)
@@ -391,7 +410,7 @@ def _cmd_status(args: argparse.Namespace) -> int:
 
     cfg = load_config(args.config)
     setup_logging(cfg.app.log_dir, cfg.app.log_level)
-    conn = connect(cfg.app.db_path)
+    conn = connect(cfg.app.target())
     try:
         counts = count_by_status(conn)
     finally:
@@ -427,6 +446,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--explain", action="store_true", help="閾値未満も含めて判定内訳を表示（調整用）"
     )
     p_collect.set_defaults(func=_cmd_collect)
+
+    p_sources = sub.add_parser("sources", help="編集ソースの key を並べる（定期実行用）")
+    p_sources.add_argument("--enabled", action="store_true", help="有効なものだけ")
+    p_sources.add_argument("--verbose", action="store_true", help="状態と名前も表示")
+    p_sources.set_defaults(func=_cmd_sources)
 
     p_probe = sub.add_parser(
         "probe-feed", help="任意のフィードURLを試して判定内訳だけ表示（DBに書き込まない）"
@@ -541,7 +565,7 @@ def main(argv: list[str] | None = None) -> int:
         from freming.db.migrate import PendingMigrations, ensure_migrated
 
         try:
-            ensure_migrated(load_config(args.config).app.db_path)
+            ensure_migrated(load_config(args.config).app.target())
         except PendingMigrations as exc:
             print(str(exc), file=sys.stderr)
             return 2

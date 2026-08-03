@@ -10,13 +10,13 @@ migrations/NNNN_name.sql を番号順に、未適用のものだけトランザ�
 from __future__ import annotations
 
 import argparse
-import sqlite3
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from freming.config import load_config
-from freming.db.connection import connect
+from freming.db.connection import SQLITE, DbConnection, connect, dialect_for
+from freming.db.dialect import translate_ddl
 from freming.logging_setup import get_logger, setup_logging
 
 log = get_logger(__name__)
@@ -26,7 +26,7 @@ MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 _TRACKING_TABLE = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version    TEXT PRIMARY KEY,
-  applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+  applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 )
 """
 
@@ -40,22 +40,66 @@ class Migration:
     def sql(self) -> str:
         return self.path.read_text(encoding="utf-8")
 
+    def sql_for(self, dialect: str) -> str:
+        """方言ごとのSQL。
+
+        NNNN_name.postgres.sql を置けばそちらが優先される（逃げ道）。
+        いまのところ差は `id INTEGER PRIMARY KEY` の採番だけなので、
+        置換で足りている。
+        """
+        override = self.path.with_suffix(f".{dialect}.sql")
+        if override.exists():
+            return override.read_text(encoding="utf-8")
+        return translate_ddl(self.sql, dialect)
+
 
 def discover_migrations(directory: Path = MIGRATIONS_DIR) -> list[Migration]:
-    """migrations ディレクトリの .sql をファイル名順に返す。"""
+    """migrations ディレクトリの .sql をファイル名順に返す。
+
+    NNNN_name.postgres.sql のような方言別ファイルは、それ自体を
+    マイグレーションとしては数えない（本体から参照される）。
+    """
     if not directory.exists():
         raise FileNotFoundError(f"マイグレーションディレクトリがありません: {directory}")
-    return [Migration(version=p.stem, path=p) for p in sorted(directory.glob("*.sql"))]
+    return [
+        Migration(version=p.stem, path=p)
+        for p in sorted(directory.glob("*.sql"))
+        if "." not in p.stem
+    ]
 
 
-def applied_versions(conn: sqlite3.Connection) -> set[str]:
+def applied_versions(conn: DbConnection) -> set[str]:
     conn.execute(_TRACKING_TABLE)
     rows = conn.execute("SELECT version FROM schema_migrations").fetchall()
     return {row["version"] for row in rows}
 
 
+def _run_script(conn: DbConnection, sql: str) -> None:
+    """複数文のSQLを流す。
+
+    sqlite3 の executescript は暗黙にコミットしてしまい、PostgreSQL には
+    そもそも無い。どちらでも同じ意味になるよう、文単位で実行する。
+    """
+    for statement in _split_statements(sql):
+        conn.execute(statement)
+
+
+def _split_statements(sql: str) -> list[str]:
+    """; 区切りで文に分ける。行コメントは落とす。
+
+    マイグレーションのSQLは自分たちで書いたものだけなので、
+    文字列リテラル中の ; までは考慮しない（現に1つも無い）。
+    """
+    lines = [
+        line for line in sql.splitlines()
+        if not line.strip().startswith("--")
+    ]
+    return [s.strip() for s in "\n".join(lines).split(";") if s.strip()]
+
+
 def migrate(db_path: str | Path) -> list[str]:
     """未適用のマイグレーションを適用し、適用したバージョンを返す。"""
+    dialect = dialect_for(db_path)
     conn = connect(db_path)
     newly_applied: list[str] = []
     try:
@@ -66,8 +110,7 @@ def migrate(db_path: str | Path) -> list[str]:
                 continue
             log.info("マイグレーション適用: %s", migration.version)
             try:
-                conn.execute("BEGIN")
-                conn.executescript(migration.sql)
+                _run_script(conn, migration.sql_for(dialect))
                 conn.execute(
                     "INSERT INTO schema_migrations (version) VALUES (?)", (migration.version,)
                 )
@@ -106,7 +149,9 @@ def ensure_migrated(db_path: str | Path) -> None:
     列が足りないまま起動すると「no such column」で全画面が500になり、
     原因が分かりにくい。先に何をすればよいかを出して止める。
     """
-    if not Path(db_path).exists():
+    # SQLite はファイルが無ければ「まだ何もしていない」と分かる。
+    # PostgreSQL は接続してみないと分からないので、status() に任せる。
+    if dialect_for(db_path) == SQLITE and not Path(db_path).exists():
         raise PendingMigrations(
             f"DBがまだありません（{db_path}）。次を実行してください:\n"
             "  python -m freming.cli db migrate"
@@ -122,13 +167,13 @@ def ensure_migrated(db_path: str | Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="DBマイグレーションの適用")
-    parser.add_argument("--db", default=None, help="DBパス（省略時は config.yaml の app.db_path）")
+    parser.add_argument("--db", default=None, help="DBパス/接続文字列（省略時は DATABASE_URL か config.yaml の app.db_path）")
     parser.add_argument("--status", action="store_true", help="適用状況の表示のみ")
     args = parser.parse_args(argv)
 
     cfg = load_config()
     setup_logging(cfg.app.log_dir, cfg.app.log_level)
-    db_path = args.db or cfg.app.db_path
+    db_path = args.db or cfg.app.target()
 
     if args.status:
         for version, is_applied in status(db_path):

@@ -15,12 +15,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import sqlite3
 import sys
 from dataclasses import dataclass, field
 
 from freming.config import Config, load_config
-from freming.db.connection import connect
+from freming.db.connection import DbConnection, Row, connect
 from freming.db.repository import (
     reasons_for_tag,
     set_feedback_tag,
@@ -109,7 +108,7 @@ class LearningClient:
                 return json.loads(block.text)
         raise RuntimeError("返答にテキストが含まれていません")
 
-    def classify(self, rows: list[sqlite3.Row], tags: list[str]) -> dict[int, str]:
+    def classify(self, rows: list[Row], tags: list[str]) -> dict[int, str]:
         listing = "\n".join(f"{row['id']}: {row['reason']}" for row in rows)
         result = self._json(
             "あなたは建築キュレーションメディアの編集アシスタントです。"
@@ -138,7 +137,7 @@ class LearningClient:
 
 def run_learning(
     config: Config,
-    conn: sqlite3.Connection,
+    conn: DbConnection,
     limit: int | None = None,
     client: LearningClient | None = None,
 ) -> LearnStats:
@@ -194,7 +193,7 @@ def main(argv: list[str] | None = None) -> int:
 
     config = load_config()
     setup_logging(config.app.log_dir, config.app.log_level)
-    conn = connect(config.app.db_path)
+    conn = connect(config.app.target())
     try:
         stats = run_learning(config, conn, args.limit)
     finally:

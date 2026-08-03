@@ -11,14 +11,13 @@ robots.txt の判定はここでも同じように適用する。
 from __future__ import annotations
 
 import argparse
-import sqlite3
 import sys
 from urllib.parse import urlparse
 
 from freming.collect import signals
 from freming.collect.base import Candidate, normalize_url, parse_page
 from freming.config import Config, load_config
-from freming.db.connection import connect
+from freming.db.connection import DbConnection, connect
 from freming.db.repository import find_by_source_url, insert_candidate
 from freming.logging_setup import get_logger, setup_logging
 from freming.net.client import HttpClient, RobotsDisallowed
@@ -51,11 +50,11 @@ def guess_source(config: Config, url: str) -> tuple[str, str | None]:
     return "manual", None
 
 
-def ingest_url(config: Config, url: str, conn: sqlite3.Connection | None = None) -> int:
+def ingest_url(config: Config, url: str, conn: DbConnection | None = None) -> int:
     """URLを1件だけ取得して候補化し、property_id を返す。"""
     url = normalize_url(url)
     owns_conn = conn is None
-    conn = conn or connect(config.app.db_path)
+    conn = conn or connect(config.app.target())
     try:
         existing = find_by_source_url(conn, url)
         if existing is not None:
@@ -105,7 +104,7 @@ def add_manual_entry(
     country: str | None = None,
     note: str | None = None,
     thumbnail_url: str | None = None,
-    conn: sqlite3.Connection | None = None,
+    conn: DbConnection | None = None,
 ) -> int:
     """ページを取得せず、人が見た内容を手で登録する。
 
@@ -115,7 +114,7 @@ def add_manual_entry(
     """
     source_url = normalize_url(source_url)
     owns_conn = conn is None
-    conn = conn or connect(config.app.db_path)
+    conn = conn or connect(config.app.target())
     try:
         existing = find_by_source_url(conn, source_url)
         if existing is not None:

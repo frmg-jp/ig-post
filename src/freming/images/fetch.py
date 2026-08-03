@@ -8,18 +8,23 @@ HttpClient が担保するので、ここでは HTTP を直接触らない。
 
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import dataclass, field
 from io import BytesIO
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
 from freming.config import Config
 from freming.images.extract import extract_image_urls
+from freming.db.connection import DbConnection, Row
 from freming.logging_setup import get_logger
 from freming.net.client import HttpClient, RobotsDisallowed
 
 log = get_logger(__name__)
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 class NoImagesFound(RuntimeError):
@@ -96,8 +101,8 @@ def _probe(data: bytes) -> tuple[int, int] | None:
 
 def fetch_images(
     config: Config,
-    conn: sqlite3.Connection,
-    row: sqlite3.Row,
+    conn: DbConnection,
+    row: Row,
     client: HttpClient | None = None,
 ) -> FetchStats:
     """1物件分の画像を取得してディスクとDBに記録する。
@@ -145,9 +150,9 @@ def fetch_images(
 
         def _skip(url: str, reason: str) -> None:
             conn.execute(
-                "INSERT OR IGNORE INTO image_skips (property_id, source_url, reason, created_at) "
-                "VALUES (?, ?, ?, datetime('now'))",
-                (row["id"], url, reason),
+                "INSERT INTO image_skips (property_id, source_url, reason, created_at) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT (property_id, source_url) DO NOTHING",
+                (row["id"], url, reason, _now()),
             )
             conn.commit()
 
@@ -201,10 +206,11 @@ def fetch_images(
             path.write_bytes(response.content)
 
             conn.execute(
-                "INSERT OR IGNORE INTO images "
+                "INSERT INTO images "
                 "(property_id, source_url, width, height, local_path, position, fetched_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, datetime('now'))",
-                (row["id"], url, width, height, str(path), position),
+                "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT (property_id, source_url) DO NOTHING",
+                (row["id"], url, width, height, str(path), position, _now()),
             )
             conn.commit()
             stats.downloaded += 1

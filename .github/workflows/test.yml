@@ -1,0 +1,40 @@
+name: テスト
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # SQLite だけで通しても「PostgreSQL でだけ落ちる」書き方が入り込むので、
+    # 実接続でも回す。
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: freming
+          POSTGRES_PASSWORD: freming
+          POSTGRES_DB: freming_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev,postgres]"
+      - run: ruff check src tests
+      - name: テスト（SQLite + PostgreSQL 実接続）
+        env:
+          FREMING_TEST_DSN: postgresql://freming:freming@localhost:5432/freming_test
+        run: python -m pytest -q

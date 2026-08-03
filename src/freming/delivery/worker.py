@@ -19,11 +19,10 @@ deliver を実行する必要はない。
 
 from __future__ import annotations
 
-import sqlite3
 import threading
 
 from freming.config import Config
-from freming.db.connection import connect
+from freming.db.connection import DbConnection, Row, connect
 from freming.db.repository import delivery_queue, record_delivery_failure
 from freming.delivery.deliver import DeliveryResult, deliver_property
 from freming.delivery.drive import DriveAuthError, DriveClient, build_client
@@ -107,7 +106,7 @@ class DeliveryWorker:
     def drain_once(self) -> list[DeliveryResult]:
         """いま納品できるものを納品する。テストから直接呼べるように分けてある。"""
         delivered: list[DeliveryResult] = []
-        conn = connect(self.config.app.db_path)
+        conn = connect(self.config.app.target())
         try:
             rows = delivery_queue(
                 conn,
@@ -134,7 +133,7 @@ class DeliveryWorker:
         return delivered
 
     def _deliver_one(
-        self, conn: sqlite3.Connection, row: sqlite3.Row
+        self, conn: DbConnection, row: Row
     ) -> DeliveryResult | None:
         property_id = int(row["id"])
         self.current_property_id = property_id

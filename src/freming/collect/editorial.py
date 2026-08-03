@@ -12,7 +12,6 @@ FREMINGの独自性はここにある。編集メディアのRSSから建築記�
 from __future__ import annotations
 
 import argparse
-import sqlite3
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -23,7 +22,7 @@ import feedparser
 from freming.collect import signals
 from freming.collect.base import Candidate, normalize_url, parse_page
 from freming.config import Config, EditorialSource, load_config
-from freming.db.connection import connect
+from freming.db.connection import DbConnection, connect
 from freming.db.repository import exists_source_url, insert_candidate
 from freming.logging_setup import get_logger, setup_logging
 from freming.net.client import HttpClient, RobotsDisallowed
@@ -204,7 +203,7 @@ def _entry_html(entry) -> str:
 class EditorialCollector:
     """編集ソース1つ分の収集。"""
 
-    def __init__(self, config: Config, client: HttpClient, conn: sqlite3.Connection) -> None:
+    def __init__(self, config: Config, client: HttpClient, conn: DbConnection) -> None:
         self.config = config
         self.client = client
         self.conn = conn
@@ -437,7 +436,7 @@ def collect_source(
     if not source.enabled:
         raise SystemExit(f"'{source_key}' は enabled: false です。config.yaml を確認してください")
 
-    conn = connect(config.app.db_path)
+    conn = connect(config.app.target())
     try:
         with HttpClient(config.http) as client:
             return EditorialCollector(config, client, conn).collect(
@@ -495,7 +494,7 @@ def probe_feed(config: Config, feed_url: str, limit: int | None = None) -> Colle
     probe_config.collect.fetch_article_pages = False   # フィードの中身だけを見る
     probe_config.collect.lookback_days = 36500         # 期間で切らず全件を見る
 
-    conn = connect(probe_config.app.db_path)
+    conn = connect(probe_config.app.target())
     try:
         with HttpClient(probe_config.http) as client:
             collector = EditorialCollector(probe_config, client, conn)
