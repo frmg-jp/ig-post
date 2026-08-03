@@ -86,9 +86,17 @@
 # 2026-08-03 に実測、4件とも結論が出た（scripts/probe_remaining_feeds.sh）
 #
 # https://thespaces.com/feed/           → 採用（config.yaml: thespaces）
-#     10件 / 本文中央値240字 / 候補0件。抜粋しか配信しないため候補0件になるが、
-#     タイトルは明確に売出中の建築物件で、Alicante・Alentejo・Bordeaux など
-#     空いている重点エリアに当たっている。fetch_article_pages: true で運用する。
+#     記事ページ取得ありで実測（2026-08-03）:
+#       10件 / 1.1本/日（8日分）/ 候補4件 → 審査 週3.1件
+#     Alentejo(PT) / Provence(FR) / Dorset(UK) / Tulum(MX) が2点で通った。
+#     いずれも本文にキーワードと価格の両方がある。
+#
+#     惜しかったもの（重点エリアなので、閾値の見直し次第で拾える）:
+#       1点  Alicante(ES)  kw=on the market あり、価格の検出なし
+#       0点  Bordeaux(FR)  価格はあるが販売キーワードから200字より遠く除外
+#
+#     フィードは抜粋（240字）しか配信しないので、probe-feed では構造的に
+#     候補0件になる。判断は必ず collect --explain で行う。
 #
 # https://themodernspaces.com/feed/     → 採用（config.yaml: themodernspaces）
 #     10件 / 本文中央値5277字 / 候補0件。リスボンの住宅を扱うが照明・椅子の

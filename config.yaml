@@ -85,13 +85,12 @@ editorial_sources:
     name: "The Spaces"
     rank: B
     enabled: true
-    # 2026-08-03 の probe-feed: 10件 / 本文中央値240字 / 候補0件。
-    # 候補0件なのはフィードが抜粋しか配信していないため。タイトルを見ると
-    # 中身は明確に売出中の建築物件で、しかも空いている重点エリアに当たっている
-    # （Alicante=スペイン、Alentejo=ポルトガル、Bordeaux/Provence=フランス）。
+    # 2026-08-03 の collect --explain（記事ページ取得あり）:
+    #   10件 / 1.1本/日（8日分）/ 候補4件 → 審査 週3.1件
+    # 現時点で最も歩留まりが良く、配信も止まっていない唯一のソース。
     #
-    # probe-feed は必ず fetch_article_pages=False で判定するため、抜粋配信の
-    # フィードは構造的に候補0件になる。ここは記事ページを取って判定する。
+    # フィードは抜粋（240字）しか配信しないので、probe-feed では構造的に
+    # 候補0件になる。判断は必ず collect --explain で行うこと。
     fetch_article_pages: true
     feeds:
       - "https://thespaces.com/feed/"
