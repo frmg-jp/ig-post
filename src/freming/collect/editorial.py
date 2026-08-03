@@ -129,6 +129,15 @@ class CollectStats:
     # 収集で使う期間（日）。窓の「長さ」だけでは、そのフィードがまだ
     # 動いているのか止まっているのかが分からない。
     lookback_days: int | None = None
+    # 一覧ページから拾った記事の数（バックフィル）。フィード由来と分けて
+    # 数える。混ぜると配信ペースの分母が狂い、「1日あたり何本」が跳ね上がる。
+    backfill_seen: int = 0
+    backfill_inserted: int = 0
+
+    @property
+    def feed_inserted(self) -> int:
+        """フィード由来の候補の数。配信ペースの見積もりはこちらを使う。"""
+        return self.inserted - self.backfill_inserted
 
     # ------------------------------------------------------------------
     # 配信ペース
@@ -186,7 +195,10 @@ class CollectStats:
         pace = self.entries_per_day
         if pace is None or not self.feed_entries:
             return None
-        return pace * (self.inserted / self.feed_entries) * 7
+        # 分子はフィード由来の候補だけ。バックフィルは過去の取りこぼしを
+        # 1回拾うものなので、これからの見込みには入らない。混ぜると
+        # 初回だけ週あたりの件数が跳ね上がる。
+        return pace * (self.feed_inserted / self.feed_entries) * 7
 
     # 抜粋しか配信しないフィードの目安。thespaces が240字で、記事ページを
     # 取ると 4/10 が候補になった。この長さでは販売シグナルが本文に無い。
@@ -326,6 +338,11 @@ class CollectStats:
             f" robots {self.skipped_robots} / 取得失敗 {self.fetch_failed} /"
             f" シグナルなし {self.no_signal}）"
         )
+        if self.backfill_seen:
+            line += (
+                f"\n  一覧ページから {self.backfill_seen} 件を見て"
+                f" {self.backfill_inserted} 件を追加（フィードから落ちた過去記事）"
+            )
         if self.used_feed_only:
             line += (
                 f"\n  ※ {self.used_feed_only} 件はフィード配信分の本文で判定しました"
@@ -382,6 +399,27 @@ def _entry_html(entry) -> str:
     return "".join(parts)
 
 
+@dataclass
+class BackfillEntry:
+    """一覧ページから拾ったURLを、フィードの記事と同じ形で扱うための入れ物。
+
+    feedparser の entry と同じ属性名（link / title）を持たせて、
+    `_process_entry` を分岐なしで通す。
+
+    公開日は持たない。持たせないことに意味があって、
+
+      - `entry_dates` に入らないので配信ペースの分母が狂わない
+      - `lookback_days` の足切りに掛からない。フィードから落ちた記事は
+        定義上その期間より古いので、掛けると1件も通らなくなる
+
+    本文も持たない。一覧ページの抜粋では判定できないので、記事ページを
+    取得できないソースではバックフィルは働かない（本文なしとして落ちる）。
+    """
+
+    link: str
+    title: str = ""
+
+
 class EditorialCollector:
     """編集ソース1つ分の収集。"""
 
@@ -413,13 +451,14 @@ class EditorialCollector:
         dry_run: bool = False,
         explain: bool = False,
         ignore_known: bool = False,
+        backfill: bool = True,
     ) -> CollectStats:
         stats = CollectStats(
             source=source.key,
             lookback_days=self.real_lookback_days or self.config.collect.lookback_days,
         )
         self._apply_source_policy(source)
-        if not source.feeds:
+        if not source.feeds and not (backfill and source.index_urls):
             log.warning(
                 "%s: フィードURLが未設定です。config.yaml の editorial_sources に "
                 "公式RSSのURLを設定してください。", source.key
@@ -439,8 +478,88 @@ class EditorialCollector:
                     entry, source, cutoff, stats, dry_run, explain, ignore_known
                 )
 
+        if backfill and source.index_urls and stats.inserted < max_items:
+            self._backfill(
+                source, cutoff, stats, dry_run, explain, ignore_known, max_items
+            )
+
         log.info(stats.summary())
         return stats
+
+    # ------------------------------------------------------------------
+    def _backfill(
+        self,
+        source: EditorialSource,
+        cutoff: datetime,
+        stats: CollectStats,
+        dry_run: bool,
+        explain: bool,
+        ignore_known: bool,
+        max_items: int,
+    ) -> None:
+        """一覧ページを見て、フィードから落ちた記事を拾う。
+
+        公式RSSは最新10件程度しか配信しない。毎日回していれば取りこぼさない
+        建て付けだが、フィードに載る前の記事や、非物件の記事に枠を食われて
+        一度も現れなかった記事は永久に入らない。一覧ページはその救済。
+
+        2回目以降はほぼ全件が「取得済み」で終わる。増えるリクエストは
+        一覧ページ1回だけなので、毎回回してよい。
+        """
+        before = stats.inserted
+        # フィードで既に見たURLは飛ばす。通常は insert 済みなので
+        # exists_source_url で落ちるが、--dry-run では書き込まないため
+        # 同じ記事をもう一度取りに行ってしまう（件数も二重に数える）。
+        from_feed = set(stats.entry_urls)
+        urls = [u for u in self._index_article_urls(source, stats) if u not in from_feed]
+        stats.backfill_seen = len(urls)
+        budget = min(source.max_backfill, max_items - stats.inserted)
+        for url in urls[:budget] if budget > 0 else []:
+            if stats.inserted >= max_items:
+                break
+            # cutoff は渡すが、公開日を持たないので効かない（BackfillEntry の
+            # 説明を参照）。引数の形を揃えるためだけに通している。
+            self._process_entry(
+                BackfillEntry(link=url), source, cutoff, stats, dry_run, explain,
+                ignore_known,
+            )
+        stats.backfill_inserted = stats.inserted - before
+
+    def _index_article_urls(
+        self, source: EditorialSource, stats: CollectStats
+    ) -> list[str]:
+        """一覧ページのリンクから記事URLを拾う。
+
+        url_include / url_exclude をそのまま使う。ナビゲーションや
+        カテゴリのリンクを弾くのは設定側の仕事にしてある。
+        """
+        from bs4 import BeautifulSoup
+
+        found: list[str] = []
+        seen: set[str] = set()
+        for index_url in source.index_urls:
+            log.info("一覧ページを取得: %s", index_url)
+            try:
+                response = self.client.get(index_url)
+            except RobotsDisallowed:
+                stats.skipped_robots += 1
+                log.warning("一覧ページが robots.txt で拒否されました: %s", index_url)
+                continue
+            except Exception as exc:  # noqa: BLE001 - 1ページの失敗で全体を止めない
+                stats.fetch_failed += 1
+                log.warning("一覧ページを取得できません: %s (%s)", index_url, exc)
+                continue
+
+            soup = BeautifulSoup(response.text, "lxml")
+            for anchor in soup.find_all("a", href=True):
+                url = normalize_url(urljoin(index_url, anchor["href"].strip()))
+                if url in seen or url == normalize_url(index_url):
+                    continue
+                if not source.url_allowed(url):
+                    continue
+                seen.add(url)
+                found.append(url)
+        return found
 
     # ------------------------------------------------------------------
     def _feed_entries(self, feed_url: str, stats: CollectStats) -> list:
@@ -513,11 +632,16 @@ class EditorialCollector:
         if not link:
             return
         url = normalize_url(link)
-        # 除外されたURLも記録する。何が弾かれているかを見ないと、
-        # url_exclude が効きすぎているのか足りないのか判断できない。
-        stats.entry_urls.append(url)
+        # フィード由来の記事だけを配信ペースの材料にする。バックフィルの分を
+        # 混ぜると、窓の件数（分子）だけが増えて「1日あたり何本」が跳ね上がり、
+        # URLパターンの「全 N 件」もフィードの実数と合わなくなる。
+        from_feed = not isinstance(entry, BackfillEntry)
+        if from_feed:
+            # 除外されたURLも記録する。何が弾かれているかを見ないと、
+            # url_exclude が効きすぎているのか足りないのか判断できない。
+            stats.entry_urls.append(url)
 
-        published = _entry_published(entry)
+        published = _entry_published(entry) if from_feed else None
         if published:
             # どのスキップよりも先に記録する。配信ペースはフィードの窓全体で
             # 決まるので、url_exclude や期間で絞ってから数えると窓が縮んで
@@ -634,6 +758,7 @@ def collect_source(
     limit: int | None = None,
     dry_run: bool = False,
     explain: bool = False,
+    backfill: bool = True,
 ) -> CollectStats:
     source = config.editorial_source(source_key)
     if source is None:
@@ -653,7 +778,7 @@ def collect_source(
     try:
         with HttpClient(config.http) as client:
             return EditorialCollector(config, client, conn).collect(
-                source, limit, dry_run, explain
+                source, limit, dry_run, explain, backfill=backfill
             )
     finally:
         conn.close()

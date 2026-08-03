@@ -155,7 +155,10 @@ def _cmd_collect(args: argparse.Namespace) -> int:
                 print(f"  {u}")
         return 0
 
-    stats = collect_source(cfg, args.source, args.limit, args.dry_run, args.explain)
+    stats = collect_source(
+        cfg, args.source, args.limit, args.dry_run, args.explain,
+        backfill=not args.no_backfill,
+    )
     print(stats.summary())
     for url in stats.candidates:
         print(f"  - {url}")
@@ -609,6 +612,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_collect.add_argument("--dry-run", action="store_true")
     p_collect.add_argument(
         "--explain", action="store_true", help="閾値未満も含めて判定内訳を表示（調整用）"
+    )
+    p_collect.add_argument(
+        "--no-backfill", action="store_true",
+        help="一覧ページからの過去記事の拾い直しをしない（フィードだけ見る）",
     )
     p_collect.set_defaults(func=_cmd_collect)
 

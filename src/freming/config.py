@@ -110,6 +110,21 @@ class EditorialSource(BaseModel):
     # 重ねた合成画像になっているメディア向け。true にすると先頭の1枚を飛ばし、
     # 2枚目から使う。審査UIのサムネイルと納品の 01.jpg の両方に効く。
     skip_lead_image: bool = False
+    # フィードから落ちた過去記事を拾う一覧ページ（バックフィル）。
+    #
+    # 公式RSSはたいてい最新10件しか配信しない。The Spaces の実測では
+    # 10件＝7.2日分で、しかも非物件の記事が枠を食うため、物件は6件しか
+    # 見えていなかった。カテゴリの一覧ページには20件並んでおり、
+    # 11件目から下はフィードに一度も現れない。
+    #
+    # ここに一覧ページのURLを入れると、フィードの処理のあとに同じページを
+    # 見て、まだDBに無い記事を拾う。URLの絞り込みは url_include /
+    # url_exclude をそのまま使う（ナビゲーションのリンクを弾くため、
+    # 記事URLの形を url_include に書くこと）。
+    index_urls: list[str] = Field(default_factory=list)
+    # 1回のバックフィルで新しく取り込む上限。一覧ページの件数で頭打ちに
+    # なるが、ページ送りを足したときに歯止めが要る。
+    max_backfill: int = 20
 
     def url_allowed(self, url: str) -> bool:
         import re

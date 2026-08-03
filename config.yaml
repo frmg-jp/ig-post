@@ -93,9 +93,28 @@ editorial_sources:
     #
     # フィードは抜粋（240字）しか配信しないので、probe-feed では構造的に
     # 候補0件になる。判断は必ず collect --explain で行うこと。
+    #
+    # 2026-08-03 追記: サイト全体のフィードからカテゴリ専用フィードに変えた。
+    # 全体フィードは10件で 7.2日分、うち4件が非物件（音楽・美術・家具）に
+    # 食われて物件は6件だった。category/property/feed は10件全部が物件で
+    # 12.2日分ある。同じ10件の枠を物件だけに使える。
     fetch_article_pages: true
     feeds:
-      - "https://thespaces.com/feed/"
+      - "https://thespaces.com/category/property/feed/"
+    # フィードは10件しか配信しない。一覧ページには20件並んでいて、
+    # 11件目から下は一度もフィードに現れないまま落ちる。ここを拾う。
+    index_urls:
+      - "https://thespaces.com/category/property/"
+    # 記事URLは slug がドメイン直下に来る。一覧ページにはナビゲーションや
+    # カテゴリのリンクも入るので、この形のものだけ通す。
+    url_include:
+      - "^https://thespaces\\.com/[a-z0-9-]+$"
+    url_exclude:
+      - "/terms-of-service"
+      - "/privacy-policy"
+      - "/about"
+      - "/contact"
+      - "/newsletter"
   - key: themodernspaces
     name: "The Modern Spaces"
     rank: B

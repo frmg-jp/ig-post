@@ -864,3 +864,148 @@ def test_url_excluded_entries_still_count_towards_the_pace(monkeypatch) -> None:
     assert len(stats.entry_dates) == 3          # 除外しても日付は残る
     assert stats.window_days == pytest.approx(3.0)
     assert "公開日が取れず" not in stats.pace_report()
+
+
+# --- バックフィル（一覧ページからの拾い直し） -----------------------------
+#
+# 公式RSSはたいてい最新10件しか配信しない。The Spaces の実測では
+# 10件＝7.2日分で、それより古い記事は一度も現れないまま落ちる。
+# 一覧ページを見て拾い直す経路が、フィードと同じ判定を通ることを確かめる。
+
+INDEX_URL = "https://www.dezeen.com/property/"
+
+
+def _index(hrefs: list[str]) -> str:
+    links = "".join(f'<a href="{h}">記事</a>' for h in hrefs)
+    return f"<html><body><nav><a href='/about/'>About</a></nav>{links}</body></html>"
+
+
+@pytest.fixture()
+def backfill_source(source):
+    src = source.model_copy(deep=True)
+    src.index_urls = [INDEX_URL]
+    src.url_include = [r"^https://www\.dezeen\.com/[a-z0-9-]+$"]
+    # 記事と同じ形をしたナビゲーションのリンクは url_exclude で落とす。
+    src.url_exclude = ["/about$", "/contact$"]
+    return src
+
+
+def test_articles_that_fell_out_of_the_feed_are_picked_up(
+    config, conn, backfill_source
+) -> None:
+    now = datetime.now(timezone.utc)
+    old = "https://www.dezeen.com/old-listing"
+    pages = {
+        FEED_URL: _feed(
+            [("New", "https://www.dezeen.com/new/", now - timedelta(days=1))]
+        ),
+        "https://www.dezeen.com/new": _article("Now for sale at $1.2 million."),
+        INDEX_URL: _index(["/new/", "/old-listing/"]),
+        old: _article("This mill house is on the market for £900,000."),
+    }
+
+    stats, _ = _run(config, conn, pages, backfill_source)
+
+    assert stats.inserted == 2
+    assert stats.backfill_inserted == 1
+    urls = {r["source_url"] for r in conn.execute("SELECT source_url FROM properties")}
+    assert old in urls
+
+
+def test_the_feed_window_is_not_re_fetched(config, conn, backfill_source) -> None:
+    """フィードで見た記事を一覧ページからもう一度取りに行かない。
+
+    通常は insert 済みなので取得済みで落ちるが、--dry-run では書き込まない
+    ため、素通しだと同じ記事を二度取って件数も二重になる。
+    """
+    now = datetime.now(timezone.utc)
+    pages = {
+        FEED_URL: _feed(
+            [("New", "https://www.dezeen.com/new/", now - timedelta(days=1))]
+        ),
+        "https://www.dezeen.com/new": _article("Now for sale at $1.2 million."),
+        INDEX_URL: _index(["/new/"]),
+    }
+
+    stats, client = _run(config, conn, pages, backfill_source, dry_run=True)
+
+    assert stats.inserted == 1
+    assert stats.backfill_seen == 0
+    assert client.requested.count("https://www.dezeen.com/new") == 1
+
+
+def test_navigation_links_are_filtered_out(config, conn, backfill_source) -> None:
+    """一覧ページにはナビゲーションのリンクも入る。url_include で弾く。"""
+    pages = {
+        FEED_URL: _feed([]),
+        INDEX_URL: _index(["/about/", "/category/houses/", "/a-real-listing/"]),
+        "https://www.dezeen.com/a-real-listing": _article("On the market for £1 million."),
+    }
+
+    stats, client = _run(config, conn, pages, backfill_source)
+
+    assert stats.backfill_seen == 1
+    assert "https://www.dezeen.com/about" not in client.requested
+    assert "https://www.dezeen.com/category/houses" not in client.requested
+
+
+def test_backfill_does_not_inflate_the_weekly_estimate(
+    config, conn, backfill_source
+) -> None:
+    """過去の拾い直しを「これからの見込み」に混ぜない。
+
+    分子だけが増えて、初回の実行だけ週あたりの件数が跳ね上がる。
+    """
+    now = datetime.now(timezone.utc)
+    pages = {
+        FEED_URL: _feed(
+            [
+                ("A", "https://www.dezeen.com/a/", now - timedelta(days=1)),
+                ("B", "https://www.dezeen.com/b/", now - timedelta(days=8)),
+            ]
+        ),
+        "https://www.dezeen.com/a": _article("For sale at $1 million."),
+        "https://www.dezeen.com/b": _article("A house completed in 2019."),
+        INDEX_URL: _index(["/c/", "/d/", "/e/"]),
+        "https://www.dezeen.com/c": _article("On the market for $2 million."),
+        "https://www.dezeen.com/d": _article("Listed for $3 million."),
+        "https://www.dezeen.com/e": _article("Asking price $4 million."),
+    }
+
+    stats, _ = _run(config, conn, pages, backfill_source)
+
+    assert stats.inserted == 4
+    assert stats.feed_inserted == 1
+    # フィードは7日で2件（0.143本/日）、うち候補は1件。0.143 × 1/2 × 7 = 0.5。
+    # バックフィルの3件を分子に混ぜると 0.143 × 4/2 × 7 = 2.0 に跳ね上がる。
+    assert stats.candidates_per_week == pytest.approx(0.5, abs=0.05)
+
+
+def test_backfill_can_be_turned_off(config, conn, backfill_source) -> None:
+    pages = {
+        FEED_URL: _feed([]),
+        INDEX_URL: _index(["/a-real-listing/"]),
+        "https://www.dezeen.com/a-real-listing": _article("On the market for £1 million."),
+    }
+
+    client = FakeClient(pages)
+    stats = EditorialCollector(config, client, conn).collect(
+        backfill_source, backfill=False
+    )
+
+    assert stats.backfill_seen == 0
+    assert INDEX_URL not in client.requested
+
+
+def test_a_source_without_index_urls_is_unchanged(config, conn, source) -> None:
+    now = datetime.now(timezone.utc)
+    pages = {
+        FEED_URL: _feed([("A", "https://www.dezeen.com/a/", now - timedelta(days=1))]),
+        "https://www.dezeen.com/a": _article("For sale at $1 million."),
+    }
+
+    stats, _ = _run(config, conn, pages, source)
+
+    assert stats.inserted == 1
+    assert stats.backfill_seen == 0
+    assert stats.backfill_inserted == 0
