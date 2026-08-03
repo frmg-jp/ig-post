@@ -121,6 +121,47 @@ class EditorialSource(BaseModel):
         return any(re.search(pattern, url) for pattern in self.url_include)
 
 
+class ListingCrawl(BaseModel):
+    """mode: crawl の販売ソースを、どうたどって何を取るか。
+
+    仲介サイトは記事メディアと違ってRSSを持たないが、公開している
+    sitemap.xml に物件ページが並んでいる。そこを入口にする。
+    サイトごとに違うのは「物件URLの見分け方」と「どこに価格と所在地が
+    書いてあるか」だけなので、コードではなくここで持つ。
+    """
+
+    # 入口。sitemap は入れ子になっていることが多いので、物件URLに
+    # 行き当たるまで sitemap_depth 段までたどる。
+    sitemap_urls: list[str] = Field(default_factory=list)
+    # sitemap を持たないサイト用。一覧ページのリンクから拾う。
+    index_urls: list[str] = Field(default_factory=list)
+    sitemap_depth: int = 2
+    # 物件ページのURL。これに一致しないものは取得しない（取得前に落とすので
+    # 相手サイトへの無駄なアクセスも減る）。
+    detail_url_include: list[str] = Field(default_factory=list)
+    detail_url_exclude: list[str] = Field(default_factory=list)
+    # 価格の書式。本文から最初に一致したものを売出価格として扱う。
+    price_patterns: list[str] = Field(default_factory=lambda: [r"\$\s?\d[\d,]{4,}"])
+    # 所在地の取り方。
+    #   address … 表示されている米国住所（"..., Oak Lawn IL 60453"）から取る。
+    #             og:title を先に見て、無ければページ全体から探す。
+    #   none    … 取らない。スコアリング側の推定に委ねる。
+    location_from: Literal["address", "none"] = "address"
+    country: str = "United States"
+    # 1回の収集で見る物件ページの上限。sitemap は数万件あることがあり、
+    # 上限を持たないと3秒間隔でも何時間も走り続ける。
+    max_details: int = 40
+
+    def detail_allowed(self, url: str) -> bool:
+        import re
+
+        if any(re.search(p, url) for p in self.detail_url_exclude):
+            return False
+        if not self.detail_url_include:
+            return True
+        return any(re.search(p, url) for p in self.detail_url_include)
+
+
 class ListingSource(BaseModel):
     key: str
     name: str
@@ -129,6 +170,8 @@ class ListingSource(BaseModel):
     enabled: bool = False
     base_url: str | None = None
     note: str | None = None
+    # mode: crawl のときだけ使う。manual_only では未設定のままにする。
+    crawl: ListingCrawl | None = None
 
 
 class ForSaleSignals(BaseModel):

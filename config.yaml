@@ -284,6 +284,50 @@ listing_sources:
     mode: crawl
     enabled: false
     base_url: "https://architectureforsale.com"
+
+  # ------------------------------------------------------------------
+  # IDX由来を含む仲介サイト。2026-08-03、ユーザー判断により自動収集の
+  # 対象にした。掲載物件にはMLSからIDXで供給された他社物件が含まれ、
+  # 自社専任物件とサイト上で機械的に分離できない。写真の権利も掲載
+  # ブローカー側にある。この点は承知のうえで取得している。
+  #
+  # 収集ポリシーのうち、robots.txt の尊重・3秒間隔・同一ドメインの
+  # 直列化は従来どおり守る。bot検知を回避する実装は行わない。
+  # 実測（2026-08-03、docs/idx-survey.md）で robots が許可し、かつ
+  # サーバ側で描画していることを確認できた2件から始める。
+  # ------------------------------------------------------------------
+  - key: dreamtown
+    name: "Dream Town Realty"
+    rank: B
+    mode: crawl
+    enabled: false
+    base_url: "https://www.dreamtown.com"
+    note: "Chicago。sitemap.xml に物件ページが無く、一覧ページから拾う"
+    crawl:
+      index_urls:
+        - "https://www.dreamtown.com/properties/coming-soon"
+      detail_url_include:
+        - "/properties/\\d+/"
+      location_from: address
+      max_details: 40
+  - key: vanguard
+    name: "Vanguard Properties"
+    rank: B
+    mode: crawl
+    enabled: false
+    base_url: "https://vanguardproperties.com"
+    note: "San Francisco。物件sitemapが1万件超あるので max_details で抑える"
+    crawl:
+      sitemap_urls:
+        - "https://vanguardproperties.com/sitemap.xml"
+      sitemap_depth: 2
+      # 物件ページは末尾にMLS番号が付く（.../inverness-ca-94937-325100256）。
+      # ここを緩めると /properties/commercial のような一覧ページを拾い、
+      # ページ内に出ている最高額を物件価格として登録してしまう。
+      detail_url_include:
+        - "/properties/[^/]*-\\d{6,}$"
+      location_from: address
+      max_details: 40
   - key: zillow
     name: "Zillow"
     rank: B

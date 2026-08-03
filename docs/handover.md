@@ -78,6 +78,8 @@ FREMING CURATED — 建築キュレーションメディアの物件収集パイ
   `.github/workflows/collect.yml`（毎日0時UTC）が Postgres を向くようにする
 - 手動URL投入物件の画像アップロード経路（未実装・半日規模。手動投入物件は
   こちらからページを取得しない建て付けなので、画像も人が入れる必要がある）
+- 仲介サイトの自動収集（経路A）: dreamtown / vanguard の2件を通した。
+  残りは docs/idx-survey.md を見る。有効化は `enabled: true` にするだけ
 - `price` 軸の重み 0.05 は未検証。承認実績が溜まってから見直す
 - 学習ループ（`learn` → ルール候補UI）は実データで未通し
 

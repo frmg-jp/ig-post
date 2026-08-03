@@ -53,6 +53,25 @@ def _cmd_collect(args: argparse.Namespace) -> int:
 
     cfg = load_config(args.config)
     setup_logging(cfg.app.log_dir, cfg.app.log_level)
+
+    # 販売ソース（経路A）は sitemap 起点で、判定の作りが経路Bと違う。
+    # key で振り分ける。呼ぶ側が経路を意識せずに済むようにしておく。
+    if cfg.editorial_source(args.source) is None and cfg.listing_source(args.source):
+        from freming.collect.listings import collect_listing_source
+
+        listing_stats = collect_listing_source(
+            cfg, args.source, args.limit, args.dry_run, args.explain
+        )
+        print(listing_stats.report())
+        if args.explain and listing_stats.samples:
+            print("\n拾った物件:")
+            print("\n".join(listing_stats.samples))
+        if args.explain and listing_stats.no_price_samples:
+            print("\n価格を取れなかったURL:")
+            for u in listing_stats.no_price_samples:
+                print(f"  {u}")
+        return 0
+
     stats = collect_source(cfg, args.source, args.limit, args.dry_run, args.explain)
     print(stats.summary())
     for url in stats.candidates:
@@ -72,7 +91,11 @@ def _cmd_sources(args: argparse.Namespace) -> int:
     ワークフローが黙って壊れる。
     """
     cfg = load_config(args.config)
-    for source in cfg.editorial_sources:
+    # 販売ソースのうち mode: crawl のものも同じ扱いで並べる。定期実行は
+    # この一覧を回して collect を叩くので、ここに出ないソースは
+    # 有効にしても毎日の収集に乗らない。manual_only は自動収集しないので出さない。
+    crawlable = [s for s in cfg.listing_sources if s.mode == "crawl"]
+    for source in [*cfg.editorial_sources, *crawlable]:
         if args.enabled and not source.enabled:
             continue
         if args.verbose:
@@ -466,8 +489,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_db.add_argument("--db", default=None)
     p_db.set_defaults(func=_cmd_db)
 
-    p_collect = sub.add_parser("collect", help="編集ソースから収集（経路B）")
-    p_collect.add_argument("--source", required=True, help="editorial_sources の key")
+    p_collect = sub.add_parser("collect", help="ソースから収集（経路A / 経路B）")
+    p_collect.add_argument(
+        "--source", required=True, help="editorial_sources または listing_sources の key"
+    )
     p_collect.add_argument("--limit", type=int, default=None)
     p_collect.add_argument("--dry-run", action="store_true")
     p_collect.add_argument(
