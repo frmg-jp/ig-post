@@ -345,7 +345,7 @@ listing_sources:
     name: "Dream Town Realty"
     rank: B
     mode: crawl
-    enabled: false
+    enabled: true
     base_url: "https://www.dreamtown.com"
     note: "Chicago。sitemap.xml に物件ページが無く、一覧ページから拾う"
     crawl:
@@ -359,7 +359,7 @@ listing_sources:
     name: "Coldwell Banker"
     rank: B
     mode: crawl
-    enabled: false
+    enabled: true
     base_url: "https://www.coldwellbanker.com"
     note: "全米。当日追加分だけのsitemapがあるので差分収集の効率が良い"
     crawl:
@@ -379,7 +379,7 @@ listing_sources:
     name: "Corcoran Icon Properties"
     rank: B
     mode: crawl
-    enabled: false
+    enabled: true
     base_url: "https://corcoranicon.com"
     note: "San Francisco。Vanguard と同じ作りで、物件は5,528件"
     crawl:
@@ -393,7 +393,7 @@ listing_sources:
     name: "Vanguard Properties"
     rank: B
     mode: crawl
-    enabled: false
+    enabled: true
     base_url: "https://vanguardproperties.com"
     note: "San Francisco。物件sitemapが1万件超あるので max_details で抑える"
     crawl:
