@@ -68,6 +68,14 @@
 #   dirt.com のトップページは Robb Report のフィードを宣言している（同系列）。
 #   配信本文が166〜199字しかないため、fetch_article_pages: true が前提。
 #   高級不動産は扱うが「著名人の家」寄りで、承認基準との相性は要検証。
+#
+#   2026-08-03 追記: これは thespaces とまったく同じ状況だった。thespaces も
+#   本文中央値240字で probe-feed の候補は0件だったが、fetch_article_pages: true
+#   にしたら 4/10 件になった。probe-feed は必ず fetch_article_pages=False で
+#   判定するため、抜粋配信のフィードは構造的に候補0件になる。
+#   「本文が薄いから保留」は、判定方法の問題であって内容の問題ではなかった。
+#   → アメリカを増やす一手として最優先で試す:
+#        bash scripts/probe_us_sources.sh
 # =====================================================================
 # https://robbreport.com/shelter/feed/
 # https://robbreport.com/shelter/celebrity-homes/feed/
@@ -100,11 +108,18 @@
 #     画像の権利を確認してから有効化する（docs/source-survey.md の26サイトと同じ論点）。
 #     コメントフィードは /buildings/ の建物ページを指すので使わない。
 
-# --- サンフランシスコ / ポートランド / シアトル（未確認） ---
-#   python -m freming.cli discover-feed --probe \
-#     https://jacksonfuller.com/ https://www.jeffmarples.com/ \
-#     https://www.seanzbecker.com/ https://pearldistrictproperties.com/ \
-#     https://jeffreynoldsseattle.com/
+# --- サンフランシスコ / ポートランド / シアトル ---
+#   ここに挙げていた5件（jacksonfuller / jeffmarples / seanzbecker /
+#   pearldistrictproperties / jeffreynolds）は、いずれも不動産エージェントの
+#   個人サイト。2026-08-03 の調査（docs/source-survey.md）で portlandscondos を
+#   保留にしたのと同じ論点が全部にかかる。掲載写真はMLS/ブローカー帰属の
+#   可能性が高く、フィードが読めても再配布してよいとは限らない。
+#
+#   したがって **フィードを試す前に画像の権利を確認する**。権利の確認なしに
+#   probe しても、通ったところで使えない。
+#
+#   アメリカを増やすなら、まず編集メディア側を埋める:
+#     bash scripts/probe_us_sources.sh
 
 # --- ポルトガル / スペイン（未確認） ---
 #   idealista は自動収集を行わない。編集メディア側から探す:
