@@ -716,3 +716,34 @@ def test_full_text_feed_with_no_candidates_is_believed() -> None:
     assert stats.excerpt_only is False
     assert stats.weekly_is_reliable is True
     assert "抜粋" not in stats.pace_report()
+
+
+def test_disabled_source_can_still_be_dry_run(tmp_path, monkeypatch) -> None:
+    """未検証のソースを enabled: false のまま試せること。
+
+    dry-run は書き込まないので止める理由がない。ここで拒むと
+    「登録して確かめてから有効化する」手順が踏めない。
+    """
+    from freming.collect.editorial import CollectStats, collect_source
+    from freming.config import load_config
+
+    cfg = load_config("config.yaml").model_copy(deep=True)
+    disabled = next(s for s in cfg.editorial_sources if not s.enabled and s.feeds)
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "freming.collect.editorial.EditorialCollector.collect",
+        lambda self, source, *a, **k: calls.append(source.key) or CollectStats(source.key),
+    )
+    monkeypatch.setattr("freming.collect.editorial.connect", lambda _t: _NullConn())
+
+    collect_source(cfg, disabled.key, dry_run=True)
+    assert calls == [disabled.key]
+
+    with pytest.raises(SystemExit, match="enabled: false"):
+        collect_source(cfg, disabled.key, dry_run=False)
+
+
+class _NullConn:
+    def close(self) -> None:
+        pass

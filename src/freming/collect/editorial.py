@@ -583,7 +583,15 @@ def collect_source(
     if source is None:
         raise SystemExit(f"editorial_sources に '{source_key}' がありません")
     if not source.enabled:
-        raise SystemExit(f"'{source_key}' は enabled: false です。config.yaml を確認してください")
+        # dry-run は書き込まないので止めない。未検証のソースを
+        # enabled: false のまま試せないと、「登録して確かめてから有効化する」
+        # という手順が踏めなくなる（無効のまま試す方が安全なのに）。
+        if not dry_run:
+            raise SystemExit(
+                f"'{source_key}' は enabled: false です。config.yaml を確認するか、"
+                "--dry-run で試してください"
+            )
+        log.warning("'%s' は enabled: false です（--dry-run なので続行します）", source_key)
 
     conn = connect(config.app.target())
     try:

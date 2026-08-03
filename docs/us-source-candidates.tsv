@@ -11,7 +11,30 @@
 #             enabled: false**（portlandscondos と同じ扱い）。
 #   unknown … どちらか判断が付かない。中身を見てから決める。
 #
-# 検証:
+# 検証結果（2026-08-03 実測）:
+#
+#   採用     Dwell            30件/2917字/1.2本/日/候補3件 → 週0.9件。全米で唯一
+#                             まともに動く。url_exclude: /ask-a-realtor（相談コラム）
+#   要検証   Robb Report      10件/198字/2.8本/日。抜粋配信のため collect で判断
+#   要検証   ArchDaily        24件/376字/9.4本/日。本数が多く、記事ページ取得の
+#                             コストが大きいので歩留まりを見てから
+#   要検証   Architectural Digest  30件/154字/5.2本/日
+#   要検証   SocketSite       15件/367字/0.4本/日/候補1件 → 週0.2件。本数が少ない
+#
+#   不採用   Architectural Record / Iconic Houses / Curbed / USModernist /
+#            Mid Century Home / Urbanize LA / National Trust / Docomomo US
+#              … フィードを宣言していない
+#   不採用   The Real Deal      robots.txt が 403 → fail-closed
+#   不採用   Old House Journal  DNSが引けない（サイトが移転または消滅）
+#   不採用   Atomic Ranch       0.2本/日でほぼ停止
+#   不採用   Old House Dreams   robots.txt が Crawl-delay: 500秒。記事ページを
+#                              30件取ると4時間かかる。加えて relist
+#   不採用   Cheap Old Houses   0.0本/日（止まっている）。加えて relist
+#
+#   罠      SocketSite のコメントフィードは probe で候補5件と出るが、中身は
+#           読者のコメント本文で、URLは過去記事を指す（CIRCA と同じ形）
+#
+# 再検証:
 #   bash scripts/probe_us_sources.sh 2>&1 | tee /tmp/probe_us.log
 #
 エリア	サイト名	URL	区分

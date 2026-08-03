@@ -136,8 +136,18 @@ editorial_sources:
   - key: dwell
     name: "Dwell"
     rank: S
-    enabled: false
-    feeds: []
+    enabled: true
+    # 2026-08-03 の probe-feed: 30件 / 本文中央値2917字 / 1.2本/日 / 候補3件
+    #   → 審査 週0.9件。全米を扱うソースとして現時点で唯一まともに動くもの。
+    # 本文を丸ごと配信するので記事ページは取りに行かない。
+    fetch_article_pages: false
+    # 「Ask a Realtor」は住宅ローンや金利の相談コラムで、物件記事ではない。
+    # 連載なので毎週出る。本文に「for sale」「asking price」が普通に入るため
+    # 放っておくと定期的に誤検出する（実際 probe で2点が付いた）。
+    url_exclude:
+      - "/ask-a-realtor"
+    feeds:
+      - "https://www.dwell.com/@dwell/rss"
   - key: designboom
     name: "designboom"
     rank: S
@@ -156,11 +166,20 @@ editorial_sources:
   - key: archdaily
     name: "ArchDaily"
     rank: A
+    # 2026-08-03: フィードは読めた（24件 / 376字 / 9.4本/日）。ただし抜粋配信
+    # なので probe では候補0件になる。本数が多く、記事ページを取ると1回の
+    # 収集で30回のアクセスになるため、歩留まりを確かめてから有効化する:
+    #   python -m freming.cli collect --source archdaily --dry-run --explain
+    # なお /cl/feed（チリ版）は robots で Disallow。本体の /feed は許可。
     enabled: false
-    feeds: []
+    fetch_article_pages: true
+    feeds:
+      - "https://www.archdaily.com/feed"
   - key: arch_record
     name: "Architectural Record"
     rank: A
+    # 2026-08-03: フィードを宣言していない（discover-feed で0件）。
+    # robots.txt は Crawl-delay: 10 秒。配信URLが見つかるまで保留。
     enabled: false
     feeds: []
   - key: domus
@@ -171,13 +190,45 @@ editorial_sources:
   - key: ad
     name: "Architectural Digest"
     rank: B
+    # 2026-08-03: フィードは読めた（30件 / 154字 / 5.2本/日）。抜粋配信なので
+    # probe では候補0件。セレブの自宅・インテリア記事が中心で、承認基準
+    # （前歴が残る一点物）との相性は未検証。確かめてから有効化する:
+    #   python -m freming.cli collect --source ad --dry-run --explain
     enabled: false
-    feeds: []
+    fetch_article_pages: true
+    feeds:
+      - "https://www.architecturaldigest.com/feed/rss"
   - key: iconic_houses
     name: "Iconic Houses"
     rank: B
+    # 2026-08-03: フィードを宣言していない（discover-feed で0件）。
     enabled: false
     feeds: []
+  - key: robbreport_shelter
+    name: "Robb Report / Shelter"
+    rank: B
+    # 2026-08-03: フィードは読めた（10件 / 198字 / 2.8本/日）。全米の高級
+    # 不動産を扱い、本数も出ている。抜粋配信（198字）なので The Spaces と
+    # 同じく probe では候補0件になる。記事ページを取って確かめてから有効化:
+    #   python -m freming.cli collect --source robbreport_shelter --dry-run --explain
+    # 「著名人の家」寄りの可能性があり、承認基準との相性は未検証。
+    enabled: false
+    fetch_article_pages: true
+    feeds:
+      - "https://robbreport.com/shelter/feed/"
+  - key: socketsite
+    name: "SocketSite"
+    rank: B
+    # 2026-08-03: 15件 / 367字 / 0.4本/日 / 候補1件 → 審査 週0.2件。
+    # サンフランシスコの不動産ブログ。本物の候補は出るが本数が少ない。
+    #
+    # コメントフィード（/comments/feed）は使わないこと。probe では候補5件と
+    # 出るが、中身は読者のコメント本文で、URLは過去記事を指している
+    # （CIRCA のエージェント紹介ページと同じ形の罠）。
+    enabled: false
+    fetch_article_pages: true
+    feeds:
+      - "https://socketsite.com/feed"
 
 # ---------------------------------------------------------------------
 # 経路A: 販売ソース
