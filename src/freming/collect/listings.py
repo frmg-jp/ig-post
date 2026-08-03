@@ -66,16 +66,21 @@ class ListingStats:
     failed: int = 0
     disallowed: int = 0           # robots.txt で取得しなかったもの
     no_price: int = 0             # 価格を取れず候補にしなかったもの
+    no_location: int = 0          # 所在地を取れず候補にしなかったもの
     samples: list[str] = field(default_factory=list)
     # 価格を取れなかったURL。価格の書式漏れなのか、そもそも物件ページで
     # ないのかを、推測せずに確かめられるようにする（--explain 用）。
     no_price_samples: list[str] = field(default_factory=list)
+    # 所在地を取れなかったURL。抽出の書式漏れなのか、そもそもページに
+    # 住所が無いのかを確かめられるようにする（--explain 用）。
+    no_location_samples: list[str] = field(default_factory=list)
 
     def report(self) -> str:
         return (
             f"[{self.source}] URL {self.seen_urls}件 → 物件 {self.matched_urls}件 → "
             f"取得 {self.fetched}件 → 登録 {self.inserted}件"
             f"（既知 {self.skipped_known} / 価格なし {self.no_price} / "
+            f"所在地なし {self.no_location} / "
             f"失敗 {self.failed} / robots拒否 {self.disallowed}）"
         )
 
@@ -312,6 +317,16 @@ class ListingCollector:
         address = None
         if crawl.location_from == "address":
             address = pick_address(url, page.title, whole_text)
+
+        if crawl.require_location and address is None:
+            # 所在地の分からない物件は入れない。エリアはスコアの2割を占め、
+            # 空だと採点が成り立たない。フッターの自社住所を拾って**誤った**
+            # 所在地を入れるくらいなら空にする、という判断で pick_address は
+            # 決められないとき None を返す。その None をここで落とす。
+            stats.no_location += 1
+            if len(stats.no_location_samples) < 10:
+                stats.no_location_samples.append(url)
+            return None
 
         # 見出しを持たない物件ページがある（Vanguard は <title> も og:title も
         # 空で、住所は本文にしかない）。URLをタイトルに据えると審査UIで

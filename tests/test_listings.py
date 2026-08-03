@@ -334,3 +334,108 @@ def test_manual_only_sources_are_never_crawled() -> None:
     with pytest.raises(SystemExit) as exc:
         collect_listing_source(CONFIG, "zillow")
     assert "mode: manual_only" in str(exc.value)
+
+
+# --- 所在地の分からない物件を入れない -----------------------------------
+#
+# エリアはスコアの2割を占める軸で、空だと採点が成り立たない。
+# pick_address は会社の住所を掴むくらいなら None を返す作りなので、
+# 「決められなかったもの」が所在地不明のまま入っていた。
+
+
+def _ambiguous(price: str) -> str:
+    """物件の住所を特定できないページ。
+
+    会社の住所と他物件の住所が並び、URLの slug にどちらの市名も出ない。
+    pick_address はこの状況で None を返す。
+    """
+    return f"""
+    <html><head><meta property="og:title" content="Charming home"></head>
+    <body><h2>Charming home</h2><div class="price">{price}</div>
+    <footer>1 Office Plaza, West Hollywood CA 90069</footer>
+    <div>Nearby: 9 Other Road, Elsewhere CA 90210</div>
+    <p>A well kept home.</p></body></html>
+    """
+
+
+def test_a_listing_without_a_location_is_skipped(db) -> None:
+    url = "https://stub.example.com/p/900001"
+    source = _source(
+        index_urls=["https://stub.example.com/list"],
+        detail_url_include=[r"/p/\d+"],
+        price_patterns=[r"\$\s?\d[\d,]{4,}"],
+    )
+    pages = {
+        "https://stub.example.com/list": f'<html><body><a href="{url}">物件</a></body></html>',
+        url: _ambiguous("$1,250,000"),
+    }
+    stats = ListingCollector(CONFIG, StubClient(pages), db).collect(source)
+
+    assert stats.fetched == 1
+    assert stats.inserted == 0
+    assert stats.no_location == 1
+    assert stats.no_location_samples == [url]
+    assert not exists_source_url(db, url)
+
+
+def test_a_listing_with_a_location_still_goes_in(db) -> None:
+    """歯止めが効きすぎていないこと。住所が取れるものは今まで通り入る。"""
+    url = "https://stub.example.com/p/900002"
+    source = _source(
+        index_urls=["https://stub.example.com/list"],
+        detail_url_include=[r"/p/\d+"],
+        price_patterns=[r"\$\s?\d[\d,]{4,}"],
+    )
+    pages = {
+        "https://stub.example.com/list": f'<html><body><a href="{url}">物件</a></body></html>',
+        url: _detail("11012 S Kilpatrick Avenue, Oak Lawn IL 60453", "$1,250,000"),
+    }
+    stats = ListingCollector(CONFIG, StubClient(pages), db).collect(source)
+
+    assert stats.inserted == 1
+    assert stats.no_location == 0
+
+
+def test_require_location_can_be_turned_off(db) -> None:
+    """国しか分からないサイト（台湾など）向けの逃げ道。
+
+    location_from: none のソースは所在地を取らないので、既定のままだと
+    1件も入らなくなる。
+    """
+    url = "https://stub.example.com/p/900003"
+    source = _source(
+        index_urls=["https://stub.example.com/list"],
+        detail_url_include=[r"/p/\d+"],
+        price_patterns=[r"\$\s?\d[\d,]{4,}"],
+        location_from="none",
+        require_location=False,
+        country="Taiwan",
+    )
+    pages = {
+        "https://stub.example.com/list": f'<html><body><a href="{url}">物件</a></body></html>',
+        url: _ambiguous("$1,250,000"),
+    }
+    stats = ListingCollector(CONFIG, StubClient(pages), db).collect(source)
+
+    assert stats.inserted == 1
+    row = db.execute(
+        "SELECT location_city, location_country FROM properties WHERE source_url = ?", (url,)
+    ).fetchone()
+    assert row["location_city"] is None
+    assert row["location_country"] == "Taiwan"
+
+
+def test_the_configured_taiwan_sources_are_exempt() -> None:
+    """config 側の取り違えを止める。
+
+    location_from: none のまま require_location を既定（true）にすると、
+    そのソースは1件も登録できない。設定として噛み合っていないので落とす。
+    """
+    for source in CONFIG.listing_sources:
+        crawl = source.crawl
+        if crawl is None or crawl.location_from != "none":
+            continue
+        assert not crawl.require_location, (
+            f"{source.key} は所在地を取らない設定なので、"
+            "require_location: false にしないと1件も入りません"
+        )

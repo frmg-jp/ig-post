@@ -162,6 +162,16 @@ class ListingCrawl(BaseModel):
     #             og:title を先に見て、無ければページ全体から探す。
     #   none    … 取らない。スコアリング側の推定に委ねる。
     location_from: Literal["address", "none"] = "address"
+    # 所在地を取れなかった物件を候補にしないか。
+    #
+    # エリアはスコアの2割を占める軸で、空だと採点が成り立たない。
+    # `pick_address` は会社の住所を掴むくらいなら None を返す作りなので、
+    # 「決められなかったもの」がそのまま所在地不明として入っていた。
+    #
+    # **`location_from: none` のソースでは常に所在地が取れない**ので、
+    # 有効にすると1件も登録されない。国しか分からないサイト（台湾など）を
+    # 使うときは、そのソースだけ false にすること。
+    require_location: bool = True
     country: str = "United States"
     # 1回の収集で見る物件ページの上限。sitemap は数万件あることがあり、
     # 上限を持たないと3秒間隔でも何時間も走り続ける。

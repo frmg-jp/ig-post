@@ -13,8 +13,11 @@ on:
   workflow_dispatch:
     inputs:
       limit:
+        # 13ソース × 10件 = 1日130件が上限。採点は score --limit 40 なので
+        # 全部が上限まで入ると溜まるが、実際に候補になるのはその一部。
+        # 増やすときは採点の上限も一緒に見ること（費用に直結する）。
         description: "1ソースあたりの上限件数"
-        default: "30"
+        default: "10"
 
 concurrency:
   group: freming-collect
@@ -49,7 +52,7 @@ jobs:
           for source in $(python -m freming.cli sources --enabled); do
             echo "::group::collect $source"
             python -m freming.cli collect --source "$source" \
-              --limit "${{ github.event.inputs.limit || 30 }}" || true
+              --limit "${{ github.event.inputs.limit || 10 }}" || true
             echo "::endgroup::"
           done
 

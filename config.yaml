@@ -452,6 +452,10 @@ listing_sources:
       # 住所は漢字で、米国住所の書式を前提にした抽出が効かない。
       # 誤った所在地を入れるより、国だけ入れて市はスコアリングに委ねる。
       location_from: none
+      # 住所が漢字でこのサイトからは市名を取れない。所在地の無い物件は
+      # 既定で落とす（require_location: true）が、それでは1件も入らない
+      # ので、このソースだけ外す。国だけ入れて市はスコアリングに委ねる。
+      require_location: false
       country: "Taiwan"
       max_details: 40
   - key: century21tw
@@ -472,6 +476,10 @@ listing_sources:
       price_patterns:
         - "\\d[\\d,]*(?:\\.\\d+)?\\s*(?:萬元|萬|億)(?!\\s*/\\s*坪)"
       location_from: none
+      # 住所が漢字でこのサイトからは市名を取れない。所在地の無い物件は
+      # 既定で落とす（require_location: true）が、それでは1件も入らない
+      # ので、このソースだけ外す。国だけ入れて市はスコアリングに委ねる。
+      require_location: false
       country: "Taiwan"
       max_details: 40
 
