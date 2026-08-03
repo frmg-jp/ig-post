@@ -9,6 +9,30 @@ from urllib.parse import urldefrag, urljoin, urlparse
 from bs4 import BeautifulSoup
 
 _STRIP_TAGS = ("script", "style", "noscript", "svg", "form")
+
+# ページの共通部分。ここを本文に混ぜると、記事の内容と関係なく
+# 販売キーワードやリンクを拾ってしまう。
+#
+# 実例（2026-08-03）: thespaces.com はナビゲーションに "Property" があり、
+# 全ページ共通の掲載枠に "for sale" と "listed for" が入っていた。
+# その結果、美術展のまとめ記事もデザイン評論も、例外なく販売シグナル1点が
+# 付いていた。全記事が同じ点数になり、シグナルが何の情報も持たない状態。
+_CHROME_TAGS = ("nav", "aside", "footer")
+
+# 本文が入っている要素の候補。見つかればその中だけを見る。
+_ARTICLE_SELECTORS = (
+    "article",
+    "main",
+    "[role='main']",
+    ".entry-content",
+    ".post-content",
+    ".article-content",
+    ".article-body",
+)
+
+# 本文とみなす最低の長さ。短すぎる要素を掴むと、本文をほとんど捨てて
+# しまうので、その場合はページ全体に戻す。
+_MIN_ARTICLE_CHARS = 400
 _MAX_TEXT_CHARS = 20000
 
 
@@ -53,6 +77,29 @@ def normalize_url(url: str) -> str:
     return parsed._replace(path=path).geturl()
 
 
+def _article_root(soup):
+    """本文が入っている要素を返す。見つからなければページ全体。
+
+    共通部分（ナビ・サイドバー・フッター）は必ず落とす。販売シグナルの
+    検出は本文に対して行うものなので、ここが混ざると記事の内容と無関係に
+    点が付く。
+    """
+    for selector in _ARTICLE_SELECTORS:
+        node = soup.select_one(selector)
+        if node is None:
+            continue
+        for tag in node(_CHROME_TAGS):
+            tag.decompose()
+        if len(node.get_text(strip=True)) >= _MIN_ARTICLE_CHARS:
+            return node
+
+    # 本文要素が見つからないページ（フィード配信のHTML断片など）は
+    # 共通部分だけ落として全体を使う。
+    for tag in soup(_CHROME_TAGS):
+        tag.decompose()
+    return soup.body or soup
+
+
 def parse_page(html: str, base_url: str) -> PageContent:
     """HTMLから本文・リンク・サムネイルを取り出す。"""
     soup = BeautifulSoup(html, "lxml")
@@ -77,10 +124,17 @@ def parse_page(html: str, base_url: str) -> PageContent:
         if first_img:
             thumbnail = urljoin(base_url, first_img["src"].strip())
 
-    text = " ".join(soup.get_text(separator=" ").split())[:_MAX_TEXT_CHARS]
+    root = _article_root(soup)
+    # 見出しは本文の一部として扱う。共通部分を落とすと <header> ごと
+    # 消えることがあり、「Home for Sale in ...」のような見出しの
+    # キーワードを取りこぼすため、先頭に明示的に付ける。
+    body = " ".join(root.get_text(separator=" ").split())
+    text = " ".join(part for part in (title, body) if part)[:_MAX_TEXT_CHARS]
 
+    # リンクも本文の中だけから拾う。フッターやサイドバーに仲介サイトへの
+    # リンクがあると、記事の内容と無関係に「売出中の裏付け」になってしまう。
     links: list[str] = []
-    for anchor in soup.find_all("a", href=True):
+    for anchor in root.find_all("a", href=True):
         href = anchor["href"].strip()
         if not href or href.startswith(("javascript:", "mailto:", "#")):
             continue

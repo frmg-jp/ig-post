@@ -246,3 +246,90 @@ def test_manual_entry_is_not_duplicated(db) -> None:
     manual.add_manual_entry(CONFIG, source_url=url, title="Loft", conn=db)
     with pytest.raises(manual.AlreadyCollected):
         manual.add_manual_entry(CONFIG, source_url=url, title="Loft（重複）", conn=db)
+
+
+# ----------------------------------------------------------------------
+# ページの共通部分を本文に混ぜない
+#
+# 2026-08-03、thespaces.com で全記事が例外なく販売シグナル1点になった。
+# ナビゲーションに "Property"、全ページ共通の掲載枠に "for sale" と
+# "listed for" が入っており、美術展のまとめ記事にまで点が付いていた。
+# 全記事が同じ点数になると、シグナルは何の情報も持たなくなる。
+# ----------------------------------------------------------------------
+def _page_with_chrome(body_text: str) -> str:
+    return f"""
+    <html><head><title>August art round-up - The Spaces</title></head>
+    <body>
+      <nav>The Spaces Property Architecture &amp; Design About us</nav>
+      <aside><h3>Property for sale</h3>
+        <p>This apartment is listed for €1,200,000</p>
+        <a href="https://www.zillow.com/homedetails/1_zpid/">See listing</a>
+      </aside>
+      <article><header><h1>August art round-up</h1></header><p>{body_text}</p></article>
+      <footer>Homes for sale in London.</footer>
+    </body></html>
+    """
+
+
+def test_navigation_is_not_part_of_the_article() -> None:
+    html = _page_with_chrome("A survey of five exhibitions. " * 30)
+    page = parse_page(html, "https://thespaces.com/a")
+    assert "About us" not in page.text
+    assert "Architecture & Design About" not in page.text
+
+
+def test_sidebar_listings_do_not_leak_into_the_article() -> None:
+    """共通の掲載枠が本文に入ると、記事の内容と無関係に販売シグナルが付く。"""
+    html = _page_with_chrome("A survey of five exhibitions. " * 30)
+    page = parse_page(html, "https://thespaces.com/a")
+    assert "listed for" not in page.text
+    assert "€1,200,000" not in page.text
+
+
+def test_footer_is_not_part_of_the_article() -> None:
+    html = _page_with_chrome("A survey of five exhibitions. " * 30)
+    page = parse_page(html, "https://thespaces.com/a")
+    assert "Homes for sale in London" not in page.text
+
+
+def test_links_come_from_the_article_only() -> None:
+    """サイドバーの仲介サイトへのリンクを「売出中の裏付け」にしない。"""
+    html = _page_with_chrome("A survey of five exhibitions. " * 30)
+    page = parse_page(html, "https://thespaces.com/a")
+    assert not any("zillow" in url for url in page.links)
+
+
+def test_headline_keywords_survive_the_stripping() -> None:
+    """見出しの「for Sale」を落とすと、本物の売出記事を取りこぼす。"""
+    body = "This mid-century home has been carefully updated. " * 30
+    html = f"""
+    <html><head><title>Updated Bridlemile Home for Sale in SW Portland</title></head>
+    <body><nav>Home About</nav>
+      <article><header><h1>Updated Bridlemile Home for Sale</h1></header>
+      <p>{body} The asking price is $899,000.</p></article>
+    </body></html>
+    """
+    page = parse_page(html, "https://example.com/a")
+    assert "for Sale" in page.text
+    assert "$899,000" in page.text
+
+
+def test_short_article_element_falls_back_to_the_whole_page() -> None:
+    """本文要素が短すぎるときに掴むと、本文をほとんど捨ててしまう。"""
+    body = "The full article lives outside the article element. " * 30
+    html = f"""
+    <html><head><title>t</title></head><body>
+      <article><p>Photo credit</p></article>
+      <div class="story"><p>{body}</p></div>
+    </body></html>
+    """
+    page = parse_page(html, "https://example.com/a")
+    assert "The full article lives outside" in page.text
+
+
+def test_feed_fragments_still_work() -> None:
+    """フィード配信のHTMLは断片で、article も nav も無い。"""
+    html = "<div><p>A converted warehouse is for sale at $2,400,000.</p></div>"
+    page = parse_page(html, "https://example.com/a")
+    assert "converted warehouse" in page.text
+    assert "$2,400,000" in page.text
