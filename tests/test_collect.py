@@ -456,3 +456,61 @@ def test_widened_keywords_do_not_revive_the_stadium_false_positive() -> None:
     result = signals.detect(text, [], SIGNALS)
     assert result.prices == []
     assert not result.is_candidate(SIGNALS.min_signal_score)
+
+
+# --- 記事要素の内側に混ざるノイズ（2026-08-03 Robb Report） --------------
+#
+# 見出しが $15.3 Million の記事から $9.3 Million が検出された。関連記事
+# ブロックに並んだ別物件の価格を拾っていた。1記事あたり10〜15件の金額が
+# 混ざり、複数の記事で同じ本文が出ていた。nav/aside/footer を落とすだけ
+# では取れない（ノイズが <article> の内側にある）。
+
+
+def _page_with_inner_noise(body: str) -> str:
+    return f"""
+    <html><head><title>Meg Ryan Has Landed a Buyer for Her $15.3 Million Home</title></head>
+    <body><article>
+      <h1>Meg Ryan Has Landed a Buyer for Her $15.3 Million Home</h1>
+      <div class="byline-bio">By Wendy Bowman. Wendy Bowman's Most Recent Stories</div>
+      <p>{body} The home was listed for $15.3 million.</p>
+      <div class="related-stories">
+        <a href="/a">Landis Gores's Home Hits the Market for $3 Million</a>
+        <a href="/b">A Napa Estate Asks $9.3 Million</a>
+      </div>
+      <div class="newsletter-signup">Subscribe for $1 a week</div>
+    </article></body></html>
+    """
+
+
+def test_related_stories_inside_the_article_are_stripped() -> None:
+    page = parse_page(_page_with_inner_noise("The house sits on two acres. " * 40),
+                      "https://robbreport.com/shelter/a")
+    assert "Landis Gores" not in page.text
+    assert "$9.3 Million" not in page.text
+
+
+def test_author_and_newsletter_blocks_are_stripped() -> None:
+    page = parse_page(_page_with_inner_noise("The house sits on two acres. " * 40),
+                      "https://robbreport.com/shelter/a")
+    assert "Most Recent Stories" not in page.text
+    assert "Subscribe" not in page.text
+
+
+def test_the_articles_own_price_survives() -> None:
+    """ノイズを落としすぎて本文の価格まで消さないこと。"""
+    page = parse_page(_page_with_inner_noise("The house sits on two acres. " * 40),
+                      "https://robbreport.com/shelter/a")
+    result = signals.detect(page.text, page.links, SIGNALS)
+    assert "$15.3 million" in page.text
+    assert result.prices == ["$15.3 million"]
+
+
+def test_hits_the_market_is_recognised() -> None:
+    """Harvard Five の建築家の住宅が1点で落ちていた実例。"""
+    text = (
+        "Harvard Five Architect Landis Gores's Connecticut Home Hits the Market "
+        "for $3 Million. The 1950s glass house has been restored."
+    )
+    result = signals.detect(text, [], SIGNALS)
+    assert "hits the market" in result.keywords
+    assert result.is_candidate(SIGNALS.min_signal_score)

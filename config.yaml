@@ -336,6 +336,11 @@ for_sale_signals:
     # 2026-08-03: thespaces の Bordeaux の記事が「before listing at €1.19 million」
     # で、listed for に当たらず0点だった。同じ意味の言い回しなので足す。
     - "listing at"
+    # 2026-08-03: Robb Report の「Landis Gores's Connecticut Home Hits the Market
+    # for $3 Million」（Harvard Five の建築家による住宅）が1点で落ちていた。
+    # on the market はあるが hits the market は別表現。
+    - "hits the market"
+    - "comes to market"
     - "asking price"
     - "now available"
     - "currently listed"

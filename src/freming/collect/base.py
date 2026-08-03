@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from urllib.parse import urldefrag, urljoin, urlparse
@@ -28,6 +29,22 @@ _ARTICLE_SELECTORS = (
     ".post-content",
     ".article-content",
     ".article-body",
+)
+
+# 記事要素の「内側」に混ざるノイズ。関連記事・人気記事・著者プロフィール・
+# ニュースレター誘導など、記事ごとに内容が変わらないブロック。
+#
+# 実例（2026-08-03、Robb Report）: 見出しが $15.3 Million の記事から
+# $9.3 Million が検出された。関連記事ブロックに並んだ別物件の価格を
+# 拾っていた。1記事あたり10〜15件の金額が混ざり、複数の記事で同じ
+# 本文が出ていた。nav/aside/footer を落とすだけでは取れない。
+_NOISE_TOKENS = re.compile(
+    r"(?:^|[-_\s])(?:"
+    r"related|recirc\w*|recommend\w*|more-?stories|most-?recent|read-?more|"
+    r"trending|popular|newsletter|subscribe|promo|advert\w*|"
+    r"author-?bio|byline-?bio|share|social|comments?"
+    r")(?:[-_\s]|$)",
+    re.IGNORECASE,
 )
 
 # 本文とみなす最低の長さ。短すぎる要素を掴むと、本文をほとんど捨てて
@@ -77,6 +94,24 @@ def normalize_url(url: str) -> str:
     return parsed._replace(path=path).geturl()
 
 
+def _strip_noise(node) -> None:
+    """class / id から、記事ごとに内容が変わらないブロックを落とす。
+
+    見出しの価格と検出される価格が食い違うのは、たいていこれが原因。
+    関連記事に並んだ別物件の価格を拾っている。
+    """
+    targets = [
+        el for el in node.find_all(True)
+        if _NOISE_TOKENS.search(
+            " ".join(el.get("class") or []) + " " + (el.get("id") or "")
+        )
+    ]
+    for el in targets:
+        # 入れ子で既に外れているものは触らない
+        if el.parent is not None:
+            el.decompose()
+
+
 def _article_root(soup):
     """本文が入っている要素を返す。見つからなければページ全体。
 
@@ -90,6 +125,7 @@ def _article_root(soup):
             continue
         for tag in node(_CHROME_TAGS):
             tag.decompose()
+        _strip_noise(node)
         if len(node.get_text(strip=True)) >= _MIN_ARTICLE_CHARS:
             return node
 
@@ -97,6 +133,7 @@ def _article_root(soup):
     # 共通部分だけ落として全体を使う。
     for tag in soup(_CHROME_TAGS):
         tag.decompose()
+    _strip_noise(soup)
     return soup.body or soup
 
 
