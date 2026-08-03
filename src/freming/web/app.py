@@ -2,8 +2,10 @@
 
     一覧（スコア順） → 承認 / 非承認（理由必須） → feedback に蓄積
 
-ローカル（127.0.0.1）で人が使う前提で、認証は持たない。外部に公開する
-用途は想定していないため、config の host も既定で 127.0.0.1 のままにする。
+既定はローカル（127.0.0.1）で人が使う前提で、認証を持たない。config の
+host も 127.0.0.1 のままにしてある。担当者と共有するために外へ出すときは
+Basic 認証をかける（web/auth.py）。認証なしで外向けに待ち受ける経路は
+作らない。
 
 単体実行:
     python -m freming.web.app
@@ -36,6 +38,7 @@ from freming.db.repository import (
     set_series,
 )
 from freming.delivery.worker import DeliveryWorker
+from freming.web.auth import BasicAuth, BasicAuthMiddleware, credentials_from_env
 from freming.web.flags import flag
 from freming.logging_setup import get_logger, setup_logging
 
@@ -68,9 +71,15 @@ def _axes(row: Row) -> list[dict]:
 
 
 def create_app(
-    config: Config | None = None, worker: DeliveryWorker | None = None
+    config: Config | None = None,
+    worker: DeliveryWorker | None = None,
+    auth: BasicAuth | None = None,
 ) -> FastAPI:
     config = config or load_config()
+    # 資格情報があれば全経路に認証をかける。ローカル（127.0.0.1）では
+    # 未設定のままでよい。外向けに待ち受けるときの必須化は呼び出し側
+    # （cli の serve と web/asgi.py）が web/auth.py の require_credentials で行う。
+    auth = auth or credentials_from_env()
     # 承認したものを自動で納品するワーカー。審査UIと同じプロセスで動かすので、
     # 別ターミナルで deliver を叩く必要がない。
     auto = config.delivery.auto and config.drive.enabled
@@ -87,12 +96,19 @@ def create_app(
                 worker.stop()
 
     app = FastAPI(title="FREMING CURATED 審査", lifespan=lifespan)
+    if auth is not None:
+        app.add_middleware(BasicAuthMiddleware, auth=auth)
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     templates.env.filters["axes"] = _axes
     templates.env.filters["flag"] = flag
 
     def _conn() -> DbConnection:
         return connect(config.app.target())
+
+    @app.get("/healthz")
+    def healthz():
+        """ホスティング側の死活監視用。認証を通さないので中身は返さない。"""
+        return {"status": "ok"}
 
     @app.get("/", response_class=HTMLResponse)
     def index(

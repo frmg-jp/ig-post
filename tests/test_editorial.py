@@ -777,7 +777,9 @@ def test_a_frozen_feed_is_reported_as_stopped() -> None:
     assert stats.is_stale() is True
     assert stats.days_since_newest() == pytest.approx(750, abs=1)
     assert "止まっています" in stats.pace_report()
-    assert "最新記事は 750 日前" in stats.pace_report()
+    # 日数は端数の丸めで 750/751 のどちらにも転ぶ（日付をまたぐと変わる）。
+    # 桁を焼き込むと、コードを何も変えていないのに落ちる日が来る。
+    assert f"最新記事は {round(stats.days_since_newest())} 日前" in stats.pace_report()
 
 
 def test_a_frozen_feed_reports_zero_not_its_old_pace() -> None:

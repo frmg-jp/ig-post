@@ -1,0 +1,29 @@
+# 審査UIの公開設定（Render）。担当者と一緒に審査するためのもの。
+#
+# Render のダッシュボードで Blueprint としてこのファイルを読ませると、
+# 下の設定でサービスが作られる。手順は docs/review-ui-hosting.md。
+#
+# 秘匿値（DATABASE_URL / パスワード）はこのファイルに書かない。
+# sync: false は「値はダッシュボードで入れる。リポジトリには持たない」の意味。
+
+services:
+  - type: web
+    name: freming-curated-review
+    runtime: python
+    plan: free
+    # Neon を Singapore に置いてあるので、DBに近い側に寄せる。
+    region: singapore
+    buildCommand: pip install -e ".[postgres]"
+    # asgi:app は serve と違い、資格情報が無ければ起動しない。
+    # 納品もしない（Drive の鍵をここに置かないため）。
+    startCommand: uvicorn freming.web.asgi:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
+      - key: DATABASE_URL
+        sync: false
+      - key: REVIEW_UI_USER
+        sync: false
+      - key: REVIEW_UI_PASSWORD
+        sync: false

@@ -359,15 +359,26 @@ def _watch_deliveries(cfg) -> int:
 
 
 def _cmd_serve(args: argparse.Namespace) -> int:
-    """審査UIを起動する（[3]）。ローカル利用前提で認証は持たない。"""
+    """審査UIを起動する（[3]）。ローカル利用なら認証は要らない。
+
+    ループバック以外で待ち受けるときだけ Basic 認証を必須にする。
+    """
     import uvicorn
 
     from freming.web.app import create_app
+    from freming.web.auth import require_credentials
 
     cfg = load_config(args.config)
     setup_logging(cfg.app.log_dir, cfg.app.log_level)
     host = args.host or cfg.review_ui.host
     port = args.port or cfg.review_ui.port
+    try:
+        auth = require_credentials(host)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    if auth is not None:
+        print(f"認証: ON（ユーザ {auth.user}）")
     print(f"審査UI:   http://{host}:{port}/")
     print(f"  未審査  http://{host}:{port}/?status=pending")
     print(f"  承認    http://{host}:{port}/?status=approved")
@@ -378,7 +389,9 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     else:
         print("自動納品: OFF（承認後に python -m freming.cli deliver を実行してください）")
     print("停止するには Ctrl+C")
-    uvicorn.run(create_app(cfg), host=host, port=port, log_level=cfg.app.log_level.lower())
+    uvicorn.run(
+        create_app(cfg, auth=auth), host=host, port=port, log_level=cfg.app.log_level.lower()
+    )
     return 0
 
 

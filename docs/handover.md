@@ -65,6 +65,23 @@ FREMING CURATED — 建築キュレーションメディアの物件収集パイ
 - 鍵は `credentials/service-account.json`（gitignore 済み）
 - 再実行しても重複納品しない（`source_url` UNIQUE + `deliveries` チェック）
 
+## 審査UIの共有（2026-08-03）
+
+担当者と一緒に審査するため、審査UIを外に出せるようにした。
+手順は docs/review-ui-hosting.md（Render・無料枠・Basic認証）。
+
+実装側で入れた歯止め:
+
+- ループバック以外で待ち受けるときは `REVIEW_UI_USER` と
+  `REVIEW_UI_PASSWORD` が必須（`web/auth.py` の `require_credentials`）。
+  **認証なしで外向けに立ち上がる経路は作らない**
+- 公開用の入口は `freming.web.asgi:app`。`serve` と違い、資格情報が
+  無ければ起動せず、`delivery.auto` を落とす
+- **納品ワーカーは1箇所だけで動かす。** 2箇所で回すと同じ物件を二重に
+  納品する（`already_delivered` の確認から Drive 書き込みまでに隙間があり、
+  フォルダ名も max+1 なので同じ frmg_igNNN を取り合う）。納品は手元の
+  `serve` に一本化してある
+
 ## 採点のモデル（2026-08-03 に変更）
 
 費用を抑えるため `claude-sonnet-5` → **`claude-haiku-4-5`** に下げた
