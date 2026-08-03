@@ -27,8 +27,11 @@
       </span>
     </div>
 
+    {# 見出しは1行で切れる（base.html の .title）。切れた分を読めるよう、
+       全文を title 属性に入れておく #}
     <div class="title">
-      <a href="{{ row['source_url'] }}" target="_blank" rel="noopener noreferrer">
+      <a href="{{ row['source_url'] }}" target="_blank" rel="noopener noreferrer"
+         title="{{ row['title'] or row['source_url'] }}">
         {{ row["title"] or row["source_url"] }}
       </a>
     </div>
