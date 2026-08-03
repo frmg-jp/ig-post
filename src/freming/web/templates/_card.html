@@ -56,6 +56,13 @@
       <div class="meta summary">非承認理由: {{ row["reject_reason"] }}</div>
     {% endif %}
 
+    {% if row["status"] == "approved" and row["delivery_error"] %}
+      {# 失敗は承認のまま残す。一覧から消すと追跡できなくなる #}
+      <div class="meta summary fail">
+        納品に失敗（{{ row["delivery_attempts"] }}回目）: {{ row["delivery_error"] }}
+      </div>
+    {% endif %}
+
     <div class="actions">
       {% if row["status"] != "delivered" and series_options %}
         {# 連載企画は編集判断なので、スコアリングでは決めずここで人が選ぶ #}
@@ -92,6 +99,19 @@
           <button class="ng" type="submit">非承認</button>
         </form>
       {% else %}
+        {% if row["status"] == "approved" and auto_deliver %}
+          {# 承認したあと何が起きているかを、その場で分かるようにする #}
+          {% if delivering_id == row["id"] %}
+            <span class="note pending">納品中…</span>
+          {% elif row["delivery_attempts"] and row["delivery_attempts"] >= max_attempts %}
+            <form method="post" action="/p/{{ row['id'] }}/retry-delivery">
+              <input type="hidden" name="status" value="{{ status }}">
+              <button type="submit">納品を再試行</button>
+            </form>
+          {% else %}
+            <span class="note pending">納品待ち</span>
+          {% endif %}
+        {% endif %}
         <form method="post" action="/p/{{ row['id'] }}/reset">
           <input type="hidden" name="status" value="{{ status }}">
           <button type="submit">未審査に戻す</button>

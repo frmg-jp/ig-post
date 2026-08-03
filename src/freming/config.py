@@ -227,6 +227,41 @@ class ReviewUIConfig(BaseModel):
     thumbnail_max_px: int = 480
 
 
+class DeliveryConfig(BaseModel):
+    """承認から納品までの自動化。
+
+    審査UI（serve）の中で1本のワーカースレッドが承認済みを拾って納品する。
+    並列にはしない。画像取得は相手サイトへのアクセスなので、
+    [1] 収集と同じく直列・間隔ありのルールをそのまま守る必要がある。
+    """
+
+    auto: bool = True
+    # 承認を取りこぼしたときの拾い直し間隔。承認直後はイベントで起こすので、
+    # 通常はこの間隔を待たずに納品が始まる。
+    poll_interval_sec: float = 30.0
+    # 1回の巡回で納品する最大件数。まとめて承認しても、1件ずつ順に処理する。
+    batch_limit: int = 5
+    # 自動での試行回数の上限。超えたら自動では触らず、審査UIから人が再試行する。
+    # 画像が取れない・Driveが落ちている等を延々と叩き続けないための歯止め。
+    max_attempts: int = 3
+    # 失敗した候補を次に試すまでの待ち時間。
+    retry_after_sec: float = 600.0
+
+    @field_validator("poll_interval_sec")
+    @classmethod
+    def _not_too_frequent(cls, v: float) -> float:
+        if v < 5.0:
+            raise ValueError("delivery.poll_interval_sec は 5.0 秒以上にすること")
+        return v
+
+    @field_validator("max_attempts")
+    @classmethod
+    def _at_least_once(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("delivery.max_attempts は 1 以上にすること")
+        return v
+
+
 class ImagesConfig(BaseModel):
     max_per_property: int = 10
     min_short_edge_px: int = 800
@@ -294,6 +329,7 @@ class Config(BaseModel):
     genres: GenresConfig = Field(default_factory=GenresConfig)
     scoring: ScoringConfig
     review_ui: ReviewUIConfig = Field(default_factory=ReviewUIConfig)
+    delivery: DeliveryConfig = Field(default_factory=DeliveryConfig)
     images: ImagesConfig = Field(default_factory=ImagesConfig)
     process: ProcessConfig = Field(default_factory=ProcessConfig)
     drive: DriveConfig

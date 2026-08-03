@@ -15,6 +15,8 @@ import json
 import sqlite3
 from pathlib import Path
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -25,13 +27,16 @@ from freming.db.repository import (
     approve_property,
     count_by_status,
     decide_rule_candidate,
+    delivery_queue_size,
     get_property,
     list_properties,
     list_rule_candidates,
     reject_property,
     reset_review,
+    retry_delivery,
     set_series,
 )
+from freming.delivery.worker import DeliveryWorker
 from freming.logging_setup import get_logger, setup_logging
 
 log = get_logger(__name__)
@@ -62,9 +67,26 @@ def _axes(row: sqlite3.Row) -> list[dict]:
         return []
 
 
-def create_app(config: Config | None = None) -> FastAPI:
+def create_app(
+    config: Config | None = None, worker: DeliveryWorker | None = None
+) -> FastAPI:
     config = config or load_config()
-    app = FastAPI(title="FREMING CURATED 審査")
+    # 承認したものを自動で納品するワーカー。審査UIと同じプロセスで動かすので、
+    # 別ターミナルで deliver を叩く必要がない。
+    auto = config.delivery.auto and config.drive.enabled
+    worker = worker or (DeliveryWorker(config) if auto else None)
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        if worker is not None:
+            worker.start()
+        try:
+            yield
+        finally:
+            if worker is not None:
+                worker.stop()
+
+    app = FastAPI(title="FREMING CURATED 審査", lifespan=lifespan)
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     templates.env.filters["axes"] = _axes
 
@@ -87,6 +109,11 @@ def create_app(config: Config | None = None) -> FastAPI:
                 conn, status=status, limit=size, offset=(page - 1) * size, series=series
             )
             counts = count_by_status(conn)
+            queued = (
+                delivery_queue_size(conn, config.delivery.max_attempts)
+                if worker is not None
+                else 0
+            )
         finally:
             conn.close()
         return templates.TemplateResponse(
@@ -96,6 +123,17 @@ def create_app(config: Config | None = None) -> FastAPI:
                 "rows": rows,
                 "counts": counts,
                 "status": status,
+                "auto_deliver": worker is not None,
+                "delivering_id": worker.current_property_id if worker else None,
+                # 納品の進み具合を見るタブだけ自動更新する。未審査タブで
+                # 勝手にページが変わると、選択位置が飛んで審査の邪魔になる。
+                "refresh_sec": (
+                    15
+                    if (worker is not None and queued and status in ("approved", "delivered"))
+                    else 0
+                ),
+                "queued": queued,
+                "max_attempts": config.delivery.max_attempts,
                 "page": page,
                 "has_next": len(rows) == size,
                 "presets": REJECT_PRESETS,
@@ -118,17 +156,44 @@ def create_app(config: Config | None = None) -> FastAPI:
         return templates.TemplateResponse(
             request,
             "detail.html",
-            {"row": row, "presets": REJECT_PRESETS, "series_options": config.series},
+            {
+                "row": row,
+                "presets": REJECT_PRESETS,
+                "series_options": config.series,
+                "auto_deliver": worker is not None,
+                "delivering_id": worker.current_property_id if worker else None,
+                "max_attempts": config.delivery.max_attempts,
+            },
         )
 
     @app.post("/p/{property_id}/approve")
     def approve(property_id: int, status: str = Form("pending")):
         conn = _conn()
         try:
-            if not approve_property(conn, property_id):
+            approved = approve_property(conn, property_id)
+            if not approved:
                 log.warning("承認できませんでした（納品済みの可能性）: id=%s", property_id)
         finally:
             conn.close()
+        # 巡回間隔を待たずに納品を始める
+        if approved and worker is not None:
+            worker.wake()
+        return RedirectResponse(f"/?status={status}", status_code=303)
+
+    @app.post("/p/{property_id}/retry-delivery")
+    def retry(property_id: int, status: str = Form("approved")):
+        """納品の試行回数を戻して自動納品に復帰させる。
+
+        画像が消えていた・Driveが落ちていた等で上限まで失敗した候補は、
+        原因を直したあとここから再開する。
+        """
+        conn = _conn()
+        try:
+            ok = retry_delivery(conn, property_id)
+        finally:
+            conn.close()
+        if ok and worker is not None:
+            worker.wake()
         return RedirectResponse(f"/?status={status}", status_code=303)
 
     @app.post("/p/{property_id}/reject")

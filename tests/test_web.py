@@ -369,3 +369,92 @@ def test_thumbnail_links_to_the_article(client, conn) -> None:
     assert body.index('href="https://example.com/loft/') < body.index(
         'src="https://example.com/photos/hero.jpg"'
     )
+
+
+# ----------------------------------------------------------------------
+# 承認から納品までの自動化
+# ----------------------------------------------------------------------
+def test_approve_wakes_the_delivery_worker(config, conn) -> None:
+    """承認したら巡回間隔を待たずに納品が始まること。"""
+    from freming.delivery.worker import DeliveryWorker
+
+    worker = DeliveryWorker(config)
+    client = TestClient(create_app(config, worker=worker))
+    property_id = _add(conn)
+
+    assert not worker._wakeup.is_set()
+    client.post(f"/p/{property_id}/approve", data={"status": "pending"})
+    assert worker._wakeup.is_set()
+
+
+def test_approving_a_delivered_property_does_not_wake_the_worker(config, conn) -> None:
+    """納品済みには何もしないので、ワーカーを起こす必要もない。"""
+    from freming.delivery.worker import DeliveryWorker
+
+    worker = DeliveryWorker(config)
+    client = TestClient(create_app(config, worker=worker))
+    property_id = _add(conn)
+    conn.execute("UPDATE properties SET status = 'delivered' WHERE id = ?", (property_id,))
+    conn.commit()
+
+    client.post(f"/p/{property_id}/approve")
+    assert not worker._wakeup.is_set()
+
+
+def test_approved_card_shows_it_is_waiting_for_delivery(config, conn) -> None:
+    from freming.delivery.worker import DeliveryWorker
+
+    client = TestClient(create_app(config, worker=DeliveryWorker(config)))
+    property_id = _add(conn)
+    client.post(f"/p/{property_id}/approve")
+
+    body = client.get("/?status=approved").text
+    assert "納品待ち" in body
+    assert "自動納品 ON" in body
+
+
+def test_failed_delivery_is_shown_with_a_retry_button(config, conn) -> None:
+    """失敗しても承認一覧に残り、そこから再開できること。"""
+    from freming.db.repository import record_delivery_failure
+    from freming.delivery.worker import DeliveryWorker
+
+    client = TestClient(create_app(config, worker=DeliveryWorker(config)))
+    property_id = _add(conn)
+    client.post(f"/p/{property_id}/approve")
+    for _ in range(config.delivery.max_attempts):
+        record_delivery_failure(conn, property_id, "NoImagesFound: 加工できた画像がありません")
+
+    body = client.get("/?status=approved").text
+    assert "納品に失敗" in body
+    assert "加工できた画像がありません" in body
+    assert "納品を再試行" in body
+
+    client.post(f"/p/{property_id}/retry-delivery", data={"status": "approved"})
+    row = conn.execute(
+        "SELECT delivery_attempts, delivery_error FROM properties WHERE id = ?",
+        (property_id,),
+    ).fetchone()
+    assert row["delivery_attempts"] == 0
+    assert row["delivery_error"] is None
+
+
+def test_pending_tab_does_not_auto_refresh(config, conn) -> None:
+    """審査中に勝手にページが変わると、選択位置が飛んで操作の邪魔になる。"""
+    from freming.delivery.worker import DeliveryWorker
+
+    client = TestClient(create_app(config, worker=DeliveryWorker(config)))
+    property_id = _add(conn)
+    client.post(f"/p/{property_id}/approve")
+
+    assert "http-equiv=\"refresh\"" not in client.get("/?status=pending").text
+    assert "http-equiv=\"refresh\"" in client.get("/?status=approved").text
+
+
+def test_auto_delivery_off_falls_back_to_the_cli_guidance(config, conn) -> None:
+    config.delivery.auto = False
+    client = TestClient(create_app(config))
+    _add(conn)
+
+    body = client.get("/?status=delivered").text
+    assert "自動納品 ON" not in body
+    assert "freming.cli deliver" in body

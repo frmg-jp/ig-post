@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import threading
 
 from freming.config import load_config
 from freming.logging_setup import setup_logging
@@ -165,10 +166,41 @@ def _cmd_deliver(args: argparse.Namespace) -> int:
     if not cfg.drive.enabled and not args.dry_run:
         print("drive.enabled が false です。", file=sys.stderr)
         return 2
+    if args.watch:
+        if args.dry_run:
+            print("--watch と --dry-run は同時に使えません。", file=sys.stderr)
+            return 2
+        return _watch_deliveries(cfg)
     with session(cfg.app.db_path) as conn:
         stats = deliver_approved(cfg, conn, args.limit, args.dry_run)
     print(stats.summary())
     print(stats.report())
+    return 0
+
+
+def _watch_deliveries(cfg) -> int:
+    """承認済みを拾い続ける常駐モード（審査UIを別マシンで開く場合用）。
+
+    serve を起動していれば同じことが中で動くので、通常は不要。
+    """
+    import signal
+
+    from freming.delivery.worker import DeliveryWorker
+
+    worker = DeliveryWorker(cfg)
+    stop = threading.Event()
+
+    def _handle(_signum, _frame):
+        stop.set()
+
+    signal.signal(signal.SIGINT, _handle)
+    signal.signal(signal.SIGTERM, _handle)
+
+    print(f"承認済みを {cfg.delivery.poll_interval_sec:.0f} 秒ごとに納品します。停止するには Ctrl+C")
+    worker.start()
+    stop.wait()
+    print("停止しています…")
+    worker.stop()
     return 0
 
 
@@ -187,6 +219,10 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     print(f"  承認    http://{host}:{port}/?status=approved")
     print(f"  非承認  http://{host}:{port}/?status=rejected")
     print(f"  納品済  http://{host}:{port}/?status=delivered")
+    if cfg.delivery.auto and cfg.drive.enabled:
+        print("自動納品: ON（承認するとそのまま画像取得→加工→Drive納品まで進みます）")
+    else:
+        print("自動納品: OFF（承認後に python -m freming.cli deliver を実行してください）")
     print("停止するには Ctrl+C")
     uvicorn.run(create_app(cfg), host=host, port=port, log_level=cfg.app.log_level.lower())
     return 0
@@ -393,6 +429,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_deliver = sub.add_parser("deliver", help="承認済みを画像取得→加工→Drive納品（[4][5][6]）")
     p_deliver.add_argument("--limit", type=int, default=None)
+    p_deliver.add_argument(
+        "--watch", action="store_true",
+        help="承認済みを拾い続ける（serve を起動していれば不要）",
+    )
     p_deliver.add_argument(
         "--dry-run", action="store_true", help="Driveに書き込まず画像取得・加工まで実行"
     )

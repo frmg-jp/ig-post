@@ -168,9 +168,14 @@ def get_property(conn: sqlite3.Connection, property_id: int) -> sqlite3.Row | No
 
 
 def approve_property(conn: sqlite3.Connection, property_id: int) -> bool:
-    """承認する。納品済みのものは触らない（再納品を防ぐ）。"""
+    """承認する。納品済みのものは触らない（再納品を防ぐ）。
+
+    納品の試行記録も消す。一度失敗した候補を審査UIで承認し直したときに、
+    上限に達したままだと自動納品に拾われず、何も起きないように見えるため。
+    """
     cursor = conn.execute(
-        "UPDATE properties SET status = 'approved', reviewed_at = ?, reject_reason = NULL "
+        "UPDATE properties SET status = 'approved', reviewed_at = ?, reject_reason = NULL, "
+        "delivery_attempts = 0, delivery_error = NULL, delivery_attempted_at = NULL "
         "WHERE id = ? AND status != 'delivered'",
         (_now(), property_id),
     )
@@ -222,12 +227,88 @@ def reset_review(conn: sqlite3.Connection, property_id: int) -> bool:
     feedback は消さない。人が一度そう判断した事実は学習の材料として残す。
     """
     cursor = conn.execute(
-        "UPDATE properties SET status = 'pending', reviewed_at = NULL, reject_reason = NULL "
+        "UPDATE properties SET status = 'pending', reviewed_at = NULL, reject_reason = NULL, "
+        "delivery_attempts = 0, delivery_error = NULL, delivery_attempted_at = NULL "
         "WHERE id = ? AND status != 'delivered'",
         (property_id,),
     )
     conn.commit()
     return cursor.rowcount > 0
+
+
+# ----------------------------------------------------------------------
+# 自動納品のキュー
+# ----------------------------------------------------------------------
+def delivery_queue(
+    conn: sqlite3.Connection,
+    *,
+    limit: int,
+    max_attempts: int,
+    retry_after_sec: float,
+) -> list[sqlite3.Row]:
+    """自動納品が次に処理すべき承認済み候補を返す。
+
+    除外するもの:
+      - 試行回数が上限に達したもの（自動では諦め、審査UIから人が再試行する）
+      - 直前の失敗から retry_after_sec が経っていないもの
+
+    未試行を先に、次に古い試行から処理する。新しく承認したものが
+    失敗続きの候補の後ろで待たされないようにするため。
+    """
+    return conn.execute(
+        "SELECT * FROM properties WHERE status = 'approved' "
+        "AND delivery_attempts < ? "
+        "AND (delivery_attempted_at IS NULL "
+        "     OR delivery_attempted_at <= datetime('now', ?)) "
+        "ORDER BY delivery_attempts, delivery_attempted_at IS NOT NULL, "
+        "         delivery_attempted_at, score DESC, id "
+        "LIMIT ?",
+        (max_attempts, f"-{max(retry_after_sec, 0):.0f} seconds", limit),
+    ).fetchall()
+
+
+def record_delivery_failure(
+    conn: sqlite3.Connection, property_id: int, message: str
+) -> int:
+    """納品の失敗を記録し、その時点の試行回数を返す。
+
+    status は approved のまま置く。失敗を別ステータスにすると
+    「承認したのに一覧から消えた」ことになり、追跡できなくなる。
+    """
+    # 時刻は datetime('now') で入れる。delivery_queue が SQL 側の
+    # datetime('now', '-N seconds') と文字列比較するため、書式を揃える必要がある
+    # （_now() の ISO 形式だと区切りが T になり、比較が常に偽になる）。
+    conn.execute(
+        "UPDATE properties SET delivery_attempts = delivery_attempts + 1, "
+        "delivery_error = ?, delivery_attempted_at = datetime('now') WHERE id = ?",
+        (message[:500], property_id),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT delivery_attempts FROM properties WHERE id = ?", (property_id,)
+    ).fetchone()
+    return int(row["delivery_attempts"]) if row else 0
+
+
+def retry_delivery(conn: sqlite3.Connection, property_id: int) -> bool:
+    """試行回数を戻して、自動納品の対象に復帰させる（審査UIの再試行）。"""
+    cursor = conn.execute(
+        "UPDATE properties SET delivery_attempts = 0, delivery_error = NULL, "
+        "delivery_attempted_at = NULL WHERE id = ? AND status = 'approved'",
+        (property_id,),
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def delivery_queue_size(conn: sqlite3.Connection, max_attempts: int) -> int:
+    """まだ自動納品に拾われる見込みのある件数（待ち時間中のものも含む）。"""
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM properties WHERE status = 'approved' "
+        "AND delivery_attempts < ?",
+        (max_attempts,),
+    ).fetchone()
+    return int(row["n"]) if row else 0
 
 
 def untagged_feedback(conn: sqlite3.Connection, limit: int = 10) -> list[sqlite3.Row]:

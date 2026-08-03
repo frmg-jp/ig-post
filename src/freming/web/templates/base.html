@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}FREMING CURATED 審査{% endblock %}</title>
+{# 納品待ちが残っているタブだけ自動更新する。納品はバックグラウンドで
+   進むので、放っておいても「納品済」に変わっていくようにする。 #}
+{% if refresh_sec %}<meta http-equiv="refresh" content="{{ refresh_sec }}">{% endif %}
 {# 英字は Inter を優先。日本語のグリフは持たないので自動的に Hiragino に落ちる。
    取得できない環境ではフォントスタックの次以降が使われ、表示は崩れない。 #}
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -35,6 +38,13 @@
   header h1 { font-size: 14px; margin: 0; letter-spacing: .08em; }
   nav a { color: var(--muted); text-decoration: none; margin-right: 12px; }
   nav a.on { color: var(--fg); font-weight: 700; }
+  .auto {
+    margin-left: auto; font-size: 11px; color: var(--ok);
+    border: 1px solid var(--ok); border-radius: 999px; padding: 1px 9px;
+  }
+  .auto.busy { animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .auto + .keys { margin-left: 0; }
   .keys { margin-left: auto; color: var(--muted); font-size: 11px; }
   .keys kbd {
     font: 11px var(--mono); border: 1px solid var(--line);
@@ -110,6 +120,8 @@
   details.manual { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 14px; }
   details.manual .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; max-width: 620px; }
   .note { color: var(--muted); font-size: 12px; }
+  .note.pending { color: var(--hi); }
+  .summary.fail { color: var(--ng); font-size: 12px; }
   .empty { color: var(--muted); padding: 40px 0; text-align: center; }
   .subnav { padding: 0 20px 8px; font-size: 12px; }
   .subnav a { color: var(--muted); text-decoration: none; margin-right: 10px; }
@@ -133,6 +145,11 @@
     {% endfor %}
     <a href="/rules" class="{{ 'on' if status == 'rules' else '' }}">ルール候補</a>
   </nav>
+  {% if auto_deliver %}
+    <span class="auto {{ 'busy' if delivering_id else '' }}">
+      自動納品 ON{% if queued %}・待ち {{ queued }}{% endif %}
+    </span>
+  {% endif %}
   <span class="keys">
     <kbd>J</kbd><kbd>K</kbd> 移動 <kbd>A</kbd> 承認 <kbd>R</kbd> 理由 <kbd>Enter</kbd> 元記事
   </span>

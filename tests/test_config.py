@@ -95,3 +95,24 @@ def test_source_rank_lookup() -> None:
     assert cfg.source_rank("archdaily") == "A"
     assert cfg.source_rank("zillow") == "B"
     assert cfg.source_rank("unknown_source") is None
+
+
+def test_delivery_polling_cannot_be_too_frequent() -> None:
+    """総当たりで承認済みを探しに行かないための下限。"""
+    from freming.config import DeliveryConfig
+
+    with pytest.raises(ValidationError, match="5.0 秒以上"):
+        DeliveryConfig(poll_interval_sec=1)
+
+
+def test_delivery_must_allow_at_least_one_attempt() -> None:
+    from freming.config import DeliveryConfig
+
+    with pytest.raises(ValidationError, match="1 以上"):
+        DeliveryConfig(max_attempts=0)
+
+
+def test_delivery_defaults_are_on() -> None:
+    """承認したらそのまま納品まで進むのが既定。"""
+    cfg = load_config("config.yaml")
+    assert cfg.delivery.auto is True

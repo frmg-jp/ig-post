@@ -35,8 +35,9 @@ python scripts/check_drive.py        # [2] Drive疎通確認（★ここが通�
 | `python -m freming.cli ingest-url <URL>` | URLを1件だけ取得して候補化（Zillow等はこの経路のみ） |
 | `python -m freming.cli check-api` | スコアリングAPIの疎通確認 |
 | `python -m freming.cli score [--limit 20] [--dry-run]` | 未採点の候補をスコアリング（[2]） |
-| `python -m freming.cli serve` | 審査UIを起動（[3]） |
+| `python -m freming.cli serve` | 審査UIを起動（[3]）。承認したものはそのまま納品まで進む |
 | `python -m freming.cli deliver [--limit 5] [--dry-run]` | 承認済みを画像取得→加工→Drive納品（[4][5][6]） |
+| `python -m freming.cli deliver --watch` | 承認済みを拾い続ける常駐モード（`serve` を起動していれば不要） |
 | `python -m freming.cli learn` | 非承認理由を分類しルール候補を作る（[7]） |
 | `python -m freming.cli rules list \| approve <タグ> \| dismiss <タグ>` | ルール候補の確認と承認（[7]） |
 | `python -m freming.cli reset-images --id <ID>` | 取得済み画像を捨てて取り直す（抽出ルールを直したとき） |
@@ -47,6 +48,42 @@ python scripts/check_drive.py        # [2] Drive疎通確認（★ここが通�
 | `python -m pytest tests/ -q` | テスト |
 
 設定値はすべて `config.yaml`。秘匿値のみ `.env`。
+
+## 承認から納品までの自動化
+
+`serve`（審査UI）の中でワーカーが動き、審査UIで承認したものを順に納品します。
+別ターミナルで `deliver` を実行する必要はありません。
+
+```
+承認 → 画像取得 → 正方形加工 → frmg_igNNN を作成 → Drive へアップロード
+```
+
+進み具合は審査UIに出ます。ヘッダーに「自動納品 ON・待ち N」、
+カードには「納品待ち」「納品中…」、納品後は「Drive で開く」。
+承認タブと納品済タブは、待ちがある間だけ15秒ごとに自動更新されます
+（未審査タブは審査の邪魔になるので更新しません）。
+
+止まるべきところで止まるようにしてあります。
+
+- 納品は**1件ずつ直列**。画像取得は相手サイトへのアクセスなので、収集と同じ
+  「間隔3秒以上・同一ドメインへの並列アクセス禁止」がそのまま適用されます。
+- 失敗は `delivery.max_attempts` 回まで。超えたら自動では触らず、審査UIの
+  **「納品を再試行」**から人が再開します。取れない画像を取りに行き続けません。
+- 失敗しても**承認済みのまま**残ります（一覧から消えると追跡できないため）。
+  失敗理由はカードに出ます。
+- Drive の認証が切れていても、同意画面（ブラウザ）には進みません。
+  `python -m freming.cli check-drive` で認証し直してください。
+
+`config.yaml`:
+
+```yaml
+delivery:
+  auto: true              # false にすると従来どおり deliver を手で実行する
+  poll_interval_sec: 30   # 承認漏れの拾い直し間隔（承認直後は待たずに始まる）
+  batch_limit: 5          # 1巡で納品する最大件数
+  max_attempts: 3         # 自動での試行回数の上限
+  retry_after_sec: 600    # 失敗した候補を次に試すまでの待ち時間
+```
 
 ## Drive の認証
 

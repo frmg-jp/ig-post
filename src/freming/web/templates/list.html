@@ -25,7 +25,11 @@
       非承認にした物件はまだありません。
     {% elif status == "delivered" %}
       納品済みの物件はまだありません。<br>
-      承認したあと <code>python -m freming.cli deliver</code> を実行してください。
+      {% if auto_deliver %}
+        <a href="/?status=pending">未審査</a> で承認すると、自動で画像取得・加工・Drive納品まで進みます。
+      {% else %}
+        承認したあと <code>python -m freming.cli deliver</code> を実行してください。
+      {% endif %}
     {% else %}
       未審査の候補がありません。<br>
       <code>python -m freming.cli collect --source sixsqft</code> で収集し、

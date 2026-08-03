@@ -123,23 +123,38 @@ def _classify(exc: HttpError, context: str) -> DriveError:
 class DriveClient:
     """Drive v3 の薄いラッパ。"""
 
-    def __init__(self, config: DriveConfig, open_browser: bool = True) -> None:
+    def __init__(
+        self,
+        config: DriveConfig,
+        open_browser: bool = True,
+        allow_interactive: bool = True,
+    ) -> None:
         self.config = config
-        self._credentials = self._load_credentials(config, open_browser=open_browser)
+        self._credentials = self._load_credentials(
+            config, open_browser=open_browser, allow_interactive=allow_interactive
+        )
         self.service = build("drive", "v3", credentials=self._credentials, cache_discovery=False)
 
     # ------------------------------------------------------------------
     # 初期化
     # ------------------------------------------------------------------
     @classmethod
-    def _load_credentials(cls, config: DriveConfig, open_browser: bool = True) -> Credentials:
+    def _load_credentials(
+        cls,
+        config: DriveConfig,
+        open_browser: bool = True,
+        allow_interactive: bool = True,
+    ) -> Credentials:
         mode = config.auth_mode
         log.info("Drive 認証モード: %s", mode)
         if mode == "service_account":
             return cls._load_service_account(config.credentials_path)
         if mode == "oauth":
             return cls._load_oauth(
-                config.oauth_client_secret_path, config.oauth_token_path, open_browser
+                config.oauth_client_secret_path,
+                config.oauth_token_path,
+                open_browser,
+                allow_interactive,
             )
         return cls._load_adc()
 
@@ -159,13 +174,20 @@ class DriveClient:
 
     @staticmethod
     def _load_oauth(
-        client_secret_path: Path, token_path: Path, open_browser: bool = True
+        client_secret_path: Path,
+        token_path: Path,
+        open_browser: bool = True,
+        allow_interactive: bool = True,
     ) -> Credentials:
         """OAuthクライアントで人のアカウントとして認証する。
 
         初回のみブラウザで同意画面が開き、以降は token_path のリフレッシュ
         トークンを使うため対話は発生しない。鍵ファイルを扱わないため、
         サービスアカウント鍵の作成を禁じる組織ポリシーの影響を受けない。
+
+        allow_interactive=False では同意画面に進まず DriveAuthError にする。
+        自動納品のような、人が画面の前にいない経路から呼ばれたときに、
+        ブラウザを開いて応答を待ち続けないようにするため。
         """
         creds: UserCredentials | None = None
         if token_path.exists():
@@ -185,6 +207,13 @@ class DriveClient:
                 return creds
             except Exception:  # noqa: BLE001 - リフレッシュ失敗時は再認証に落とす
                 log.warning("トークンの更新に失敗しました。再認証します。", exc_info=True)
+
+        if not allow_interactive:
+            raise DriveAuthError(
+                "Drive の認証が切れています（対話的な再認証が必要）。\n"
+                "  python -m freming.cli check-drive\n"
+                "を1回実行して認証し直してください。"
+            )
 
         if not client_secret_path.exists():
             raise DriveAuthError(
@@ -501,5 +530,5 @@ def _save_token(creds: UserCredentials, token_path: Path) -> None:
     log.info("認証トークンを保存しました: %s", token_path)
 
 
-def build_client(config: DriveConfig) -> DriveClient:
-    return DriveClient(config)
+def build_client(config: DriveConfig, *, allow_interactive: bool = True) -> DriveClient:
+    return DriveClient(config, allow_interactive=allow_interactive)

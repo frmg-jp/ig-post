@@ -73,6 +73,23 @@ def test_broken_token_falls_back_to_client_secret_error(tmp_path) -> None:
         DriveClient(cfg)
 
 
+def test_background_delivery_never_opens_the_consent_screen(tmp_path) -> None:
+    """自動納品から呼ばれたときは同意画面に進まないこと。
+
+    人が画面の前にいるとは限らない経路なので、ブラウザを開いて
+    応答を待ち続けると納品スレッドがそのまま止まる。
+    """
+    secret = tmp_path / "client.json"
+    secret.write_text("{}", encoding="utf-8")   # 存在はするが、そこまで進まない
+    cfg = _cfg(
+        auth_mode="oauth",
+        oauth_client_secret_path=secret,
+        oauth_token_path=tmp_path / "token.json",
+    )
+    with pytest.raises(DriveAuthError, match="check-drive"):
+        DriveClient(cfg, allow_interactive=False)
+
+
 class _FakeResponse:
     """HttpError に渡す最小限のレスポンス。"""
 
