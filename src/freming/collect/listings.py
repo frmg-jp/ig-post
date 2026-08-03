@@ -80,6 +80,18 @@ class ListingStats:
         )
 
 
+def _addresses(text: str | None) -> list[tuple[str, str]]:
+    """文字列に含まれる住所を、出現順にすべて返す。"""
+    if not text:
+        return []
+    found = []
+    for street, city, state, postal in _US_ADDRESS_RE.findall(text):
+        found.append(
+            (f"{street.strip()}, {city.strip()}, {state} {postal}", city.strip())
+        )
+    return found
+
+
 def find_address(*texts: str | None) -> tuple[str, str] | None:
     """住所らしい並びを探し、(住所全体, 市名) を返す。
 
@@ -87,12 +99,49 @@ def find_address(*texts: str | None) -> tuple[str, str] | None:
     住所だけが入っている文字列を先に渡し、ページ全体は最後に回す。
     """
     for text in texts:
-        if not text:
-            continue
-        match = _US_ADDRESS_RE.search(text)
-        if match:
-            street, city, state, postal = match.groups()
-            return f"{street.strip()}, {city.strip()}, {state} {postal}", city.strip()
+        found = _addresses(text)
+        if found:
+            return found[0]
+    return None
+
+
+def pick_address(url: str, title: str | None, page_text: str) -> tuple[str, str] | None:
+    """物件の住所を選ぶ。会社の住所を掴まないようにする。
+
+    仲介サイトはヘッダーとフッターに自社の住所を必ず置いている。単に
+    最初の一致を採ると、どの物件も会社の所在地になる。
+
+    実例（2026-08-03）: Nest Seekers はカナダ Wasaga Beach の物件に
+    「New York」、Beverly Hills Estates は Bel Air の物件に
+    「West Hollywood」が付いた。どちらも会社の住所。
+
+    共通部分をタグで落とす手も試したが、Coldwell Banker は価格と住所を
+    <header> の中に置いており、落とすと物件の情報まで消えた。
+    そこで**URLと突き合わせる**。物件ページのURLには市名が入っている
+    ことが多く、会社の住所はそこに出てこない。
+
+    順に:
+      1. og:title に住所があればそれ（住所だけが入っているので確実）
+      2. ページ内の住所のうち、市名がURLに現れるもの
+      3. 1件しか見つからないならそれ（会社の住所と紛れようがない）
+      4. 決められなければ None。誤った所在地を入れるより空にする
+    """
+    from_title = _addresses(title)
+    if from_title:
+        return from_title[0]
+
+    found = _addresses(page_text)
+    if not found:
+        return None
+
+    slug = url.lower()
+    for address, city in found:
+        if city.lower().replace(" ", "-") in slug:
+            return address, city
+
+    unique_cities = {city for _, city in found}
+    if len(unique_cities) == 1:
+        return found[0]
     return None
 
 
@@ -245,7 +294,8 @@ class ListingCollector:
         # 価格も住所も、parse_page が集める <p> の地の文には入っていない
         # ことが多い。物件ページでは見出しや専用のボックスに置かれる。
         # 記事メディアと違って関連記事の価格が混ざる作りではないので、
-        # ページ全体に降りても取り違えは起きにくい。
+        # 価格はページ全体から拾ってよい。住所は会社のものと紛れるので
+        # pick_address で選び分ける。
         whole_text = BeautifulSoup(response.text, "lxml").get_text(" ", strip=True)
 
         price = _first_price(page.text, crawl.price_patterns) or _first_price(
@@ -261,7 +311,7 @@ class ListingCollector:
 
         address = None
         if crawl.location_from == "address":
-            address = find_address(page.title, whole_text)
+            address = pick_address(url, page.title, whole_text)
 
         # 見出しを持たない物件ページがある（Vanguard は <title> も og:title も
         # 空で、住所は本文にしかない）。URLをタイトルに据えると審査UIで

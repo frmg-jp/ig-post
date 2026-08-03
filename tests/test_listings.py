@@ -12,6 +12,7 @@ from freming.collect.listings import (
     ListingCollector,
     _first_price,
     find_address,
+    pick_address,
 )
 from freming.config import ListingCrawl, ListingSource, load_config
 from freming.db.connection import connect
@@ -105,6 +106,52 @@ def test_address_takes_the_first_source_that_matches() -> None:
 
 def test_address_not_found_returns_none() -> None:
     assert find_address("Rental Listings | Stub Realty", "no address here") is None
+
+
+def test_company_address_in_the_footer_is_not_used() -> None:
+    """会社の住所を物件の所在地にしない。
+
+    実例（2026-08-03）: Nest Seekers はカナダ Wasaga Beach の物件に
+    「New York」、Beverly Hills Estates は Bel Air の物件に
+    「West Hollywood」が付いた。どちらもフッターの自社住所。
+    URLに現れる市名と突き合わせて選び分ける。
+    """
+    picked = pick_address(
+        "https://x.example.com/properties/983-lakewood-rd-new-castle-pa-123456",
+        None,
+        "983 Lakewood Road, New Castle, PA 16105 ... 505 Fifth Avenue, New York, NY 10017",
+    )
+    assert picked is not None and picked[1] == "New Castle"
+
+
+def test_address_is_left_empty_when_it_cannot_be_decided() -> None:
+    """どれが物件の住所か決められないときは空にする。誤った所在地を入れない。"""
+    picked = pick_address(
+        "https://x.example.com/listing/11201-chalon-rd/",
+        None,
+        "8878 Sunset Blvd, West Hollywood, CA 90069 ... 1 Other Way, Malibu, CA 90265",
+    )
+    assert picked is None
+
+
+def test_single_address_is_used_even_without_a_url_hint() -> None:
+    """住所が1つしか無ければ、会社のものと紛れようがないので使う。"""
+    picked = pick_address(
+        "https://x.example.com/properties/abc-123456",
+        None,
+        "Featured listing 42 Elm Street, Springfield, IL 62701 today",
+    )
+    assert picked is not None and picked[1] == "Springfield"
+
+
+def test_title_address_wins_over_the_page() -> None:
+    """og:title に住所があればそれを使う（住所だけが入っているので確実）。"""
+    picked = pick_address(
+        "https://x.example.com/properties/9-9-9",
+        "5 Oak Street, Oak Lawn IL 60453",
+        "999 Company Plaza, Chicago, IL 60601",
+    )
+    assert picked is not None and picked[1] == "Oak Lawn"
 
 
 def test_first_price_takes_the_earliest_match() -> None:

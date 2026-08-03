@@ -310,6 +310,40 @@ listing_sources:
         - "/properties/\\d+/"
       location_from: address
       max_details: 40
+  - key: coldwellbanker
+    name: "Coldwell Banker"
+    rank: B
+    mode: crawl
+    enabled: false
+    base_url: "https://www.coldwellbanker.com"
+    note: "全米。当日追加分だけのsitemapがあるので差分収集の効率が良い"
+    crawl:
+      # 当日追加分。全物件のsitemapもあるが、毎日回す前提ならこちらで足りる。
+      sitemap_urls:
+        - "https://www.coldwellbanker.com/xml-sitemap/states/sitemapindex-listings-new-day.xml"
+      # /tx/victoria/sunray-rd/lid-P008... のように 州/市/街路 が並ぶ。
+      detail_url_include:
+        - "\\.com/[a-z]{2}/[^/]+/[^/]+"
+      max_details: 40
+  # @properties は sitemap を resources.atproperties.com に置いているが、
+  # そのサブドメインの robots.txt が 403 を返す。取得できない robots.txt は
+  # 「許可されていない」と扱う（fail-closed）ので、収集できない。
+  # 2026-08-03 に登録を試みて上記の理由で外した。再挑戦するなら、
+  # www 側に置かれた sitemap を探すこと。
+  - key: corcoranicon
+    name: "Corcoran Icon Properties"
+    rank: B
+    mode: crawl
+    enabled: false
+    base_url: "https://corcoranicon.com"
+    note: "San Francisco。Vanguard と同じ作りで、物件は5,528件"
+    crawl:
+      sitemap_urls:
+        - "https://corcoranicon.com/sitemap.xml"
+      sitemap_depth: 2
+      detail_url_include:
+        - "/properties/[^/]*-\\d{6,}$"
+      max_details: 40
   - key: vanguard
     name: "Vanguard Properties"
     rank: B
