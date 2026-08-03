@@ -54,7 +54,19 @@ class PostgresConnection:
         import psycopg
         from psycopg.rows import dict_row
 
-        self._conn = psycopg.connect(dsn, row_factory=dict_row, autocommit=False)
+        # prepare_threshold=None でサーバ側 prepared statement を使わない。
+        #
+        # psycopg は同じSQLを5回実行すると自動で prepared statement に切り替える。
+        # ところが接続プーラをトランザクション単位で使う構成（Neon の
+        # -pooler エンドポイント、Supabase の 6543番ポート）では、次の実行が
+        # 別の接続に振られるため「そんな statement は無い」で落ちる。
+        # 収集も審査UIも同じSQLを繰り返し実行するので、確実に踏む。
+        #
+        # 直結エンドポイントを使えば起きないが、どちらを渡されても動く方を
+        # 既定にする。速度差はこの規模では問題にならない。
+        self._conn = psycopg.connect(
+            dsn, row_factory=dict_row, autocommit=False, prepare_threshold=None
+        )
 
     def execute(self, sql: str, params: Any = ()) -> Any:
         cursor = self._conn.cursor()

@@ -3,6 +3,8 @@
     freming check-drive            # Drive 疎通確認（最優先）
     freming db migrate             # マイグレーション適用
     freming db status              # 適用状況
+    freming db check               # 接続先の疎通と中身（移行前の確認用）
+    freming db transfer            # SQLite → PostgreSQL の移行（1回きり）
 
 （collect / score / serve / deliver は各フェーズの実装時に追加する）
 """
@@ -36,6 +38,7 @@ def _cmd_check_drive(args: argparse.Namespace) -> int:
 
 def _cmd_db(args: argparse.Namespace) -> int:
     from freming.db import migrate as migrate_mod
+    from freming.db.connection import connect as connect_db
 
     cfg = load_config(args.config)
     setup_logging(cfg.app.log_dir, cfg.app.log_level)
@@ -44,6 +47,50 @@ def _cmd_db(args: argparse.Namespace) -> int:
     if args.db_action == "status":
         for version, applied in migrate_mod.status(db_path):
             print(f"{'[x]' if applied else '[ ]'} {version}")
+        return 0
+
+    if args.db_action == "check":
+        # 移行の前に接続文字列を確かめる。移行は1回きりなので、
+        # 繋がるか・空かをここで見てから走らせる。
+        from freming.db.dialect import POSTGRES, dialect_of, redact
+        from freming.db.transfer import TABLES
+
+        target = args.db or cfg.app.target()
+        print(f"接続先: {redact(target)}")
+        print(f"方言:   {'PostgreSQL' if dialect_of(target) == POSTGRES else 'SQLite'}")
+        try:
+            conn = connect_db(target)
+        except Exception as exc:  # noqa: BLE001 - 原因をそのまま見せる
+            print(f"接続できません: {type(exc).__name__}: {exc}", file=sys.stderr)
+            return 1
+        try:
+            if dialect_of(target) == POSTGRES:
+                row = conn.execute("SELECT version() AS v").fetchone()
+                print(f"サーバ: {row['v'].split(' on ')[0]}")
+
+            applied = [v for v, ok in migrate_mod.status(target) if ok]
+            pending = [v for v, ok in migrate_mod.status(target) if not ok]
+            print(f"マイグレーション: 適用済み {len(applied)} / 未適用 {len(pending)}")
+
+            total = 0
+            for table in TABLES:
+                try:
+                    count = conn.execute(
+                        f"SELECT COUNT(*) AS n FROM {table}"  # noqa: S608 - 定数の表名
+                    ).fetchone()["n"]
+                except Exception:  # noqa: BLE001 - テーブルが無い＝未適用
+                    continue
+                total += count
+                if count:
+                    print(f"  {table:<16} {count:>6} 行")
+            if total == 0:
+                print("空です。db transfer の移行先として使えます。")
+            else:
+                print(
+                    f"既に {total} 行あります。db transfer は空のDBにしか流せません。"
+                )
+        finally:
+            conn.close()
         return 0
 
     if args.db_action == "transfer":
@@ -521,11 +568,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_drive.set_defaults(func=_cmd_check_drive)
 
     p_db = sub.add_parser("db", help="DB操作")
-    p_db.add_argument("db_action", choices=["migrate", "status", "transfer"])
+    p_db.add_argument("db_action", choices=["migrate", "status", "check", "transfer"])
     p_db.add_argument(
         "--db",
         default=None,
-        help="migrate/status では対象DB。transfer では移行元のSQLite（既定は config の db_path）",
+        help="migrate/status/check では対象DB。transfer では移行元のSQLite（既定は config の db_path）",
     )
     p_db.set_defaults(func=_cmd_db)
 

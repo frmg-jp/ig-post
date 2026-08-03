@@ -10,33 +10,52 @@
 
 ## 現在の状況
 
-**プロジェクト作成で止まっている。** Supabase の無料枠は1ユーザーあたり
-2プロジェクトまでで、`yadokari-quotation` と `akiyax` で埋まっている。
-2026-08-03 に `freming-curated`（ap-northeast-1、月額 $0）の作成を試みて
-以下で弾かれた。
+**接続先は Neon（無料）で進める。** あとは接続文字列を作るだけで、
+コード側の準備は完了している。
+
+Supabase は見送った。無料枠が1ユーザー2プロジェクトまでで、
+`yadokari-quotation` と `akiyax` で埋まっており、2026-08-03 に
+`freming-curated` の作成を試みて弾かれた。
 
 ```
 akiyax.jp@gmail.com (2 project limit), isseisawada@gmail.com (2 project limit)
 ```
 
-選択肢は3つ。いずれもユーザーの判断:
+Neon の無料枠は1 Organization に **100プロジェクト**まで作れるので、
+既存を止めずに済む。実測に基づく見積もり:
 
-1. 既存プロジェクトのどれかを一時停止（pause）する
-2. 既存プロジェクトに相乗りし、`freming` スキーマを切って同居させる
-3. Pro プランに上げる（月額が発生する）
+| 項目 | Neon Free | このプロジェクトの見込み |
+| --- | --- | --- |
+| ストレージ | 0.5 GB / プロジェクト | 1件あたり約3KB（`content_text` 実測 平均2,366字）。15万件相当 |
+| コンピュート | 100 CU時間 / 月 | 5分アイドルで自動停止。毎日の収集と審査で月10 CU時間程度 |
+| 転送量 | 5 GB / 月 | 画像はDBに入らない（Drive送り）ので問題にならない |
 
-移行処理そのものは PostgreSQL 16 に対して検証済み（下記）なので、
-接続先さえ決まれば残りはコマンド2本で終わる。
+注意点:
+
+- 5分アイドルで停止するので、審査UIを開いた最初の1回だけ起動待ちが入る
+- 履歴保持は6時間・手動スナップショット1つ。定期バックアップは別途考える
 
 ## 手順
 
 ### 1. 移行先を用意する
 
-Supabase のプロジェクトを作り、Connection string（Session pooler 推奨）を
-控える。`postgresql://postgres.xxxx:PASSWORD@aws-...pooler.supabase.com:5432/postgres`
-の形。
+Neon でプロジェクトを作り、Connection string を控える。
+`postgresql://USER:PASSWORD@ep-xxxx.REGION.aws.neon.tech/neondb?sslmode=require`
+の形。pooler 付き・直結のどちらでもよい（下記「prepared statement」を参照）。
 
-### 2. 移行する
+### 2. 接続を確かめる
+
+移行は1回きりなので、先に接続文字列だけ試す。
+
+```
+export DATABASE_URL='ここに接続文字列'
+python -m freming.cli db check --db "$DATABASE_URL"
+```
+
+繋がれば、サーバのバージョン・マイグレーションの適用状況・各テーブルの
+行数が出る。「空です。db transfer の移行先として使えます。」と出れば次へ。
+
+### 3. 移行する
 
 移行元は config の `db_path`、移行先は `DATABASE_URL`。
 
@@ -48,19 +67,19 @@ python -m freming.cli db transfer
 マイグレーションの適用まで含めて中で行う。移行先が空でないと止まるので、
 取り違えても二重投入にはならない。終わると各テーブルの行数が出る。
 
-### 3. GitHub Secrets に登録する
+### 4. GitHub Secrets に登録する
 
 リポジトリの Settings → Secrets and variables → Actions で、
 `DATABASE_URL` に同じ接続文字列を登録する。ワークフロー側の修正は不要
 （すでに `secrets.DATABASE_URL` を読んでいる）。
 
-### 4. 審査UIを Postgres に向ける
+### 5. 審査UIを Postgres に向ける
 
 `.env` に `DATABASE_URL` を書いておけば `serve` も `collect` も同じDBを見る。
 
 ## 検証済みの内容（2026-08-03、PostgreSQL 16）
 
-ローカルに立てた PostgreSQL 16 に対して通した結果:
+ローカルに立てた PostgreSQL 16 に対して、上の手順をそのまま通した結果:
 
 - 移行 16行（properties 9・feedback 7）。マイグレーション6件も自動適用
 - **二重実行は止まる**。移行先に行があると「空のデータベースに対して
@@ -69,6 +88,8 @@ python -m freming.cli db transfer
   移行直後の登録が id=10 になった（主キー衝突しない）
 - 審査UI・収集とも Postgres 相手で動作
 - `tests/test_postgres.py` の7件（普段はスキップ）が全て通る
+- `db check` が空のDBと中身のあるDBを見分ける
+- 移行後に `collect` を回して6件が追記できた
 
 ## 踏んだ落とし穴
 
@@ -86,3 +107,9 @@ python -m freming.cli db transfer
   `export DATABASE_URL='...'` の形で伝えて中身は書かない
 - `psycopg` は `pip install -e ".[postgres]"` で入る。素の `pip install -e .`
   だけだと `ModuleNotFoundError: No module named 'psycopg'` になる
+- **prepared statement とプーラ。** psycopg は同じSQLを5回実行すると自動で
+  サーバ側 prepared statement に切り替える。接続プーラをトランザクション
+  単位で使う構成（Neon の `-pooler` エンドポイント、Supabase の 6543番
+  ポート）では、次の実行が別の接続に振られて落ちる。収集も審査UIも同じSQLを
+  繰り返すので確実に踏む。`connection.py` で `prepare_threshold=None` を
+  渡して無効にしてあるため、pooler 付き・直結のどちらの接続文字列でも動く

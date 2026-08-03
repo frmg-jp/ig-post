@@ -30,7 +30,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.4"]
-# PostgreSQL（Supabase）に繋ぐときだけ必要。SQLite で動かす分には要らない。
+# PostgreSQL（Neon / Supabase など）に繋ぐときだけ必要。SQLite で動かす分には要らない。
 postgres = ["psycopg[binary]>=3.1"]
 
 [project.scripts]

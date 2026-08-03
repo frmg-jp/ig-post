@@ -73,8 +73,9 @@ FREMING CURATED — 建築キュレーションメディアの物件収集パイ
   robbreport_shelter` 済み。`collect --source robbreport_shelter` で取り直し）
 - ArchDaily / Architectural Digest を `collect --dry-run --explain` で検証
   （config では disabled のまま）
-- Supabase 移行: 手順は docs/postgres-migration.md。**プロジェクト作成で
-  止まっている**（無料枠は1ユーザー2件までで、既存2件で埋まっている）
+- PostgreSQL 移行: 手順は docs/postgres-migration.md。接続先は **Neon の
+  無料枠**で進める（Supabase は無料プロジェクト2件の上限で作れなかった）。
+  コード側の準備は完了しており、残るのは Neon で接続文字列を作るところだけ
 - 手動URL投入物件の画像アップロード経路（未実装・半日規模。手動投入物件は
   こちらからページを取得しない建て付けなので、画像も人が入れる必要がある）
 - 仲介サイトの自動収集（経路A）: dreamtown / vanguard の2件を通した。
