@@ -309,15 +309,20 @@ for_sale_signals:
 # ---------------------------------------------------------------------
 # 重点エリア / 優先ジャンル
 # ---------------------------------------------------------------------
-# 承認実績（docs/approval-criteria.md）に Chicago / Brooklyn が含まれていたため、
-# 両都市を重点エリアに追加。district は承認実例のあった地区を明記している。
+# focus_areas は area_match 軸（重み0.20）だけに効く。一致すれば100点、
+# 外れても20点で、ここで候補が消えることはない。
+#
+# 2026-08-03: アメリカを全土に変更した。都市指定（LA/SF/Portland/Seattle/
+# Chicago/New York）をやめて country のみにしている。
+# 都市を並べていた頃も一致すれば同じ100点で、都市と国で差は付いていなかった。
+# 「アメリカの物件はどこでも重点」という方針をそのまま設定に写した形。
+#
+# 元の都市と地区（戻すときのために残す。承認実例のあった地区）:
+#   Los Angeles / San Francisco[South Beach, SOMA] / Portland[Pearl District]
+#   Seattle[Pioneer Square] / Chicago[West Loop, Wicker Park, Logan Square]
+#   New York[DUMBO, Brooklyn, Williamsburg, Tribeca]
 focus_areas:
-  - { country: "United States", city: "Los Angeles" }
-  - { country: "United States", city: "San Francisco", districts: ["South Beach", "SOMA"] }
-  - { country: "United States", city: "Portland", districts: ["Pearl District"] }
-  - { country: "United States", city: "Seattle", districts: ["Pioneer Square"] }
-  - { country: "United States", city: "Chicago", districts: ["West Loop", "Wicker Park", "Logan Square"] }
-  - { country: "United States", city: "New York", districts: ["DUMBO", "Brooklyn", "Williamsburg", "Tribeca"] }
+  - { country: "United States" }
   - { country: "Portugal" }
   - { country: "Spain" }
   - { country: "Taiwan" }

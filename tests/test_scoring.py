@@ -352,3 +352,45 @@ def test_long_summary_is_reported_not_truncated(config, conn) -> None:
     assert "字数上限" in stats.summary()
     # 切り詰めずにそのまま保存する（途中で切れた要約を納品しない）
     assert _row(conn, property_id)["summary"] == long_summary
+
+
+# ----------------------------------------------------------------------
+# 重点エリア（2026-08-03: アメリカを全土に変更）
+# ----------------------------------------------------------------------
+def _area(cfg, city: str, country: str):
+    from freming.scoring.schema import Assessment
+    from freming.scoring.weights import _area_axis
+
+    class _Row(dict):
+        def __getitem__(self, key):
+            return self.get(key)
+
+    return _area_axis(cfg, Assessment(city=city, country=country), _Row())
+
+
+def test_any_us_city_is_a_focus_area() -> None:
+    """都市指定をやめたので、掲載されていなかった都市も重点になる。"""
+    cfg = load_config("config.yaml")
+    for city in ("Austin", "Marfa", "Detroit", "Providence"):
+        assert _area(cfg, city, "United States").raw == 100.0
+
+
+def test_previously_listed_us_cities_still_score_full() -> None:
+    """変更前から重点だった都市が下がっていないこと。"""
+    cfg = load_config("config.yaml")
+    for city in ("Los Angeles", "New York", "Chicago", "Seattle"):
+        assert _area(cfg, city, "United States").raw == 100.0
+
+
+def test_other_focus_countries_are_unchanged() -> None:
+    cfg = load_config("config.yaml")
+    for city, country in (("Lisbon", "Portugal"), ("Alicante", "Spain"), ("Taipei", "Taiwan")):
+        assert _area(cfg, city, country).raw == 100.0
+
+
+def test_outside_the_focus_areas_is_not_zero() -> None:
+    """エリアで候補を消さない。承認実績8件のうち2件は当初エリア外だった。"""
+    cfg = load_config("config.yaml")
+    axis = _area(cfg, "Provence", "France")
+    assert axis.raw == 20.0
+    assert "重点エリア外" in axis.reason
