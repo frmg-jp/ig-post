@@ -747,3 +747,76 @@ def test_disabled_source_can_still_be_dry_run(tmp_path, monkeypatch) -> None:
 class _NullConn:
     def close(self) -> None:
         pass
+
+
+# ----------------------------------------------------------------------
+# 止まったフィード
+#
+# 2026-08-03、SocketSite の最新記事が2024年7月だった。窓の長さだけを見ると
+# 「0.4本/日」という健全な数字が出るが、実際には2年前に止まっていて
+# collect では「期間外 15」で1件も入らない。窓の長さと、その窓がいつの
+# ものかは別の情報で、後者を出さないと止まったフィードを採用してしまう。
+# ----------------------------------------------------------------------
+def _stats_ending(days_ago: float, span: float, count: int = 15, lookback: int = 30):
+    from datetime import datetime, timedelta, timezone
+
+    from freming.collect.editorial import CollectStats
+
+    now = datetime(2026, 8, 3, tzinfo=timezone.utc)
+    stats = CollectStats(source="t", lookback_days=lookback)
+    stats.feed_entries = count
+    stats.inserted = 1
+    stats.entry_dates = [
+        now - timedelta(days=days_ago + span * i / (count - 1)) for i in range(count)
+    ]
+    return stats
+
+
+def test_a_frozen_feed_is_reported_as_stopped() -> None:
+    stats = _stats_ending(days_ago=750, span=32)
+    assert stats.is_stale() is True
+    assert stats.days_since_newest() == pytest.approx(750, abs=1)
+    assert "止まっています" in stats.pace_report()
+    assert "最新記事は 750 日前" in stats.pace_report()
+
+
+def test_a_frozen_feed_reports_zero_not_its_old_pace() -> None:
+    """過去のペースを「見込み」として出さない。"""
+    stats = _stats_ending(days_ago=750, span=32)
+    assert stats.entries_per_day == pytest.approx(14 / 32)   # 過去のペースは残す
+    assert stats.candidates_per_week == 0.0                  # 見込みは0
+
+
+def test_a_live_feed_is_not_flagged() -> None:
+    stats = _stats_ending(days_ago=2, span=8)
+    assert stats.is_stale() is False
+    assert "止まっています" not in stats.pace_report()
+    assert stats.candidates_per_week is not None
+    assert stats.candidates_per_week > 0
+
+
+def test_staleness_is_measured_against_the_collection_window() -> None:
+    """基準は collect.lookback_days。probe が期間を外しても本来の値で判定する。"""
+    stats = _stats_ending(days_ago=45, span=10, lookback=30)
+    assert stats.is_stale() is True
+    stats.lookback_days = 90
+    assert stats.is_stale() is False
+
+
+def test_probe_uses_the_real_lookback_for_staleness(monkeypatch) -> None:
+    """probe は期間フィルタを 36500 日に緩めるが、停止判定はそれを使わない。
+
+    緩めた値で判定すると、2年前に止まったフィードも「動いている」と出る。
+    """
+    from freming.collect.editorial import EditorialCollector
+    from freming.config import load_config
+
+    cfg = load_config("config.yaml").model_copy(deep=True)
+    cfg.collect.lookback_days = 36500
+    collector = EditorialCollector(cfg, client=None, conn=None)
+    collector.real_lookback_days = 30
+
+    source = next(s for s in cfg.editorial_sources if s.feeds)
+    source = source.model_copy(update={"feeds": []})   # フィード取得はしない
+    stats = collector.collect(source, dry_run=True)
+    assert stats.lookback_days == 30

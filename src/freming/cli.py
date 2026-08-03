@@ -116,7 +116,11 @@ def _cmd_probe_feed(args: argparse.Namespace) -> int:
         rate = stats.entries_per_day
         pace = f"{rate:>5.1f}本/日" if rate is not None else " ペース不明"
         weekly = stats.candidates_per_week
-        if weekly is None:
+        age = stats.days_since_newest()
+        if stats.is_stale():
+            # 止まったフィードは「本/日」が健全に見える。ここで言い切る。
+            estimate = f"  停止中（最新 {age:.0f} 日前）"
+        elif weekly is None:
             estimate = ""
         elif stats.weekly_is_reliable:
             estimate = f"  審査 週{weekly:.1f}件"

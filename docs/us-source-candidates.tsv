@@ -19,7 +19,8 @@
 #   要検証   ArchDaily        24件/376字/9.4本/日。本数が多く、記事ページ取得の
 #                             コストが大きいので歩留まりを見てから
 #   要検証   Architectural Digest  30件/154字/5.2本/日
-#   要検証   SocketSite       15件/367字/0.4本/日/候補1件 → 週0.2件。本数が少ない
+#   不採用   SocketSite       **止まっている**。最新記事が2024-07-15 で、collect では
+#                             15件すべて期間外。probe の「0.4本/日」は2024年の値だった
 #
 #   不採用   Architectural Record / Iconic Houses / Curbed / USModernist /
 #            Mid Century Home / Urbanize LA / National Trust / Docomomo US

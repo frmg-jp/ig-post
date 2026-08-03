@@ -126,6 +126,9 @@ class CollectStats:
     # 知らないと1日あたりの本数が分からない。審査に上がる件数の見積もりは
     # ここが分からないと桁で外れる。
     entry_dates: list[datetime] = field(default_factory=list)
+    # 収集で使う期間（日）。窓の「長さ」だけでは、そのフィードがまだ
+    # 動いているのか止まっているのかが分からない。
+    lookback_days: int | None = None
 
     # ------------------------------------------------------------------
     # 配信ペース
@@ -150,12 +153,36 @@ class CollectStats:
         # 窓の両端しか分からないので、区間の数（件数-1）で割る
         return (len(self.entry_dates) - 1) / days
 
+    def days_since_newest(self, now: datetime | None = None) -> float | None:
+        """最新記事から何日経っているか。
+
+        2026-08-03、SocketSite の最新記事が2024年7月だった。窓の長さだけを
+        見ていると「0.4本/日」という健全な数字が出るが、実際には2年前に
+        止まっていて1件も収集できない。窓が「いつのものか」を出さないと、
+        止まったフィードを動いていると誤読する。
+        """
+        if not self.entry_dates:
+            return None
+        current = now or datetime.now(timezone.utc)
+        return (current - max(self.entry_dates)).total_seconds() / 86400
+
+    def is_stale(self, now: datetime | None = None) -> bool:
+        """収集期間より古い記事しか無い＝いま回しても1件も入らない。"""
+        age = self.days_since_newest(now)
+        if age is None or self.lookback_days is None:
+            return False
+        return age > self.lookback_days
+
     @property
     def candidates_per_week(self) -> float | None:
         """1週間あたり審査に上がる件数の見込み。
 
         候補率（候補/フィード件数）に配信ペースを掛ける。
+        止まっているフィードでは 0 を返す（過去のペースを見込みとして
+        出さない）。
         """
+        if self.is_stale():
+            return 0.0
         pace = self.entries_per_day
         if pace is None or not self.feed_entries:
             return None
@@ -184,7 +211,10 @@ class CollectStats:
 
         抜粋配信で候補0件のときは、判定が本文不足で落ちているだけの
         可能性が高い。数字としては下限であって見込みではない。
+        止まっているフィードは 0 で正しいので、こちらは信じてよい。
         """
+        if self.is_stale():
+            return True
         return not (self.excerpt_only and self.inserted == 0)
 
     def pace_report(self) -> str:
@@ -202,17 +232,26 @@ class CollectStats:
             )
         oldest = min(self.entry_dates).strftime("%Y-%m-%d")
         newest = max(self.entry_dates).strftime("%Y-%m-%d")
+        age = self.days_since_newest()
         lines = [
             "",
             "--- 配信ペース ---",
             f"  {len(self.entry_dates)}件が {oldest} 〜 {newest} の {days:.1f}日分"
             f"  → {self.entries_per_day:.1f} 本/日",
+            f"  最新記事は {age:.0f} 日前",
         ]
         weekly = self.candidates_per_week
         if weekly is not None:
             lines.append(
                 f"  候補 {self.inserted}件 / {self.feed_entries}件 "
                 f"→ 審査に上がるのは 週 {weekly:.1f} 件の見込み"
+            )
+        if self.is_stale():
+            lines.append(
+                f"  ※ **このフィードは止まっています。** 収集期間"
+                f"（collect.lookback_days = {self.lookback_days}日）より古い記事しか\n"
+                "     無いため、いま回しても1件も入りません。上の「本/日」は過去の\n"
+                "     ペースであって、いまの供給量ではありません。"
             )
         if not self.weekly_is_reliable:
             lines.append(
@@ -352,6 +391,9 @@ class EditorialCollector:
         self.conn = conn
         self._article_fetch_disabled = not config.collect.fetch_article_pages
         self._consecutive_article_failures = 0
+        # 調査（probe）では期間フィルタを外すため collect.lookback_days が
+        # 実際の値ではなくなる。「止まっているか」の判定には本来の値が要る。
+        self.real_lookback_days: int | None = None
 
     def _apply_source_policy(self, source: EditorialSource) -> None:
         """ソース単位の設定を反映する（記事取得の有無）。"""
@@ -372,7 +414,10 @@ class EditorialCollector:
         explain: bool = False,
         ignore_known: bool = False,
     ) -> CollectStats:
-        stats = CollectStats(source=source.key)
+        stats = CollectStats(
+            source=source.key,
+            lookback_days=self.real_lookback_days or self.config.collect.lookback_days,
+        )
         self._apply_source_policy(source)
         if not source.feeds:
             log.warning(
@@ -655,6 +700,10 @@ def probe_feed(config: Config, feed_url: str, limit: int | None = None) -> Colle
     try:
         with HttpClient(probe_config.http) as client:
             collector = EditorialCollector(probe_config, client, conn)
+            # 期間フィルタは外して全件見るが、「止まっているか」の判定には
+            # 本来の収集期間を使う。36500日を基準にすると、2年前に止まった
+            # フィードも「動いている」と出てしまう。
+            collector.real_lookback_days = config.collect.lookback_days
             # 調査用なので、取得済みかどうかに関係なくすべて表示する
             return collector.collect(
                 source, limit=limit, dry_run=True, explain=True, ignore_known=True
