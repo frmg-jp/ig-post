@@ -514,3 +514,78 @@ def test_hits_the_market_is_recognised() -> None:
     result = signals.detect(text, [], SIGNALS)
     assert "hits the market" in result.keywords
     assert result.is_candidate(SIGNALS.min_signal_score)
+
+
+# --- 地の文だけを取り出す（2026-08-03 Robb Report 第2ラウンド） ----------
+#
+# class 名でノイズを除くやり方は、名前を当てられないと届かない。
+# 関連記事と著者の「最近の記事」一覧を落としきれず、山火事の避難記事に
+# 別記事の見出し「… Hits the Market for $3 Million」が混ざって売出中と
+# 判定された。3つの記事が同じキーワードと同じ価格を持つ形で表面化した。
+
+
+def _page_with_unlabelled_related(headline: str, body: str) -> str:
+    """関連記事一覧に class が付いていないページ（Robb Report と同じ形）。"""
+    return f"""
+    <html><head><title>{headline}</title></head><body><article>
+      <h1>{headline}</h1>
+      <div><span>By Wendy Bowman</span>
+        <ul><li><a href="/x">Wendy Bowman's Most Recent Stories</a></li></ul></div>
+      <p>{body}</p>
+      <div><h2>More From Robb Report</h2><ul>
+        <li><a href="/a">Landis Gores's Home Hits the Market for $3 Million</a></li>
+        <li><a href="/b">A Napa Estate Asks $9.3 Million</a></li>
+      </ul></div>
+    </article></body></html>
+    """
+
+
+def test_headlines_of_other_articles_do_not_leak_in() -> None:
+    page = parse_page(
+        _page_with_unlabelled_related(
+            "Clooney Forced to Evacuate French Estate",
+            "Wildfires forced the couple to leave the estate. " * 30,
+        ),
+        "https://robbreport.com/shelter/clooney",
+    )
+    assert "Landis Gores" not in page.text
+    assert "$9.3 Million" not in page.text
+
+
+def test_an_unrelated_article_is_not_made_a_candidate_by_leakage() -> None:
+    """山火事の避難記事が「売出中」になっていた実例。"""
+    page = parse_page(
+        _page_with_unlabelled_related(
+            "Clooney Forced to Evacuate French Estate",
+            "Wildfires forced the couple to leave the estate. " * 30,
+        ),
+        "https://robbreport.com/shelter/clooney",
+    )
+    result = signals.detect(page.text, page.links, SIGNALS)
+    assert result.score == 0
+    assert not result.is_candidate(SIGNALS.min_signal_score)
+
+
+def test_the_real_listing_still_scores() -> None:
+    """ノイズを落としすぎて本物まで消さないこと。"""
+    page = parse_page(
+        _page_with_unlabelled_related(
+            "Landis Gores's Home Hits the Market for $3 Million",
+            "The 1950s glass house has been restored. " * 30
+            + " It hits the market for $3 million.",
+        ),
+        "https://robbreport.com/shelter/landis",
+    )
+    result = signals.detect(page.text, page.links, SIGNALS)
+    assert result.is_candidate(SIGNALS.min_signal_score)
+
+
+def test_pages_without_paragraphs_keep_their_body() -> None:
+    """<p> を使わずに本文を組むページで、本文を丸ごと捨てないこと。"""
+    body = "This converted firehouse is for sale at $2.4 million. " * 20
+    html = f"<html><head><title>t</title></head><body><article><div>{body}</div></article></body></html>"
+    page = parse_page(html, "https://example.com/a")
+    assert "converted firehouse" in page.text
+    assert signals.detect(page.text, page.links, SIGNALS).is_candidate(
+        SIGNALS.min_signal_score
+    )

@@ -112,6 +112,29 @@ def _strip_noise(node) -> None:
             el.decompose()
 
 
+def _body_text(root) -> str:
+    """記事の地の文だけを取り出す。
+
+    class 名でノイズを除くやり方は、名前を当てられないと届かない。
+    実例（2026-08-03、Robb Report）: 関連記事と著者の「最近の記事」一覧を
+    class で落としきれず、山火事の避難記事に別記事の見出し
+    「… Hits the Market for $3 Million」が混ざって売出中と判定された。
+    3つの記事が同じキーワードと同じ価格を持つという形で表面化した。
+
+    そこで構造で取る。記事の地の文は <p> に入り、関連記事の一覧は
+    <li><a> や <h3><a> に入る。<p> だけを集めれば、class 名を知らなくても
+    見出しの羅列は落ちる。
+
+    <p> を使わずに本文を組む作りのページもあるので、集めた結果が短すぎる
+    ときは全体に戻す（本文を丸ごと捨てるよりは、ノイズが混ざる方がまし）。
+    """
+    paragraphs = [p.get_text(" ", strip=True) for p in root.find_all("p")]
+    text = " ".join(" ".join(paragraphs).split())
+    if len(text) >= _MIN_ARTICLE_CHARS:
+        return text
+    return " ".join(root.get_text(separator=" ").split())
+
+
 def _article_root(soup):
     """本文が入っている要素を返す。見つからなければページ全体。
 
@@ -165,7 +188,7 @@ def parse_page(html: str, base_url: str) -> PageContent:
     # 見出しは本文の一部として扱う。共通部分を落とすと <header> ごと
     # 消えることがあり、「Home for Sale in ...」のような見出しの
     # キーワードを取りこぼすため、先頭に明示的に付ける。
-    body = " ".join(root.get_text(separator=" ").split())
+    body = _body_text(root)
     text = " ".join(part for part in (title, body) if part)[:_MAX_TEXT_CHARS]
 
     # リンクも本文の中だけから拾う。フッターやサイドバーに仲介サイトへの
