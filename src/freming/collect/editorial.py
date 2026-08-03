@@ -44,6 +44,39 @@ class Explanation:
     listing_links: list[str] = field(default_factory=list)
     ignored_prices: list[str] = field(default_factory=list)
     text_head: str = ""
+    keyword_context: str = ""
+    price_context: str = ""
+
+    @property
+    def near_miss(self) -> str:
+        """あと一歩で候補にならなかった理由。候補になったものには出さない。
+
+        「キーワードはあるが価格が無い」のか「価格はあるがキーワードが無い」のかで、
+        直すところがまったく違う（キーワード表現の不足か、価格の書式か）。
+        ここを出さないと、推測で config をいじることになる。
+        """
+        has_kw, has_price = bool(self.keywords), bool(self.prices)
+        if has_kw and has_price:
+            return ""
+        if has_kw and not has_price:
+            if self.ignored_prices:
+                return (
+                    f"価格 {self.ignored_prices[0]} はキーワードから遠いため除外"
+                    f"（price_requires_keyword_within）\n        本文: {self.price_context}"
+                )
+            return (
+                "販売キーワードはあるが価格を検出できず"
+                f"（price_patterns の書式漏れか、本文に価格が無い）\n        "
+                f"本文: {self.keyword_context}"
+            )
+        if has_price or self.ignored_prices:
+            price = (self.prices or self.ignored_prices)[0]
+            return (
+                f"価格 {price} はあるが販売キーワードが無い"
+                f"（for_sale_signals.keywords の表現漏れ）\n        "
+                f"本文: {self.price_context}"
+            )
+        return ""
 
     def line(self) -> str:
         found: list[str] = []
@@ -57,10 +90,12 @@ class Explanation:
             found.append(f"除外price={len(self.ignored_prices)}")
         detail = " ".join(found) or "シグナルなし"
         origin = "feed" if self.from_feed_only else "記事"
-        return (
+        line = (
             f"  {self.score}点 [{origin} {self.text_chars:>5}字] {self.title[:40]:<40} "
             f"{detail}\n        {self.url}"
         )
+        miss = self.near_miss
+        return f"{line}\n        → {miss}" if miss else line
 
 
 @dataclass
@@ -497,6 +532,8 @@ class EditorialCollector:
                     listing_links=list(result.listing_links),
                     ignored_prices=list(result.ignored_prices),
                     text_head=page.text[:160],
+                    keyword_context=result.keyword_context,
+                    price_context=result.price_context,
                 )
             )
 

@@ -333,3 +333,72 @@ def test_feed_fragments_still_work() -> None:
     page = parse_page(html, "https://example.com/a")
     assert "converted warehouse" in page.text
     assert "$2,400,000" in page.text
+
+
+# --- 取りこぼしの診断 ---------------------------------------------------
+#
+# 「1点で落ちた」だけでは、キーワード表現が足りないのか価格の書式が
+# 合わないのかが分からない。原因が分からないまま設定をいじると、
+# CIRCA の assume_for_sale や listing_link_score のときと同じ失敗になる。
+
+
+def _explain(text: str):
+    from freming.collect.editorial import Explanation
+
+    result = signals.detect(text, [], SIGNALS)
+    return Explanation(
+        url="https://example.com/a", title="t", score=result.score,
+        text_chars=len(text), from_feed_only=False,
+        keywords=list(result.keywords), prices=list(result.prices),
+        ignored_prices=list(result.ignored_prices),
+        keyword_context=result.keyword_context,
+        price_context=result.price_context,
+    )
+
+
+def test_price_without_a_keyword_points_at_the_keyword_list() -> None:
+    """価格はあるがキーワードが無い＝キーワードの表現漏れ。"""
+    explanation = _explain(
+        "This neoclassical apartment retains its mouldings. "
+        "It is available through Maisons Marine at €1,200,000."
+    )
+    miss = explanation.near_miss
+    assert "販売キーワードが無い" in miss
+    assert "keywords" in miss
+    # どの表現を足せばよいか分かるよう、価格の周辺を出す
+    assert "available through" in miss
+
+
+def test_keyword_without_a_price_points_at_the_price_patterns() -> None:
+    """キーワードはあるが価格が無い＝価格の書式漏れか、本文に価格が無い。"""
+    explanation = _explain(
+        "This finca near Alicante has just come on the market. Price on application."
+    )
+    miss = explanation.near_miss
+    assert "価格を検出できず" in miss
+    assert "price_patterns" in miss
+    assert "on the market" in miss
+
+
+def test_distant_price_points_at_the_window_setting() -> None:
+    """遠すぎて除外された場合は、距離の設定が原因だと分かるようにする。"""
+    filler = "word " * 100
+    explanation = _explain(f"This house is for sale. {filler} The stadium cost €240 million.")
+    miss = explanation.near_miss
+    assert "遠いため除外" in miss
+    assert "price_requires_keyword_within" in miss
+
+
+def test_a_real_candidate_gets_no_near_miss_note() -> None:
+    """候補になったものに診断は出さない（読むところを増やさない）。"""
+    explanation = _explain(
+        "The converted firehouse is now for sale with an asking price of $2.4 million."
+    )
+    assert explanation.near_miss == ""
+    assert "→" not in explanation.line()
+
+
+def test_articles_with_no_signal_at_all_get_no_note() -> None:
+    """そもそも何も無い記事に理由を出しても意味がない。"""
+    explanation = _explain("A survey of five exhibitions across Europe this month.")
+    assert explanation.near_miss == ""

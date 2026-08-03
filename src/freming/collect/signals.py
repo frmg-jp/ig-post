@@ -30,6 +30,12 @@ class SignalResult:
     listing_links: list[str] = field(default_factory=list)
     ignored_prices: list[str] = field(default_factory=list)  # 文脈から売出価格でないと判断
     evidence: str = ""
+    # 「なぜ点が付かなかったか」を人が読める形にするための抜粋。
+    # キーワードは出たが価格が出ない（またはその逆）とき、本文のどこを
+    # 見て判定したのかが分からないと、キーワード表現の不足なのか価格の
+    # 書式なのかを切り分けられず、推測で設定をいじることになる。
+    keyword_context: str = ""
+    price_context: str = ""
 
     def is_candidate(self, threshold: int) -> bool:
         return self.score >= threshold
@@ -59,6 +65,14 @@ def _snippet(text: str, needle: str) -> str:
     return " ".join(text[start:end].split())
 
 
+def _context(text: str, start: int, end: int, width: int = 70) -> str:
+    """該当箇所の前後を切り出す。取りこぼしの原因を目で確かめるため。"""
+    head = max(0, start - width)
+    tail = min(len(text), end + width)
+    snippet = " ".join(text[head:tail].split())
+    return f"…{snippet}…" if head or tail < len(text) else snippet
+
+
 def detect(text: str, links: list[str], config: ForSaleSignals) -> SignalResult:
     """本文とリンクから販売シグナルを検出する。"""
     result = SignalResult()
@@ -71,6 +85,8 @@ def detect(text: str, links: list[str], config: ForSaleSignals) -> SignalResult:
         if start < 0:
             continue
         result.keywords.append(keyword)
+        if not result.keyword_context:
+            result.keyword_context = _context(text, start, start + len(keyword))
         while start >= 0:
             keyword_spans.append((start, start + len(lowered_keyword)))
             start = lowered.find(lowered_keyword, start + 1)
@@ -86,6 +102,8 @@ def detect(text: str, links: list[str], config: ForSaleSignals) -> SignalResult:
             found = match.group(0).strip()
             if not found:
                 continue
+            if not result.price_context:
+                result.price_context = _context(text, match.start(), match.end())
             if _near_keyword(match.start(), match.end(), keyword_spans, window):
                 if found not in result.prices:
                     result.prices.append(found)
