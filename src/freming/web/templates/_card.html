@@ -16,9 +16,10 @@
       <span class="score {{ 'hi' if row['score'] and row['score'] >= highlight else '' }}">
         {{ '%.1f'|format(row['score']) if row['score'] is not none else '未採点' }}
       </span>
-      {# エリアは審査中に最も参照する属性なので、点数の右に置く。
+      {# 価格・エリアは審査中に最も参照する属性なので、点数の隣に置く。
          国旗は文字を読む前に「どこの国か」が分かるようにするためのもの。
          知らない国では空になるので、間違った旗は出ない。 #}
+      {% if row["price"] %}<span class="price">{{ row["price"] }}</span>{% endif %}
       {% set country_flag = row["location_country"] | flag %}
       <span class="area">
         {% if country_flag %}<span class="flag">{{ country_flag }}</span>{% endif %}
@@ -40,7 +41,6 @@
       {% endif %}
       {% if row["provenance_visible"] %}<span class="tag on">前歴あり</span>{% endif %}
       {% if row["genre"] %}<span class="tag">{{ row["genre"] }}</span>{% endif %}
-      {% if row["price"] %}<span class="tag">{{ row["price"] }}</span>{% endif %}
       {% if not row["is_for_sale"] %}<span class="tag warn">売出未確認</span>{% endif %}
       <span class="tag">{{ row["source"] }}{% if row["source_rank"] %}/{{ row["source_rank"] }}{% endif %}</span>
     </div>

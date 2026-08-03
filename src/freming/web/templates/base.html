@@ -71,6 +71,8 @@
   .head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
   .score { font-size: 22px; font-weight: 700; line-height: 1; letter-spacing: -.01em; }
   .score.hi { color: var(--hi); }
+  /* 価格は審査の判断に直接効くので、点数の次に目に入る強さにする */
+  .price { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
   .area { font-size: 13px; color: var(--muted); }
   /* 国旗は少し大きくしないと、13px では潰れて判別できない */
   .flag { font-size: 15px; line-height: 1; margin-right: 1px; }
@@ -107,6 +109,9 @@
     font: inherit; font-size: 13px; padding: 5px 7px; border: 1px solid var(--line);
     border-radius: 5px; background: var(--card); color: var(--fg);
   }
+  /* プルダウンは中身の最長の選択肢に合わせて伸びる。非承認理由は文が長く、
+     放っておくと行の大半を占める。幅を固定して、自由記入に場所を残す。 */
+  .actions select { width: 170px; flex: none; }
   input[type=text].free { flex: 1; min-width: 140px; }
   button {
     font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 5px; cursor: pointer;

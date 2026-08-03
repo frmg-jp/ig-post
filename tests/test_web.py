@@ -495,3 +495,28 @@ def test_thumbnail_is_square(client, conn) -> None:
     body = client.get("/").text
     assert "aspect-ratio: 1" in body
     assert "object-fit: cover" in body
+
+
+def test_price_is_shown_next_to_the_score(client, conn) -> None:
+    """価格は審査の判断に直接効くので、点数の隣（国旗の左）に出す。"""
+    property_id = _add(conn, price="£1,500,000")
+    conn.execute("UPDATE properties SET score = 66.8 WHERE id = ?", (property_id,))
+    conn.commit()
+
+    body = client.get("/").text
+    assert '<span class="price">£1,500,000</span>' in body
+    # 見出しに出したので、タグ列には重ねて出さない
+    assert '<span class="tag">£1,500,000</span>' not in body
+    # 並びは 点数 → 価格 → 国旗
+    assert body.index('class="price"') < body.index('class="flag"')
+
+
+def test_no_price_leaves_the_head_clean(client, conn) -> None:
+    _add(conn, price=None)
+    assert 'class="price"' not in client.get("/").text
+
+
+def test_reason_dropdown_has_a_fixed_width(client, conn) -> None:
+    """選択肢の文が長いと、放っておくと行の大半を占める。"""
+    _add(conn)
+    assert ".actions select { width: 170px" in client.get("/").text
