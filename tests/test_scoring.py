@@ -394,3 +394,43 @@ def test_outside_the_focus_areas_is_not_zero() -> None:
     axis = _area(cfg, "Provence", "France")
     assert axis.raw == 20.0
     assert "重点エリア外" in axis.reason
+
+
+# --- リクエストの組み立て -------------------------------------------------
+#
+# effort は全モデルにあるパラメータではない（Opus 4.5 以降と Sonnet 4.6
+# 以降のみ）。非対応モデルに送ると 400 になり、400 は再試行されないので
+# その場で全件が失敗する。config で外せることを固定しておく。
+
+
+def _client(monkeypatch, effort):
+    from freming.scoring.client import ScoringClient
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    cfg = load_config("config.yaml")
+    cfg.scoring.effort = effort
+    return ScoringClient(cfg, "system")
+
+
+def test_effort_is_not_sent_when_it_is_unset(monkeypatch) -> None:
+    output_config = _client(monkeypatch, None)._output_config()
+    assert "effort" not in output_config
+    assert output_config["format"]["type"] == "json_schema"
+
+
+def test_effort_is_sent_when_configured(monkeypatch) -> None:
+    assert _client(monkeypatch, "medium")._output_config()["effort"] == "medium"
+
+
+def test_the_configured_model_does_not_use_effort() -> None:
+    """config.yaml の model と effort の組み合わせが噛み合っていること。
+
+    effort を持たないモデルに effort を残したままにすると、採点が
+    まるごと落ちる。設定ファイル側の取り違えをここで止める。
+    """
+    cfg = load_config("config.yaml")
+    without_effort = ("claude-haiku-4-5", "claude-3-5-haiku", "claude-haiku-3")
+    if cfg.scoring.model.startswith(without_effort):
+        assert cfg.scoring.effort is None, (
+            f"{cfg.scoring.model} は effort を受け付けません。config.yaml で null にしてください"
+        )

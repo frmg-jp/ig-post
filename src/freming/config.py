@@ -256,7 +256,9 @@ class FeedbackConfig(BaseModel):
 class ScoringConfig(BaseModel):
     model: str = "claude-sonnet-5"
     max_tokens: int = 2000
-    effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
+    # effort は対応モデルにだけ渡す。null にすると送らない。
+    # 詳細は scoring/client.py の _output_config を見ること。
+    effort: Literal["low", "medium", "high", "xhigh", "max"] | None = "medium"
     summary_max_chars: int = 80
     score_scale: int = 100
     weights: ScoringWeights

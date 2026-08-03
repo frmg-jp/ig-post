@@ -532,14 +532,17 @@ genres:
 # スコアリング（Claude API）
 # ---------------------------------------------------------------------
 scoring:
-  model: "claude-sonnet-5"     # 上位に切替可: claude-opus-5
-  # max_tokens は thinking と本文の合計に効く上限。claude-sonnet-5 は
-  # thinking パラメータを省略すると adaptive thinking が既定で動くため、
-  # 判定結果のJSON自体は小さくても上限に届きうる。2000 では打ち切られる
-  # 可能性があるので余裕を持たせている（打ち切られた場合は
-  # ScoringError で理由が出る）。
+  # 費用を抑えるため 2026-08-03 に claude-sonnet-5 から下げた。
+  # 上位に切替可: claude-sonnet-5 / claude-opus-5（そのときは effort も戻す）
+  model: "claude-haiku-4-5"
+  # max_tokens は thinking と本文の合計に効く上限。judgement の JSON 自体は
+  # 小さいが、thinking が動くモデルでは上限に届きうるので余裕を持たせている
+  # （打ち切られた場合は ScoringError で理由が出る）。
   max_tokens: 8000
-  effort: medium               # low | medium | high | xhigh | max
+  # effort は Opus 4.5 以降と Sonnet 4.6 以降にしか無い。claude-haiku-4-5 に
+  # 渡すと 400 になるので、送らない（null）。上位モデルに戻すときは
+  # medium から。指定できる値: low | medium | high | xhigh | max
+  effort: null
   summary_max_chars: 80
   score_scale: 100             # 0-100
   weights:                     # 合計 1.0

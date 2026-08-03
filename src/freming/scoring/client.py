@@ -53,16 +53,26 @@ class ScoringClient:
                 time.sleep(wait)
         raise ScoringError(f"{max_attempts}回試して判定できませんでした: {last_error}")
 
+    def _output_config(self) -> dict:
+        """リクエストの output_config を組み立てる。
+
+        effort は全モデルにあるわけではない（Opus 4.5 以降と Sonnet 4.6 以降。
+        Haiku 4.5 には無い）。非対応モデルに渡すと 400 になり、400 は
+        `_is_retryable` が再試行しないので、その場で全件が失敗する。
+        config で null にできるようにして、指定が無ければ送らない。
+        """
+        output_config: dict = {"format": {"type": "json_schema", "schema": OUTPUT_SCHEMA}}
+        if self.config.scoring.effort:
+            output_config["effort"] = self.config.scoring.effort
+        return output_config
+
     def _assess_once(self, user_prompt: str) -> Assessment:
         response = self._client.messages.create(
             model=self.model,
             max_tokens=self.config.scoring.max_tokens,
             system=self.system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
-            output_config={
-                "effort": self.config.scoring.effort,
-                "format": {"type": "json_schema", "schema": OUTPUT_SCHEMA},
-            },
+            output_config=self._output_config(),
         )
         _check_stop_reason(response, self.config.scoring.max_tokens)
         return Assessment.from_json(json.loads(_text_of(response)))
@@ -130,7 +140,8 @@ def check_api(config: Config) -> tuple[bool, str]:
         return False, f"{config.scoring.model} を呼び出せませんでした: {exc}"
 
     return True, (
-        f"疎通OK（model={config.scoring.model} effort={config.scoring.effort}）\n"
+        f"疎通OK（model={config.scoring.model} "
+        f"effort={config.scoring.effort or '送っていません'}）\n"
         f"  テスト記事の判定: genre={assessment.genre} "
         f"前歴={assessment.provenance_visible} story={assessment.story_score}\n"
         f"  {assessment.summary}"

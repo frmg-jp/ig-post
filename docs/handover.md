@@ -65,6 +65,26 @@ FREMING CURATED — 建築キュレーションメディアの物件収集パイ
 - 鍵は `credentials/service-account.json`（gitignore 済み）
 - 再実行しても重複納品しない（`source_url` UNIQUE + `deliveries` チェック）
 
+## 採点のモデル（2026-08-03 に変更）
+
+費用を抑えるため `claude-sonnet-5` → **`claude-haiku-4-5`** に下げた
+（`config.yaml` の `scoring.model`）。判定の精度は落ちる。1〜2週間ぶん
+溜まったら、Sonnet 5 のときの点と見比べて戻すかどうか決める。
+
+同時に `scoring.effort` を **null** にしてある。**effort は Opus 4.5 以降と
+Sonnet 4.6 以降にしか無いパラメータで、Haiku 4.5 に渡すと 400 になる。**
+400 は `_is_retryable` が再試行しないので、その場で全件失敗する。
+`client.py` の `_output_config` が null のときに送らない作りにしてある。
+上位モデルに戻すときは `effort: medium` も一緒に戻すこと
+（`tests/test_scoring.py` に組み合わせの取り違えを止めるテストがある）。
+
+概算の費用（実測の入力量から）:
+
+| モデル | 単価（入力/出力・per MTok） | 1件あたり | 月（1日3〜4件） |
+| --- | --- | --- | --- |
+| claude-sonnet-5 | $2 / $10（2026-08-31 まで。以降 $3 / $15） | 約 $0.02 | $2〜3 |
+| claude-haiku-4-5 | $1 / $5 | 約 $0.007 | $1 未満 |
+
 ## 残タスク（トンマナの次）
 
 優先度はユーザーに確認してから着手する:
