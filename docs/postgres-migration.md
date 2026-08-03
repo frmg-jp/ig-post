@@ -76,9 +76,17 @@ python -m freming.cli db transfer
 
 ### 4. GitHub Secrets に登録する
 
-リポジトリの Settings → Secrets and variables → Actions で、
-`DATABASE_URL` に同じ接続文字列を登録する。ワークフロー側の修正は不要
-（すでに `secrets.DATABASE_URL` を読んでいる）。
+リポジトリの Settings → Secrets and variables → Actions で、**2つとも**
+登録する。ワークフロー側の修正は不要（すでに両方を読んでいる）。
+
+| Name | 値 |
+| --- | --- |
+| `DATABASE_URL` | 接続文字列（両端の `'` は含めない） |
+| `ANTHROPIC_API_KEY` | 採点に使う Claude API キー |
+
+**`DATABASE_URL` だけだと収集は通って採点で落ちる。** 2026-08-03 の初回
+実行がこれで、収集3件は Neon に入ったが `score` が
+`RuntimeError: ANTHROPIC_API_KEY が未設定です` で終了した。
 
 ### 5. 審査UIを Postgres に向ける
 
@@ -102,6 +110,15 @@ python -m freming.cli db transfer
 移った**ことを確認した。ここを取りこぼすと frmg_igNNN が振り直しになり、
 Drive 上の既存フォルダと衝突する。次の納品は frmg_ig003 から続く。
 
+## 定期実行が Neon を見ているかの確かめ方
+
+収集ログの「取得済み」の件数を見る。これは source_url が既にDBにある、
+という判定なので、**移行済みのデータが読めているときだけ0より大きくなる**。
+ランナーの使い捨て SQLite を見ていれば全件が新規になる。
+
+2026-08-03 の初回実行では 6sqft 5件・The Spaces 6件・Robb Report 6件・
+WowHaus 5件が「取得済み」で、Neon を読めていることが確認できた。
+
 ## 踏んだ落とし穴
 
 - **`FREMING_TEST_DSN` を移行先と同じDBに向けない。** `test_postgres.py`
@@ -118,6 +135,12 @@ Drive 上の既存フォルダと衝突する。次の納品は frmg_ig003 か�
   `export DATABASE_URL='...'` の形で伝えて中身は書かない
 - `psycopg` は `pip install -e ".[postgres]"` で入る。素の `pip install -e .`
   だけだと `ModuleNotFoundError: No module named 'psycopg'` になる
+- **GitHub Actions からは記事ページが 403 になるサイトがある。** 初回実行で
+  Dezeen と WowHaus が全て 403 を返した。データセンターのIPを拒否している
+  ためで、User-Agent の偽装による回避は行わない。実装は3回続けて失敗したら
+  記事ページの取得をやめ、フィード配信分の本文だけで判定に切り替える。
+  手元のMacから collect すると同じ記事が取得できるので、**歩留まりは
+  定期実行の方が落ちる**（Dezeen は本文が厚いフィードなので実害は小さい）
 - **prepared statement とプーラ。** psycopg は同じSQLを5回実行すると自動で
   サーバ側 prepared statement に切り替える。接続プーラをトランザクション
   単位で使う構成（Neon の `-pooler` エンドポイント、Supabase の 6543番
