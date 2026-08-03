@@ -589,3 +589,25 @@ def test_pages_without_paragraphs_keep_their_body() -> None:
     assert signals.detect(page.text, page.links, SIGNALS).is_candidate(
         SIGNALS.min_signal_score
     )
+
+
+def test_is_now_asking_is_recognised() -> None:
+    """納屋を住居に転用した売出物件が0点で落ちていた実例（Robb Report）。
+
+    承認基準の中核（前歴が残る一点物）そのものだったので、取りこぼしの
+    損失が大きい。asking price はあったが「is now asking」の形が無かった。
+    """
+    text = (
+        "The renovation stretched on far longer than expected. The property is now "
+        "asking £1 million (about $1.3 million) with Blue Book Agency."
+    )
+    result = signals.detect(text, [], SIGNALS)
+    assert "now asking" in result.keywords
+    assert result.is_candidate(SIGNALS.min_signal_score)
+
+
+def test_asking_alone_still_needs_a_price_nearby() -> None:
+    """「asking」を含む文があっても、価格が無ければ候補にしない。"""
+    text = "We began by asking the architect how the barn had been used before."
+    result = signals.detect(text, [], SIGNALS)
+    assert not result.is_candidate(SIGNALS.min_signal_score)

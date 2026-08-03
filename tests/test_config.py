@@ -116,3 +116,20 @@ def test_delivery_defaults_are_on() -> None:
     """承認したらそのまま納品まで進むのが既定。"""
     cfg = load_config("config.yaml")
     assert cfg.delivery.auto is True
+
+
+def test_robb_report_excludes_art_auctions_and_listicles() -> None:
+    """物件以外のセクションを、記事を取りに行く前に落とす。
+
+    /art-collectibles/ は美術品オークション（金額は出るが物件ではない）、
+    /lists/ は「所有物件まとめ」のようなリスト記事で、納品する素材にならない。
+    """
+    cfg = load_config("config.yaml")
+    source = cfg.editorial_source("robbreport_shelter")
+    assert source is not None and source.enabled
+
+    base = "https://robbreport.com/shelter"
+    assert not source.url_allowed(f"{base}/art-collectibles/monet-auction-123")
+    assert not source.url_allowed(f"{base}/celebrity-homes/lists/tom-cruise-portfolio-123")
+    assert source.url_allowed(f"{base}/homes-for-sale/cotswolds-barn-for-sale-123")
+    assert source.url_allowed(f"{base}/celebrity-homes/betsey-johnson-house-123")

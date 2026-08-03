@@ -210,13 +210,21 @@ editorial_sources:
   - key: robbreport_shelter
     name: "Robb Report / Shelter"
     rank: B
-    # 2026-08-03: フィードは読めた（10件 / 198字 / 2.8本/日）。全米の高級
-    # 不動産を扱い、本数も出ている。抜粋配信（198字）なので The Spaces と
-    # 同じく probe では候補0件になる。記事ページを取って確かめてから有効化:
-    #   python -m freming.cli collect --source robbreport_shelter --dry-run --explain
-    # 「著名人の家」寄りの可能性があり、承認基準との相性は未検証。
-    enabled: false
+    enabled: true
+    # 2026-08-03 の collect --explain（記事ページ取得あり）:
+    #   10件 / 2.8本/日（3.2日分）/ 候補6件 → 審査 週11.6件
+    # 全米の高級不動産。本数・鮮度ともに現時点で最大の供給源。
+    #
+    # 抜粋配信（198字）なので probe-feed では構造的に候補0件になる。
+    # 判断は必ず collect --explain で行うこと。
     fetch_article_pages: true
+    url_exclude:
+      # 美術品オークションの記事。金額は出るが物件ではない。
+      # 10件中2件がこのセクションだった（Monet、FBIの画廊捜索）。
+      - "/art-collectibles/"
+      # 「Tom Cruise の所有物件まとめ」のようなリスト記事。物件1件の
+      # 記事ではないので、納品する素材にならない。
+      - "/lists/"
     feeds:
       - "https://robbreport.com/shelter/feed/"
   - key: socketsite
@@ -341,6 +349,13 @@ for_sale_signals:
     # on the market はあるが hits the market は別表現。
     - "hits the market"
     - "comes to market"
+    # 2026-08-03: Robb Report の「This Former Barn in the Cotswolds Was
+    # Reimagined as a Cozy Rural Retreat」（納屋を住居に転用した売出物件で、
+    # 承認基準の中核そのもの）が0点だった。本文は
+    # 「The property is now asking £1 million with Blue Book Agency」。
+    # asking price はあったが、この形が無かった。
+    - "is asking"
+    - "now asking"
     - "asking price"
     - "now available"
     - "currently listed"
