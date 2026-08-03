@@ -314,6 +314,7 @@ def _cmd_rules(args: argparse.Namespace) -> int:
 def _cmd_deliver(args: argparse.Namespace) -> int:
     from freming.db.connection import session
     from freming.delivery.deliver import deliver_approved
+    from freming.delivery.lock import DeliveryInProgress, delivery_lock
 
     cfg = load_config(args.config)
     setup_logging(cfg.app.log_dir, cfg.app.log_level)
@@ -325,8 +326,19 @@ def _cmd_deliver(args: argparse.Namespace) -> int:
             print("--watch と --dry-run は同時に使えません。", file=sys.stderr)
             return 2
         return _watch_deliveries(cfg)
-    with session(cfg.app.target()) as conn:
-        stats = deliver_approved(cfg, conn, args.limit, args.dry_run)
+    if args.dry_run:
+        # Drive に書かないので、他の納品と衝突しない。
+        with session(cfg.app.target()) as conn:
+            stats = deliver_approved(cfg, conn, args.limit, args.dry_run)
+    else:
+        try:
+            with delivery_lock(cfg):
+                with session(cfg.app.target()) as conn:
+                    stats = deliver_approved(cfg, conn, args.limit, args.dry_run)
+        except DeliveryInProgress as exc:
+            # 定期実行から呼ばれる経路なので、これは失敗ではない。
+            print(str(exc))
+            return 0
     print(stats.summary())
     print(stats.report())
     return 0

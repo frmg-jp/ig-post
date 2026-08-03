@@ -79,8 +79,15 @@ FREMING CURATED — 建築キュレーションメディアの物件収集パイ
   無ければ起動せず、`delivery.auto` を落とす
 - **納品ワーカーは1箇所だけで動かす。** 2箇所で回すと同じ物件を二重に
   納品する（`already_delivered` の確認から Drive 書き込みまでに隙間があり、
-  フォルダ名も max+1 なので同じ frmg_igNNN を取り合う）。納品は手元の
-  `serve` に一本化してある
+  フォルダ名も max+1 なので同じ frmg_igNNN を取り合う）。納品は Mac 側に
+  一本化し、同一マシン内の重複は `data/delivery.lock` のファイルロックで
+  止めている（`delivery/lock.py`）
+- 納品は launchd で15分おきに自動実行する
+  （`scripts/install-delivery-agent.sh`）。**常駐にしないのは Neon の
+  無料枠のため。** ポーリングし続けるとDBが自動停止せず、月100 CU時間を
+  使い切る。Render 側で納品しないのは、記事ページがデータセンターのIPから
+  403 になる実測（GitHub Actions で Dezeen / WowHaus が全滅）と、
+  Drive の認証が本人アカウントの OAuth だから
 
 ## 採点のモデル（2026-08-03 に変更）
 

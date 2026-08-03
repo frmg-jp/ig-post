@@ -26,6 +26,7 @@ from freming.db.connection import DbConnection, Row, connect
 from freming.db.repository import delivery_queue, record_delivery_failure
 from freming.delivery.deliver import DeliveryResult, deliver_property
 from freming.delivery.drive import DriveAuthError, DriveClient, build_client
+from freming.delivery.lock import DeliveryInProgress, delivery_lock
 from freming.logging_setup import get_logger
 from freming.net.client import HttpClient
 
@@ -95,6 +96,21 @@ class DeliveryWorker:
     # 本体
     # ------------------------------------------------------------------
     def _run(self) -> None:
+        # 巡回の間ずっとロックを持つ。launchd の定期実行と serve のワーカーが
+        # 同時に納品すると、同じ frmg_igNNN を取り合って二重納品になる。
+        # serve が開いている間は、定期実行の側が退く。
+        try:
+            with delivery_lock(self.config):
+                self._loop()
+        except DeliveryInProgress as exc:
+            self.last_error = str(exc)
+            log.warning(
+                "%s\n"
+                "  この審査UIからは納品しません。定期実行の側が納品します。",
+                exc,
+            )
+
+    def _loop(self) -> None:
         while not self._stopping.is_set():
             try:
                 self.drain_once()
