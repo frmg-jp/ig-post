@@ -43,9 +43,9 @@
 {% endfor %}
 
 {% if page > 1 or has_next %}
-  <p>
+  <p class="pager">
     {% if page > 1 %}<a href="/?status={{ status }}&page={{ page - 1 }}">← 前</a>{% endif %}
-    {% if has_next %}<a href="/?status={{ status }}&page={{ page + 1 }}">次 →</a>{% endif %}
+    {% if has_next %}<a class="next" href="/?status={{ status }}&page={{ page + 1 }}">次 →</a>{% endif %}
   </p>
 {% endif %}
 

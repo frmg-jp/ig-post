@@ -7,135 +7,235 @@
 {# 納品待ちが残っているタブだけ自動更新する。納品はバックグラウンドで
    進むので、放っておいても「納品済」に変わっていくようにする。 #}
 {% if refresh_sec %}<meta http-equiv="refresh" content="{{ refresh_sec }}">{% endif %}
-{# 英字は Inter を優先。日本語のグリフは持たないので自動的に Hiragino に落ちる。
-   取得できない環境ではフォントスタックの次以降が使われ、表示は崩れない。 #}
+{# 欧文は Inter Tight。Inter より字幅が詰まっていて、見出しの詰めが
+   編集メディアの組みに近くなる。日本語のグリフは持たないので、
+   自動的に Hiragino / Noto Sans JP に落ちる。
+   取得できない環境ではスタックの次以降が使われ、表示は崩れない。 #}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
+  /* ------------------------------------------------------------------
+     ブランドトークン。トンマナの調整はここだけで完結するようにしてある。
+     色・角丸・罫の太さを変えれば全ページに反映される。
+     ------------------------------------------------------------------ */
   :root {
-    --bg: #fbfbfa; --fg: #1c1b19; --muted: #6b6862;
-    --line: #e3e0da; --card: #ffffff;
-    --ok: #2f6f4f; --ng: #9c3b2e; --hi: #b07d2b;
-    --sans: Inter, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    /* 紙の白と墨。彩度を落とし、色は意味のあるところにだけ置く */
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --fg: #14140f;
+    --muted: #767268;
+    --faint: #a5a099;
+    --line: #e6e3dd;      /* 罫はヘアライン。囲みを主張させない */
+    --line-strong: #14140f;
+    --ok: #1f5c3d;
+    --ng: #97372a;
+    --hi: #9a7526;        /* 唯一のアクセント。点数・企画・Drive だけに使う */
+    --radius: 2px;        /* 角はほぼ立てる */
+    --sans: "Inter Tight", -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
     --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+    /* ラベルの字送り。ここのラベルはほぼ日本語なので、欧文の小見出しに
+       使うような .15em を当てると「未 審 査」と間延びする。日本語として
+       意図的に見える範囲に留める。欧文だけの箇所は個別に広げる。 */
+    --track-label: .05em;
   }
   @media (prefers-color-scheme: dark) {
+    /* 明暗を反転しても、色同士の関係は変えない */
     :root {
-      --bg: #1a1917; --fg: #eceae5; --muted: #9a958c;
-      --line: #33312d; --card: #232120;
-      --ok: #6fbf95; --ng: #e08a7a; --hi: #d9b06a;
+      --bg: #131311; --surface: #1a1a18; --fg: #f0eee9;
+      --muted: #969288; --faint: #6f6b63;
+      --line: #2e2d29; --line-strong: #f0eee9;
+      --ok: #6cbb92; --ng: #dd8574; --hi: #cfa860;
     }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.55 var(--sans); }
+  /* 既定の青いリンクを出さない。色は意味のあるところにだけ置く */
+  a { color: var(--fg); }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 400 14px/1.75 var(--sans);
+    /* 日本語は少しだけ字間を開けた方が読みやすい */
+    letter-spacing: .012em;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* 数字は等幅で。点数と価格が縦に揃わないと、一覧を目で走査できない */
+  .score, .price, .keys kbd, .meta, details.axes .body {
+    font-variant-numeric: tabular-nums;
+  }
 
+  /* ---- マストヘッド ------------------------------------------------- */
   header {
     position: sticky; top: 0; z-index: 10; background: var(--bg);
-    border-bottom: 1px solid var(--line); padding: 10px 20px;
-    display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap;
+    border-bottom: 1px solid var(--line-strong);
+    padding: 14px 28px 12px;
+    display: flex; gap: 22px; align-items: baseline; flex-wrap: wrap;
   }
-  header h1 { font-size: 14px; margin: 0; letter-spacing: .08em; }
-  nav a { color: var(--muted); text-decoration: none; margin-right: 12px; }
-  nav a.on { color: var(--fg); font-weight: 700; }
+  header h1 {
+    font-size: 12px; font-weight: 600; margin: 0;
+    letter-spacing: .26em; text-transform: uppercase;
+  }
+  nav { display: flex; gap: 18px; flex-wrap: wrap; }
+  nav a {
+    color: var(--muted); text-decoration: none;
+    font-size: 11px; letter-spacing: var(--track-label);
+    padding-bottom: 2px; border-bottom: 1px solid transparent;
+  }
+  nav a:hover { color: var(--fg); }
+  nav a.on { color: var(--fg); font-weight: 600; border-bottom-color: var(--fg); }
+  nav a .n { color: var(--faint); font-weight: 400; margin-left: 3px; }
+  nav a.on .n { color: var(--muted); }
   .auto {
-    margin-left: auto; font-size: 11px; color: var(--ok);
-    border: 1px solid var(--ok); border-radius: 999px; padding: 1px 9px;
+    margin-left: auto; font-size: 10px; color: var(--ok);
+    letter-spacing: var(--track-label); text-transform: uppercase;
+    border: 1px solid var(--ok); border-radius: 999px; padding: 2px 10px;
   }
   .auto.busy { animation: pulse 1.4s ease-in-out infinite; }
-  @keyframes pulse { 50% { opacity: .35; } }
+  @keyframes pulse { 50% { opacity: .3; } }
   .auto + .keys { margin-left: 0; }
-  .keys { margin-left: auto; color: var(--muted); font-size: 11px; }
+  .keys { margin-left: auto; color: var(--faint); font-size: 11px; letter-spacing: 0; }
   .keys kbd {
-    font: 11px var(--mono); border: 1px solid var(--line);
-    border-radius: 3px; padding: 0 4px; margin: 0 1px;
+    font: 10px var(--mono); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 1px 4px; margin: 0 1px;
   }
-  main { max-width: 1000px; margin: 0 auto; padding: 16px 20px 60px; }
+  main { max-width: 1020px; margin: 0 auto; padding: 24px 28px 80px; }
 
-  /* カードは1画面に多く入ることを優先する。審査は件数を捌く作業なので、
+  /* ---- カード -------------------------------------------------------
+     1画面に多く入ることを優先する。審査は件数を捌く作業なので、
      スクロール回数がそのまま所要時間になる。
+     囲みは細い罫だけにして、写真と文字を前に出す。
      サムネイルの一辺は config.yaml の review_ui.thumbnail_px。 */
   .card {
-    background: var(--card); border: 1px solid var(--line);
-    border-radius: 8px; padding: 12px; margin-bottom: 10px;
-    display: grid; grid-template-columns: {{ thumb_px or 170 }}px 1fr; gap: 14px;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 16px; margin-bottom: 12px;
+    display: grid; grid-template-columns: {{ thumb_px or 170 }}px 1fr; gap: 18px;
+    transition: border-color .12s;
   }
+  .card:hover { border-color: var(--faint); }
   .card.no-thumb { grid-template-columns: 1fr; }
-  .card.sel { border-color: var(--hi); box-shadow: 0 0 0 2px var(--hi); }
+  .card.sel { border-color: var(--fg); box-shadow: inset 3px 0 0 var(--hi); }
   .card img {
-    width: 100%; border-radius: 4px; object-fit: cover; aspect-ratio: 1; display: block;
+    width: 100%; border-radius: var(--radius); object-fit: cover;
+    aspect-ratio: 1; display: block; background: var(--line);
     transition: opacity .12s;
   }
   .card a:hover img { opacity: .85; }
 
-  .head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-  .score { font-size: 22px; font-weight: 700; line-height: 1; letter-spacing: -.01em; }
+  .head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .score {
+    font-size: 26px; font-weight: 600; line-height: 1;
+    letter-spacing: -.03em; font-feature-settings: "ss01";
+  }
   .score.hi { color: var(--hi); }
   /* 価格は審査の判断に直接効くので、点数の次に目に入る強さにする */
   .price { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
-  .area { font-size: 13px; color: var(--muted); }
-  /* 国旗は少し大きくしないと、13px では潰れて判別できない */
-  .flag { font-size: 15px; line-height: 1; margin-right: 1px; }
-  .title { font-size: 15px; font-weight: 600; margin: 4px 0 6px; }
-  .title a { color: inherit; }
+  .area { font-size: 12px; color: var(--muted); letter-spacing: .04em; }
+  /* 国旗は少し大きくしないと、12px では潰れて判別できない */
+  .flag { font-size: 15px; line-height: 1; margin-right: 2px; }
+  .title { font-size: 16px; font-weight: 500; line-height: 1.5; margin: 8px 0 8px; }
+  .title a { color: inherit; text-decoration: none; border-bottom: 1px solid var(--line); }
+  .title a:hover { border-bottom-color: var(--fg); }
   .meta { color: var(--muted); font-size: 12px; }
 
   .tag {
-    display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px;
-    border: 1px solid var(--line); margin: 0 4px 3px 0; color: var(--muted);
+    display: inline-block; font-size: 10px; line-height: 1.9;
+    padding: 0 8px; border-radius: 999px;
+    border: 1px solid var(--line); margin: 0 4px 4px 0;
+    color: var(--muted); letter-spacing: var(--track-label);
   }
   .tag.on { color: var(--ok); border-color: var(--ok); }
   .tag.warn { color: var(--ng); border-color: var(--ng); }
-  .tag.series { color: var(--hi); border-color: var(--hi); font-weight: 700; }
+  .tag.series { color: var(--hi); border-color: var(--hi); font-weight: 600; }
 
-  .summary { margin: 5px 0; }
-  details.axes { margin: 4px 0 8px; }
+  .summary { margin: 8px 0; color: var(--fg); }
+  details.axes { margin: 6px 0 10px; }
   details.axes > summary {
-    cursor: pointer; color: var(--muted); font-size: 12px; list-style: none;
+    cursor: pointer; color: var(--faint); font-size: 11px;
+    letter-spacing: var(--track-label); list-style: none;
   }
-  details.axes > summary::before { content: "▸ "; }
-  details.axes[open] > summary::before { content: "▾ "; }
+  details.axes > summary:hover { color: var(--muted); }
+  details.axes > summary::before { content: "＋ "; }
+  details.axes[open] > summary::before { content: "− "; }
   details.axes .body {
-    font: 11px/1.7 var(--mono); color: var(--muted);
-    margin-top: 4px; white-space: pre-wrap;
+    font: 11px/1.9 var(--mono); color: var(--muted);
+    margin-top: 6px; white-space: pre-wrap; letter-spacing: 0;
+    border-left: 1px solid var(--line); padding-left: 10px;
   }
 
-  /* 承認・非承認・企画を1行にまとめ、視線とマウスの移動を減らす */
+  /* ---- 操作列 -------------------------------------------------------
+     承認・非承認・企画を1行にまとめ、視線とマウスの移動を減らす */
   .actions {
-    display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 8px;
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line);
   }
   .actions form { display: contents; }
   select, input[type=text] {
-    font: inherit; font-size: 13px; padding: 5px 7px; border: 1px solid var(--line);
-    border-radius: 5px; background: var(--card); color: var(--fg);
+    font: inherit; font-size: 13px; padding: 6px 8px;
+    border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--surface); color: var(--fg); letter-spacing: inherit;
+  }
+  select:focus, input[type=text]:focus, button:focus-visible {
+    outline: none; border-color: var(--fg);
   }
   /* プルダウンは中身の最長の選択肢に合わせて伸びる。非承認理由は文が長く、
      放っておくと行の大半を占める。幅を固定して、自由記入に場所を残す。 */
   .actions select { width: 170px; flex: none; }
   input[type=text].free { flex: 1; min-width: 140px; }
   button {
-    font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 5px; cursor: pointer;
-    border: 1px solid var(--line); background: var(--card); color: var(--fg); white-space: nowrap;
+    font: inherit; font-size: 12px; font-weight: 500;
+    letter-spacing: var(--track-label); padding: 7px 16px;
+    border-radius: var(--radius); cursor: pointer;
+    border: 1px solid var(--line); background: var(--surface);
+    color: var(--muted); white-space: nowrap; transition: all .12s;
   }
+  button:hover { color: var(--fg); border-color: var(--fg); }
   button.ok { border-color: var(--ok); color: var(--ok); font-weight: 600; }
+  button.ok:hover { background: var(--ok); color: var(--bg); }
   button.ng { border-color: var(--ng); color: var(--ng); }
+  button.ng:hover { background: var(--ng); color: var(--bg); }
 
   a.drive {
-    font-size: 13px; color: var(--hi); text-decoration: none;
-    border: 1px solid var(--hi); border-radius: 5px; padding: 4px 10px;
+    font-size: 11px; color: var(--hi); text-decoration: none;
+    letter-spacing: var(--track-label);
+    border: 1px solid var(--hi); border-radius: var(--radius); padding: 6px 14px;
   }
+  a.drive:hover { background: var(--hi); color: var(--bg); }
 
-  details.manual { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 14px; }
-  details.manual .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; max-width: 620px; }
+  h2 {
+    font-size: 13px; font-weight: 600; letter-spacing: var(--track-label);
+    text-transform: uppercase; margin: 8px 0 12px;
+    padding-bottom: 10px; border-bottom: 1px solid var(--line-strong);
+  }
+  code {
+    font: 12px var(--mono); background: var(--line);
+    border-radius: var(--radius); padding: 1px 5px; letter-spacing: 0;
+  }
+  details.manual { margin-top: 40px; border-top: 1px solid var(--line-strong); padding-top: 18px; }
+  details.manual > summary {
+    cursor: pointer; font-size: 11px; letter-spacing: var(--track-label);
+    text-transform: uppercase; color: var(--muted); list-style: none;
+  }
+  details.manual > summary::before { content: "＋ "; }
+  details.manual[open] > summary::before { content: "− "; }
+  details.manual .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; max-width: 620px; margin-top: 14px; }
   .note { color: var(--muted); font-size: 12px; }
-  .note.pending { color: var(--hi); }
+  .note.pending { color: var(--hi); letter-spacing: var(--track-label); font-size: 11px; }
   .summary.fail { color: var(--ng); font-size: 12px; }
-  .empty { color: var(--muted); padding: 40px 0; text-align: center; }
-  .subnav { padding: 0 20px 8px; font-size: 12px; }
-  .subnav a { color: var(--muted); text-decoration: none; margin-right: 10px; }
-  .subnav a.on { color: var(--hi); font-weight: 700; }
+  .empty { color: var(--muted); padding: 72px 0; text-align: center; line-height: 2.2; }
+  .pager { display: flex; gap: 20px; margin: 24px 0 0; font-size: 12px; }
+  .pager a {
+    color: var(--muted); text-decoration: none;
+    letter-spacing: var(--track-label);
+    border-bottom: 1px solid var(--line); padding-bottom: 2px;
+  }
+  .pager a:hover { color: var(--fg); border-bottom-color: var(--fg); }
+  .pager .next { margin-left: auto; }
+  .subnav { padding: 0 0 16px; font-size: 11px; letter-spacing: var(--track-label); }
+  .subnav a { color: var(--faint); text-decoration: none; margin-right: 14px; }
+  .subnav a:hover { color: var(--fg); }
+  .subnav a.on { color: var(--fg); border-bottom: 1px solid var(--hi); }
 
   @media (max-width: 640px) {
+    header, main { padding-left: 18px; padding-right: 18px; }
     .card { grid-template-columns: 1fr; }
     details.manual .grid { grid-template-columns: 1fr; }
     .keys { display: none; }
@@ -148,7 +248,7 @@
   <nav>
     {% for key, label in [("pending","未審査"),("approved","承認"),("rejected","非承認"),("delivered","納品済"),("all","すべて")] %}
       <a href="/?status={{ key }}" class="{{ 'on' if status == key else '' }}">
-        {{ label }}{% if counts and counts.get(key) %} {{ counts.get(key) }}{% endif %}
+        {{ label }}{% if counts and counts.get(key) %}<span class="n">{{ counts.get(key) }}</span>{% endif %}
       </a>
     {% endfor %}
     <a href="/rules" class="{{ 'on' if status == 'rules' else '' }}">ルール候補</a>
