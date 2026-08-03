@@ -43,14 +43,30 @@ class FetchStats:
     too_small: int = 0
     wrong_type: int = 0
     failed: int = 0
+    # 前回までに取得済み・除外済みのURL。再実行時はここに入るので
+    # ダウンロードは発生しない（相手サイトへのリクエストが増えない）。
+    already_have: int = 0
+    skipped_before: int = 0
     images: list[FetchedImage] = field(default_factory=list)
 
+    @property
+    def usable(self) -> int:
+        """加工に回せる枚数。今回取得した分と、前回までの取得済みの合計。"""
+        return self.downloaded + self.already_have
+
     def summary(self) -> str:
-        return (
+        # 「採用 0 枚」だけを出すと、再実行時に取得済み10枚があっても
+        # 失敗したように読める。手元の枚数と、今回の増分を分けて出す。
+        head = (
             f"[画像] property_id={self.property_id} "
-            f"候補URL {self.found_urls} → 採用 {self.downloaded} 枚"
-            f"（小さすぎ {self.too_small} / 形式外 {self.wrong_type} / 失敗 {self.failed}）"
+            f"候補URL {self.found_urls} → 手元 {self.usable} 枚"
+            f"（新規 {self.downloaded} / 取得済み {self.already_have}）"
         )
+        dropped = (
+            f"小さすぎ {self.too_small} / 形式外 {self.wrong_type} / "
+            f"失敗 {self.failed} / 除外済み {self.skipped_before}"
+        )
+        return f"{head}（{dropped}）"
 
 
 _SAFE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp"})
@@ -143,7 +159,11 @@ def fetch_images(
         for url in urls:
             if stats.downloaded + len(existing) >= config.images.max_per_property:
                 break
-            if url in existing or url in skipped:
+            if url in existing:
+                stats.already_have += 1
+                continue
+            if url in skipped:
+                stats.skipped_before += 1
                 continue
             try:
                 response = client.get(url)

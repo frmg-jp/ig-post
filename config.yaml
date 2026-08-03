@@ -81,6 +81,50 @@ editorial_sources:
     feeds:
       - "https://www.6sqft.com/feed/"
 
+  - key: thespaces
+    name: "The Spaces"
+    rank: B
+    enabled: true
+    # 2026-08-03 の probe-feed: 10件 / 本文中央値240字 / 候補0件。
+    # 候補0件なのはフィードが抜粋しか配信していないため。タイトルを見ると
+    # 中身は明確に売出中の建築物件で、しかも空いている重点エリアに当たっている
+    # （Alicante=スペイン、Alentejo=ポルトガル、Bordeaux/Provence=フランス）。
+    #
+    # probe-feed は必ず fetch_article_pages=False で判定するため、抜粋配信の
+    # フィードは構造的に候補0件になる。ここは記事ページを取って判定する。
+    fetch_article_pages: true
+    feeds:
+      - "https://thespaces.com/feed/"
+  - key: themodernspaces
+    name: "The Modern Spaces"
+    rank: B
+    enabled: true
+    # 2026-08-03 の probe-feed: 10件 / 本文中央値5277字 / 候補0件。
+    # リスボンの住宅を継続的に扱う（Avenidas Novas、Salitre Gardens など）が、
+    # 照明・椅子・ギャラリーの記事も混ざるデザイン誌。販売記事は時々。
+    # dezeen と同じ扱いで、出たときに拾えれば良いとする。
+    #
+    # フィードが本文を丸ごと配信しているので記事ページは取りに行かない
+    # （1回のリクエストで判定が完結する）。
+    fetch_article_pages: false
+    feeds:
+      - "https://themodernspaces.com/feed/"
+  - key: portlandscondos
+    name: "Portland's Condos"
+    rank: B
+    # 2026-08-03 の probe-feed: 10件 / 本文中央値2313字 / 6件が販売シグナル1点。
+    # Portland（重点エリアで未充足）の売出物件を継続的に扱っており、
+    # フィードの質としては採用圏内。
+    #
+    # ただし **有効化する前に画像の権利を確認すること**。これは仲介業者の
+    # ブログで、掲載写真はMLS/ブローカー帰属の可能性が高い。docs/source-survey.md
+    # で26サイトを×にしたのと同じ理由がここにも当てはまる。フィードが読めることと
+    # 写真を再配布してよいことは別問題なので、確認できるまで false のままにする。
+    enabled: false
+    feeds:
+      - "https://portlandscondos.com/feed/"
+    # コメントフィードは /buildings/ の建物ページを指すので使わない。
+
   # --- 編集メディア（販売記事は時々。ここが FREMING の独自性） ---
   - key: dezeen
     name: "Dezeen"

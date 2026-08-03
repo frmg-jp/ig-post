@@ -75,10 +75,30 @@
 # =====================================================================
 # 未調査（重点エリア。フィードURLが不明なものは discover-feed --probe へ）
 # =====================================================================
-https://thespaces.com/feed/
-https://themodernspaces.com/feed/
-https://www.metalocus.es/en/rss.xml
-https://portlandscondos.com/feed/
+# 2026-08-03 に実測、4件とも結論が出た（scripts/probe_remaining_feeds.sh）
+#
+# https://thespaces.com/feed/           → 採用（config.yaml: thespaces）
+#     10件 / 本文中央値240字 / 候補0件。抜粋しか配信しないため候補0件になるが、
+#     タイトルは明確に売出中の建築物件で、Alicante・Alentejo・Bordeaux など
+#     空いている重点エリアに当たっている。fetch_article_pages: true で運用する。
+#
+# https://themodernspaces.com/feed/     → 採用（config.yaml: themodernspaces）
+#     10件 / 本文中央値5277字 / 候補0件。リスボンの住宅を扱うが照明・椅子の
+#     記事も混ざるデザイン誌。dezeen と同じ「販売記事は時々」の扱い。
+#     本文が丸ごと配信されるので fetch_article_pages: false。
+#
+# https://www.metalocus.es/en/rss.xml   → 不採用（CIRCA と同じ）
+#     10件すべてが著者紹介ページ（/es/autor/... と /en/author/...）で、
+#     物件記事は0件。URLパターンでの絞り込みもできない。
+#     サイト側でフィードの宣言も無い（discover-feed で0件）。
+#     スペインを埋めるなら別のフィードを探す:
+#       python -m freming.cli discover-feed --probe https://arquitecturaviva.com/
+#
+# https://portlandscondos.com/feed/     → 保留（config.yaml に enabled: false で登録）
+#     10件 / 本文中央値2313字 / 6件が販売シグナル1点。フィードの質は採用圏内。
+#     ただし仲介業者のブログで、掲載写真はMLS/ブローカー帰属の可能性が高い。
+#     画像の権利を確認してから有効化する（docs/source-survey.md の26サイトと同じ論点）。
+#     コメントフィードは /buildings/ の建物ページを指すので使わない。
 
 # --- サンフランシスコ / ポートランド / シアトル（未確認） ---
 #   python -m freming.cli discover-feed --probe \

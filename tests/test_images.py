@@ -382,3 +382,19 @@ def test_downloaded_files_have_clean_names(config, conn, row) -> None:
         "SELECT local_path FROM images WHERE property_id = ?", (row["id"],)
     ).fetchone()
     assert Path(saved["local_path"]).name == "01.jpg"
+
+
+def test_refetch_reports_what_is_already_on_hand(config, conn, tmp_path) -> None:
+    """再実行時に「採用 0 枚」だけを出すと、失敗したように読める。
+
+    dry-run の直後に本実行すると全URLが取得済みになる。実際は手元に
+    10枚あって加工もできているのに、ログが 0 枚と言っていた。
+    """
+    from freming.images.fetch import FetchStats
+
+    stats = FetchStats(property_id=1, found_urls=25, downloaded=0, already_have=10)
+    assert stats.usable == 10
+    text = stats.summary()
+    assert "手元 10 枚" in text
+    assert "新規 0" in text
+    assert "取得済み 10" in text
