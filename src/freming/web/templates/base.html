@@ -53,11 +53,12 @@
   main { max-width: 1000px; margin: 0 auto; padding: 16px 20px 60px; }
 
   /* カードは1画面に多く入ることを優先する。審査は件数を捌く作業なので、
-     スクロール回数がそのまま所要時間になる。 */
+     スクロール回数がそのまま所要時間になる。
+     サムネイルの一辺は config.yaml の review_ui.thumbnail_px。 */
   .card {
     background: var(--card); border: 1px solid var(--line);
     border-radius: 8px; padding: 12px; margin-bottom: 10px;
-    display: grid; grid-template-columns: 132px 1fr; gap: 14px;
+    display: grid; grid-template-columns: {{ thumb_px or 170 }}px 1fr; gap: 14px;
   }
   .card.no-thumb { grid-template-columns: 1fr; }
   .card.sel { border-color: var(--hi); box-shadow: 0 0 0 2px var(--hi); }

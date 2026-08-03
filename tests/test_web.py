@@ -474,3 +474,24 @@ def test_unknown_country_shows_no_flag(client, conn) -> None:
     body = client.get("/").text
     assert 'class="flag"' not in body
     assert "所在地不明" in body
+
+
+def test_thumbnail_size_comes_from_the_config(config, conn) -> None:
+    """review_ui.thumbnail_px が実際に効くこと。
+
+    以前は thumbnail_max_px という名前でテンプレートに渡していたが、
+    どこでも使われておらず、値を変えても何も起きなかった。
+    """
+    config.review_ui.thumbnail_px = 240
+    client = TestClient(create_app(config))
+    _add(conn, thumbnail_url="https://example.com/photos/hero.jpg")
+
+    assert "grid-template-columns: 240px 1fr" in client.get("/").text
+
+
+def test_thumbnail_is_square(client, conn) -> None:
+    """縦横比を保つと段の高さが揃わず、一覧が読みにくくなる。"""
+    _add(conn, thumbnail_url="https://example.com/photos/hero.jpg")
+    body = client.get("/").text
+    assert "aspect-ratio: 1" in body
+    assert "object-fit: cover" in body

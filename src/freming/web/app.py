@@ -141,7 +141,7 @@ def create_app(
                 "series_options": config.series,
                 "series": series,
                 "highlight": config.scoring.thresholds.highlight_above,
-                "thumb_px": config.review_ui.thumbnail_max_px,
+                "thumb_px": config.review_ui.thumbnail_px,
             },
         )
 
@@ -164,6 +164,7 @@ def create_app(
                 "auto_deliver": worker is not None,
                 "delivering_id": worker.current_property_id if worker else None,
                 "max_attempts": config.delivery.max_attempts,
+                "thumb_px": config.review_ui.thumbnail_px,
             },
         )
 

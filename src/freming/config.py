@@ -233,7 +233,11 @@ class ReviewUIConfig(BaseModel):
     port: int = 8000
     page_size: int = 50
     default_filter: str = "pending"
-    thumbnail_max_px: int = 480
+    # カードのサムネイルの一辺（px）。正方形で表示する。
+    # 大きいほど写真の判断はしやすいが、1画面に入る件数が減る。
+    # 旧名 thumbnail_max_px。テンプレートに渡すだけで使われておらず、
+    # 値を変えても何も起きない状態だった。
+    thumbnail_px: int = 170
 
 
 class DeliveryConfig(BaseModel):
