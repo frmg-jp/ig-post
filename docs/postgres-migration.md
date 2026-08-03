@@ -10,8 +10,14 @@
 
 ## 現在の状況
 
-**接続先は Neon（無料）で進める。** あとは接続文字列を作るだけで、
-コード側の準備は完了している。
+**移行済み（2026-08-03）。** Neon の無料枠、Singapore リージョン、
+PostgreSQL 18.4。properties 23 / feedback 1 / deliveries 2 / images 20 の
+計46行を移し終えている。
+
+残るのは GitHub Secrets への `DATABASE_URL` 登録だけ。ここが空だと
+定期実行はランナーの使い捨て SQLite に書いて毎回消える。
+
+### 経緯
 
 Supabase は見送った。無料枠が1ユーザー2プロジェクトまでで、
 `yadokari-quotation` と `akiyax` で埋まっており、2026-08-03 に
@@ -33,6 +39,7 @@ Neon の無料枠は1 Organization に **100プロジェクト**まで作れる�
 注意点:
 
 - 5分アイドルで停止するので、審査UIを開いた最初の1回だけ起動待ちが入る
+- Neon に東京リージョンは無い。日本から最も近いのは Singapore
 - 履歴保持は6時間・手動スナップショット1つ。定期バックアップは別途考える
 
 ## 手順
@@ -90,6 +97,10 @@ python -m freming.cli db transfer
 - `tests/test_postgres.py` の7件（普段はスキップ）が全て通る
 - `db check` が空のDBと中身のあるDBを見分ける
 - 移行後に `collect` を回して6件が追記できた
+
+本番（Neon / PostgreSQL 18.4）でも同じ手順が通り、**`deliveries` の2行が
+移った**ことを確認した。ここを取りこぼすと frmg_igNNN が振り直しになり、
+Drive 上の既存フォルダと衝突する。次の納品は frmg_ig003 から続く。
 
 ## 踏んだ落とし穴
 
