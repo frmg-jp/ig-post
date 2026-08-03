@@ -91,9 +91,14 @@
 #     Alentejo(PT) / Provence(FR) / Dorset(UK) / Tulum(MX) が2点で通った。
 #     いずれも本文にキーワードと価格の両方がある。
 #
-#     惜しかったもの（重点エリアなので、閾値の見直し次第で拾える）:
-#       1点  Alicante(ES)  kw=on the market あり、価格の検出なし
-#       0点  Bordeaux(FR)  価格はあるが販売キーワードから200字より遠く除外
+#     取りこぼしていた2件は原因を特定して修正済み（どちらも閾値の問題ではなかった）:
+#       Bordeaux(FR)  「before listing at €1.19 million」… listed for はあったが
+#                     listing at が無く0点。keywords に追加した
+#       Alicante(ES)  「on the market with Adelante Homes, price on application」…
+#                     売出中と明記されているが価格非公開。price upon request を
+#                     keywords から price_patterns へ移し、価格の状態も価格
+#                     シグナルとして数えるようにした
+#     → 修正後は両方2点。thespaces は 週3.1件 → 週4.4件 相当になる見込み
 #
 #     フィードは抜粋（240字）しか配信しないので、probe-feed では構造的に
 #     候補0件になる。判断は必ず collect --explain で行う。

@@ -370,9 +370,14 @@ def test_price_without_a_keyword_points_at_the_keyword_list() -> None:
 
 
 def test_keyword_without_a_price_points_at_the_price_patterns() -> None:
-    """キーワードはあるが価格が無い＝価格の書式漏れか、本文に価格が無い。"""
+    """キーワードはあるが価格が無い＝価格の書式漏れか、本文に価格が無い。
+
+    「price on application」は価格シグナルとして数えるようになったので、
+    ここでは価格にまったく触れていない本文を使う。
+    """
     explanation = _explain(
-        "This finca near Alicante has just come on the market. Price on application."
+        "This finca near Alicante has just come on the market. "
+        "The property is being offered directly by the architect."
     )
     miss = explanation.near_miss
     assert "価格を検出できず" in miss
@@ -402,3 +407,52 @@ def test_articles_with_no_signal_at_all_get_no_note() -> None:
     """そもそも何も無い記事に理由を出しても意味がない。"""
     explanation = _explain("A survey of five exhibitions across Europe this month.")
     assert explanation.near_miss == ""
+
+
+# --- 実データで見つけた取りこぼし（2026-08-03 thespaces） ----------------
+
+
+def test_listing_at_is_recognised_as_a_sale_phrase() -> None:
+    """「listed for」はあったが「listing at」が無く、実物件を0点にしていた。"""
+    text = (
+        "Preserving many of the original architectural details before listing at "
+        "€1.19 million. Marble fireplaces, decorative mouldings, gilded ceiling medallions."
+    )
+    result = signals.detect(text, [], SIGNALS)
+    assert "listing at" in result.keywords
+    assert "€1.19 million" in " ".join(result.prices)
+    assert result.is_candidate(SIGNALS.min_signal_score)
+
+
+def test_price_on_application_counts_as_a_price() -> None:
+    """価格非公開の売出物件を取りこぼさない。
+
+    「price upon request」を keywords に置いていたのは分類の誤りだった。
+    販売の言い回しではなく価格の状態であり、キーワードは何個あっても
+    1点なので、そこに置いても価格非公開の物件は閾値に届かなかった。
+    """
+    text = (
+        "The entire property is on the market with Adelante Homes, "
+        "price on application. Photography: courtesy of the architect."
+    )
+    result = signals.detect(text, [], SIGNALS)
+    assert "on the market" in result.keywords
+    assert result.prices                       # 価格の状態を価格シグナルとして数える
+    assert result.is_candidate(SIGNALS.min_signal_score)
+
+
+def test_price_on_application_alone_is_not_enough() -> None:
+    """物やアートの記事にも「price on application」は出る。単独では候補にしない。"""
+    text = "A sculptural writing desk by an Italian maker. Price on application."
+    result = signals.detect(text, [], SIGNALS)
+    assert result.keywords == []
+    assert not result.is_candidate(SIGNALS.min_signal_score)
+
+
+def test_widened_keywords_do_not_revive_the_stadium_false_positive() -> None:
+    """キーワードを足しても、建設費の誤検出は戻らないこと。"""
+    filler = "word " * 100
+    text = f"This house is for sale. {filler} The nearby stadium cost €240 million."
+    result = signals.detect(text, [], SIGNALS)
+    assert result.prices == []
+    assert not result.is_candidate(SIGNALS.min_signal_score)

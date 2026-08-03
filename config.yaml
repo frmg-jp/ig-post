@@ -273,15 +273,26 @@ for_sale_signals:
     - "for sale"
     - "on the market"
     - "listed for"
+    # 2026-08-03: thespaces の Bordeaux の記事が「before listing at €1.19 million」
+    # で、listed for に当たらず0点だった。同じ意味の言い回しなので足す。
+    - "listing at"
     - "asking price"
     - "now available"
-    - "price upon request"
     - "currently listed"
     - "販売中"
     - "売出中"
+    # 「price upon request」はここから price_patterns に移した。これは販売の
+    # 言い回しではなく価格の状態で、キーワードは何個あっても1点なので、
+    # ここに置いても価格非公開の物件を拾えなかった。
   price_patterns:
     - '[$€£]\s?\d[\d,.]*\s?(million|M|k)?\b'
     - '\d[\d,.]*\s?(万円|億円)'
+    # 価格非公開も「価格について述べている」ことに変わりなく、売出中の
+    # 裏付けとしては金額と同等に扱う。
+    # 2026-08-03: thespaces の Alicante の記事が「is on the market with
+    # Adelante Homes, price on application」で、売出中と明記されているのに
+    # 価格が無いという理由で1点止まりだった。
+    - 'price\s+(on|upon)\s+(application|request)'
   listing_domains:
     - sothebysrealty.com
     - christiesrealestate.com
