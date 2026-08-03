@@ -58,6 +58,7 @@ def _cmd_collect(args: argparse.Namespace) -> int:
     for url in stats.candidates:
         print(f"  - {url}")
     if args.explain:
+        print(stats.pace_report())
         print(stats.url_pattern_report())
         print(stats.explain_report())
     return 0
@@ -107,16 +108,21 @@ def _cmd_probe_feed(args: argparse.Namespace) -> int:
 
         chars = sorted(e.text_chars for e in stats.explanations) or [0]
         median = chars[len(chars) // 2]
+        # 「10件」はフィードの窓であって1日分ではない。何日分なのかまで
+        # 出さないと、審査に上がる件数の見積もりが桁で外れる。
+        weekly = stats.candidates_per_week
+        pace = f"  審査 週{weekly:.1f}件" if weekly is not None else "  ペース不明"
         results.append(
             (
                 True,
                 url,
                 f"{stats.feed_entries:>3}件  本文中央値 {median:>5}字  "
-                f"候補 {stats.inserted}件",
+                f"候補 {stats.inserted}件{pace}",
             )
         )
         if args.details:
             print(f"\n### {url}")
+            print(stats.pace_report())
             print(stats.url_pattern_report())
             print(stats.explain_report(top=args.top))
 

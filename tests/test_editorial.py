@@ -618,3 +618,66 @@ def test_excluded_urls_are_still_reported(config, conn, source) -> None:
 
     assert stats.skipped_url_pattern == 1
     assert "/agent/" in stats.url_pattern_report()
+
+
+# ----------------------------------------------------------------------
+# 配信ペース（フィードの窓が何日分か）
+# ----------------------------------------------------------------------
+def _stats_with_dates(days_ago: list[float], entries: int, inserted: int):
+    """公開日を指定した CollectStats を組み立てる。"""
+    from datetime import datetime, timedelta, timezone
+
+    from freming.collect.editorial import CollectStats
+
+    now = datetime(2026, 8, 3, tzinfo=timezone.utc)
+    stats = CollectStats(source="test")
+    stats.feed_entries = entries
+    stats.inserted = inserted
+    stats.entry_dates = [now - timedelta(days=d) for d in days_ago]
+    return stats
+
+
+def test_window_is_measured_in_days() -> None:
+    """10件が何日分かが分からないと、1日あたりの本数が出せない。"""
+    stats = _stats_with_dates([0, 2, 4, 6], entries=4, inserted=2)
+    assert stats.window_days == pytest.approx(6.0)
+    # 窓の両端しか分からないので、区間の数（件数-1）で割る
+    assert stats.entries_per_day == pytest.approx(3 / 6)
+
+
+def test_weekly_candidates_combine_pace_and_ratio() -> None:
+    """審査に上がる件数 = 配信ペース × 候補率。"""
+    stats = _stats_with_dates([0, 2, 4, 6], entries=4, inserted=2)
+    # 0.5本/日 × 候補率0.5 × 7日 = 1.75件/週
+    assert stats.candidates_per_week == pytest.approx(1.75)
+
+
+def test_pace_is_unknown_without_dates() -> None:
+    """公開日を配信しないフィードもある。分からないものは分からないと出す。"""
+    stats = _stats_with_dates([], entries=10, inserted=4)
+    assert stats.window_days is None
+    assert stats.entries_per_day is None
+    assert stats.candidates_per_week is None
+    assert "測れません" in stats.pace_report()
+
+
+def test_pace_is_unknown_when_everything_shares_one_timestamp() -> None:
+    """全件が同時刻だと 0 で割ることになる。0件/日と言い切らない。"""
+    stats = _stats_with_dates([1, 1, 1], entries=3, inserted=1)
+    assert stats.window_days is None
+    assert "同一" in stats.pace_report()
+
+
+def test_pace_report_says_how_many_entries_lacked_a_date() -> None:
+    """一部だけ日付が無い場合、何件を計算から外したかを出す。"""
+    stats = _stats_with_dates([0, 3], entries=10, inserted=4)
+    report = stats.pace_report()
+    assert "8件は公開日が取れず" in report
+
+
+def test_pace_report_shows_the_window_and_the_weekly_estimate() -> None:
+    stats = _stats_with_dates([0, 7], entries=2, inserted=1)
+    report = stats.pace_report()
+    assert "2026-07-27" in report and "2026-08-03" in report
+    assert "7.0日分" in report
+    assert "週" in report

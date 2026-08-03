@@ -86,6 +86,79 @@ class CollectStats:
     # url_include / url_exclude を決めるには、実際にどんなURLが来るかを
     # 見る必要がある。フィード1回のリクエストで分かる情報なので取っておく。
     entry_urls: list[str] = field(default_factory=list)
+    # フィードに載っていた記事の公開日（取れたものだけ）。
+    # 「10件」がフィードの窓の大きさでしかないため、それが何日分なのかを
+    # 知らないと1日あたりの本数が分からない。審査に上がる件数の見積もりは
+    # ここが分からないと桁で外れる。
+    entry_dates: list[datetime] = field(default_factory=list)
+
+    # ------------------------------------------------------------------
+    # 配信ペース
+    # ------------------------------------------------------------------
+    @property
+    def window_days(self) -> float | None:
+        """フィードの窓が何日分か。公開日が取れないフィードでは None。
+
+        1件しか無い、または全件が同時刻の場合も測れないので None を返す
+        （0で割らないため、というより「測れていない」を数字で塗り潰さないため）。
+        """
+        if len(self.entry_dates) < 2:
+            return None
+        span = (max(self.entry_dates) - min(self.entry_dates)).total_seconds() / 86400
+        return span if span > 0 else None
+
+    @property
+    def entries_per_day(self) -> float | None:
+        days = self.window_days
+        if days is None or not self.entry_dates:
+            return None
+        # 窓の両端しか分からないので、区間の数（件数-1）で割る
+        return (len(self.entry_dates) - 1) / days
+
+    @property
+    def candidates_per_week(self) -> float | None:
+        """1週間あたり審査に上がる件数の見込み。
+
+        候補率（候補/フィード件数）に配信ペースを掛ける。
+        """
+        pace = self.entries_per_day
+        if pace is None or not self.feed_entries:
+            return None
+        return pace * (self.inserted / self.feed_entries) * 7
+
+    def pace_report(self) -> str:
+        """配信ペースと、そこから見た週あたりの候補数。"""
+        if not self.entry_dates:
+            return (
+                "\n--- 配信ペース ---\n"
+                "  公開日がフィードに含まれていないため測れません"
+            )
+        days = self.window_days
+        if days is None:
+            return (
+                "\n--- 配信ペース ---\n"
+                f"  {len(self.entry_dates)}件の公開日が同一のため測れません"
+            )
+        oldest = min(self.entry_dates).strftime("%Y-%m-%d")
+        newest = max(self.entry_dates).strftime("%Y-%m-%d")
+        lines = [
+            "",
+            "--- 配信ペース ---",
+            f"  {len(self.entry_dates)}件が {oldest} 〜 {newest} の {days:.1f}日分"
+            f"  → {self.entries_per_day:.1f} 本/日",
+        ]
+        weekly = self.candidates_per_week
+        if weekly is not None:
+            lines.append(
+                f"  候補 {self.inserted}件 / {self.feed_entries}件 "
+                f"→ 審査に上がるのは 週 {weekly:.1f} 件の見込み"
+            )
+        if len(self.entry_dates) < self.feed_entries:
+            lines.append(
+                f"  ※ {self.feed_entries - len(self.entry_dates)}件は公開日が取れず、"
+                "この計算から除いています"
+            )
+        return "\n".join(lines)
 
     def url_pattern_report(self, top: int = 8) -> str:
         """記事URLをパスの第1階層でまとめて表示する。
@@ -335,6 +408,10 @@ class EditorialCollector:
             return
 
         published = _entry_published(entry)
+        if published:
+            # 判定の可否に関わらず記録する。配信ペースはフィードの窓全体で
+            # 決まるので、ここで絞ると窓が縮んで見える。
+            stats.entry_dates.append(published)
         if published and published < cutoff:
             stats.skipped_old += 1
             return
