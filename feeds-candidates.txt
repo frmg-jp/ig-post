@@ -103,10 +103,11 @@
 #     フィードは抜粋（240字）しか配信しないので、probe-feed では構造的に
 #     候補0件になる。判断は必ず collect --explain で行う。
 #
-# https://themodernspaces.com/feed/     → 採用（config.yaml: themodernspaces）
-#     10件 / 本文中央値5277字 / 候補0件。リスボンの住宅を扱うが照明・椅子の
-#     記事も混ざるデザイン誌。dezeen と同じ「販売記事は時々」の扱い。
-#     本文が丸ごと配信されるので fetch_article_pages: false。
+# https://themodernspaces.com/feed/     → 停止中のため無効化
+#     10件 / 本文中央値5277字 / 候補0件。当初は「販売記事は時々」の扱いで
+#     採用したが、停止判定を入れて測り直すと **最新記事が110日前** だった。
+#     collect.lookback_days = 30 より古いので1件も入らない。
+#     再開したら戻す（リスボンの住宅を扱うのでポルトガルの供給源になる）。
 #
 # https://www.metalocus.es/en/rss.xml   → 不採用（CIRCA と同じ）
 #     10件すべてが著者紹介ページ（/es/autor/... と /en/author/...）で、

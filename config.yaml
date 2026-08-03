@@ -99,14 +99,17 @@ editorial_sources:
   - key: themodernspaces
     name: "The Modern Spaces"
     rank: B
-    enabled: true
-    # 2026-08-03 の probe-feed: 10件 / 本文中央値5277字 / 候補0件。
-    # リスボンの住宅を継続的に扱う（Avenidas Novas、Salitre Gardens など）が、
-    # 照明・椅子・ギャラリーの記事も混ざるデザイン誌。販売記事は時々。
-    # dezeen と同じ扱いで、出たときに拾えれば良いとする。
+    # 2026-08-03: **フィードが止まっている（最新記事が110日前）。**
+    # collect.lookback_days = 30 より古いので、回しても1件も入らない。
     #
-    # フィードが本文を丸ごと配信しているので記事ページは取りに行かない
-    # （1回のリクエストで判定が完結する）。
+    # 同日の probe では「10件 / 本文中央値5277字 / 候補0件」と出て、本文が
+    # 厚いので dezeen と同じ「販売記事は時々」の扱いで有効化していた。
+    # 停止判定を入れて測り直したところ止まっていたと分かり、無効化した。
+    # 窓の長さ（本/日）だけでは、動いているかどうかは分からない。
+    #
+    # 再開したら戻す。リスボンの住宅を扱うので、ポルトガルの供給源としては
+    # 価値がある。
+    enabled: false
     fetch_article_pages: false
     feeds:
       - "https://themodernspaces.com/feed/"
