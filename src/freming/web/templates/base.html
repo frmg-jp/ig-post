@@ -7,56 +7,62 @@
 {# 納品待ちが残っているタブだけ自動更新する。納品はバックグラウンドで
    進むので、放っておいても「納品済」に変わっていくようにする。 #}
 {% if refresh_sec %}<meta http-equiv="refresh" content="{{ refresh_sec }}">{% endif %}
-{# 欧文は Inter Tight。Inter より字幅が詰まっていて、見出しの詰めが
-   編集メディアの組みに近くなる。日本語のグリフは持たないので、
-   自動的に Hiragino / Noto Sans JP に落ちる。
-   取得できない環境ではスタックの次以降が使われ、表示は崩れない。 #}
+{# frmg.jp と同じ二書体構成にする。和文は明朝、欧文と数字は IBM Plex Mono。
+   本家は Adobe Fonts の hiragino-mincho-pron / ibm-plex-mono を読んでいるが、
+   あのキットは frmg.jp ドメインでしか使えない。そこで
+   - 欧文: IBM Plex Mono（同じ書体が Google Fonts にある）
+   - 和文: 端末の Hiragino Mincho ProN → 游明朝 → Noto Serif JP
+   の順に落とす。Mac なら本家とほぼ同じ字面になる。 #}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Serif+JP:wght@300;400;600&display=swap" rel="stylesheet">
 <style>
   /* ------------------------------------------------------------------
-     ブランドトークン。トンマナの調整はここだけで完結するようにしてある。
-     色・角丸・罫の太さを変えれば全ページに反映される。
+     ブランドトークン。値は frmg.jp のテーマ CSS（wp_freming/style.css）の
+     :root から採った実測値で、勝手に決めた色は置いていない。
+     トンマナの調整はここだけで完結するようにしてある。
      ------------------------------------------------------------------ */
   :root {
-    /* 紙の白と墨。彩度を落とし、色は意味のあるところにだけ置く */
-    --bg: #ffffff;
-    --surface: #ffffff;
-    --fg: #14140f;
-    --muted: #767268;
-    --faint: #a5a099;
-    --line: #e6e3dd;      /* 罫はヘアライン。囲みを主張させない */
-    --line-strong: #14140f;
+    /* frmg.jp の --color-offwhite / --color-dark / --color-gray など */
+    --bg: #efefef;        /* body の地。白ではなくオフホワイト */
+    --surface: #efefef;   /* 面を作らない。カードも地に溶かす */
+    --fg: #1c1b1b;
+    --muted: #707070;
+    --faint: #6a6a6a;
+    --line: #cfcfcf;      /* 罫はヘアライン。囲みを主張させない */
+    --line-strong: #1c1b1b;
+    /* frmg.jp のパレットに緑はないが、承認・非承認は取り違えると納品事故に
+       なるので、ここだけは判別を優先して色を残す。彩度は本家の赤より
+       落としてあり、アクセントの赤とは別物に見える */
     --ok: #1f5c3d;
     --ng: #97372a;
-    --hi: #9a7526;        /* 唯一のアクセント。点数・企画・Drive だけに使う */
-    --radius: 2px;        /* 角はほぼ立てる */
-    --sans: "Inter Tight", -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
-    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
-    /* ラベルの字送り。ここのラベルはほぼ日本語なので、欧文の小見出しに
-       使うような .15em を当てると「未 審 査」と間延びする。日本語として
-       意図的に見える範囲に留める。欧文だけの箇所は個別に広げる。 */
-    --track-label: .05em;
+    --hi: #ff3500;        /* 本家の唯一の彩度。ホバーとスコアだけに使う */
+    --radius: 0;          /* 角は立てる。本家に角丸はない */
+    --serif: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif;
+    /* 等幅の指定でも、和文が混じる箇所（タグ・ボタン）は明朝に落とす。
+       ここを monospace で終えると、その部分だけゴシックになる */
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo,
+            "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif;
+    /* 本家の letter-spacing は和欧とも normal。広げない */
+    --track-label: 0;
   }
-  @media (prefers-color-scheme: dark) {
-    /* 明暗を反転しても、色同士の関係は変えない */
-    :root {
-      --bg: #131311; --surface: #1a1a18; --fg: #f0eee9;
-      --muted: #969288; --faint: #6f6b63;
-      --line: #2e2d29; --line-strong: #f0eee9;
-      --ok: #6cbb92; --ng: #dd8574; --hi: #cfa860;
-    }
-  }
+  /* ダークモードは持たない。frmg.jp がライトのみなので、反転させると
+     そこだけ別サイトになる。 */
   * { box-sizing: border-box; }
   /* 既定の青いリンクを出さない。色は意味のあるところにだけ置く */
   a { color: var(--fg); }
   body {
     margin: 0; background: var(--bg); color: var(--fg);
-    font: 400 14px/1.75 var(--sans);
-    /* 日本語は少しだけ字間を開けた方が読みやすい */
-    letter-spacing: .012em;
+    /* 本家の和文は 16px / 行送り 2.0 の明朝。審査UIは件数を捌くので
+       1段だけ落として 15px にし、行送りは本家のまま残す */
+    font: 400 15px/2 var(--serif);
+    letter-spacing: normal;
     -webkit-font-smoothing: antialiased;
+  }
+  /* 欧文・数字は本家と同じく等幅。ラベル類は大文字で置く */
+  .score, .price, .keys, .keys kbd, .meta, details.axes .body, .auto,
+  code, h1, h2, .pager, .subnav, .tag, button, a.drive {
+    font-family: var(--mono);
   }
   /* 数字は等幅で。点数と価格が縦に揃わないと、一覧を目で走査できない */
   .score, .price, .keys kbd, .meta, details.axes .body {
@@ -70,24 +76,29 @@
     padding: 14px 28px 12px;
     display: flex; gap: 22px; align-items: baseline; flex-wrap: wrap;
   }
+  /* 本家のロゴ「FRMG™」と同じ、等幅・大文字・字送りなし */
   header h1 {
-    font-size: 12px; font-weight: 600; margin: 0;
-    letter-spacing: .26em; text-transform: uppercase;
+    font-size: 16px; font-weight: 400; margin: 0;
+    letter-spacing: normal; text-transform: uppercase;
   }
-  nav { display: flex; gap: 18px; flex-wrap: wrap; }
+  nav { display: flex; gap: 20px; flex-wrap: wrap; }
+  /* 本家のグローバルナビは 16px 等幅の大文字。審査UIは項目数が多いので
+     13px まで落とすが、書体と字送りは合わせる */
   nav a {
     color: var(--muted); text-decoration: none;
-    font-size: 11px; letter-spacing: var(--track-label);
-    padding-bottom: 2px; border-bottom: 1px solid transparent;
+    font-family: var(--mono);
+    font-size: 13px; letter-spacing: var(--track-label);
+    padding-bottom: 3px; border-bottom: 2px solid transparent;
   }
-  nav a:hover { color: var(--fg); }
-  nav a.on { color: var(--fg); font-weight: 600; border-bottom-color: var(--fg); }
-  nav a .n { color: var(--faint); font-weight: 400; margin-left: 3px; }
+  /* 本家の .hover-red と同じで、ホバーの一点だけ赤に振る */
+  nav a:hover { color: var(--hi); }
+  nav a.on { color: var(--fg); border-bottom-color: var(--fg); }
+  nav a .n { color: var(--faint); margin-left: 4px; }
   nav a.on .n { color: var(--muted); }
   .auto {
-    margin-left: auto; font-size: 10px; color: var(--ok);
+    margin-left: auto; font-size: 11px; color: var(--ok);
     letter-spacing: var(--track-label); text-transform: uppercase;
-    border: 1px solid var(--ok); border-radius: 999px; padding: 2px 10px;
+    border: 1px solid var(--ok); border-radius: var(--radius); padding: 3px 10px;
   }
   .auto.busy { animation: pulse 1.4s ease-in-out infinite; }
   @keyframes pulse { 50% { opacity: .3; } }
@@ -102,17 +113,20 @@
   /* ---- カード -------------------------------------------------------
      1画面に多く入ることを優先する。審査は件数を捌く作業なので、
      スクロール回数がそのまま所要時間になる。
-     囲みは細い罫だけにして、写真と文字を前に出す。
+     囲みは持たせない。frmg.jp の information 一覧と同じで、行を下罫だけで
+     区切り、地の色の上に写真と文字を直接置く。
      サムネイルの一辺は config.yaml の review_ui.thumbnail_px。 */
   .card {
-    background: var(--surface); border: 1px solid var(--line);
-    border-radius: var(--radius); padding: 16px; margin-bottom: 12px;
+    background: transparent; border: 0;
+    border-bottom: 1px solid var(--line);
+    padding: 22px 0 22px 14px; margin-bottom: 0;
     display: grid; grid-template-columns: {{ thumb_px or 170 }}px 1fr; gap: 18px;
-    transition: border-color .12s;
+    transition: border-color .12s, box-shadow .12s;
   }
-  .card:hover { border-color: var(--faint); }
+  .card:hover { border-bottom-color: var(--fg); }
   .card.no-thumb { grid-template-columns: 1fr; }
-  .card.sel { border-color: var(--fg); box-shadow: inset 3px 0 0 var(--hi); }
+  /* 囲みがないので、選択中は左の赤い罫で示す */
+  .card.sel { box-shadow: inset 2px 0 0 var(--hi); }
   .card img {
     width: 100%; border-radius: var(--radius); object-fit: cover;
     aspect-ratio: 1; display: block; background: var(--line);
@@ -121,30 +135,34 @@
   .card a:hover img { opacity: .85; }
 
   .head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  /* 数字は等幅なので、負の字送りを掛けなくても縦に揃う */
   .score {
-    font-size: 26px; font-weight: 600; line-height: 1;
-    letter-spacing: -.03em; font-feature-settings: "ss01";
+    font-size: 26px; font-weight: 400; line-height: 1;
+    letter-spacing: normal;
   }
   .score.hi { color: var(--hi); }
   /* 価格は審査の判断に直接効くので、点数の次に目に入る強さにする */
-  .price { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
-  .area { font-size: 12px; color: var(--muted); letter-spacing: .04em; }
+  .price { font-size: 15px; font-weight: 500; letter-spacing: normal; }
+  .area { font-size: 12px; color: var(--muted); letter-spacing: normal; }
   /* 国旗は少し大きくしないと、12px では潰れて判別できない */
   .flag { font-size: 15px; line-height: 1; margin-right: 2px; }
-  .title { font-size: 16px; font-weight: 500; line-height: 1.5; margin: 8px 0 8px; }
-  .title a { color: inherit; text-decoration: none; border-bottom: 1px solid var(--line); }
-  .title a:hover { border-bottom-color: var(--fg); }
+  /* 本家の記事見出しは明朝・細ウェイト・行送り 1.5 */
+  .title { font-size: 18px; font-weight: 400; line-height: 1.55; margin: 10px 0; }
+  /* 本家は既定で下線を出さず、ホバーで引く（.hover-underline）。
+     見出しに常時下線が入ると、一覧が罫だらけになる */
+  .title a { color: inherit; text-decoration: none; border-bottom: 1px solid transparent; }
+  .title a:hover { color: var(--hi); border-bottom-color: var(--hi); }
   .meta { color: var(--muted); font-size: 12px; }
 
   .tag {
-    display: inline-block; font-size: 10px; line-height: 1.9;
-    padding: 0 8px; border-radius: 999px;
+    display: inline-block; font-size: 11px; line-height: 1.9;
+    padding: 0 8px; border-radius: var(--radius);
     border: 1px solid var(--line); margin: 0 4px 4px 0;
     color: var(--muted); letter-spacing: var(--track-label);
   }
   .tag.on { color: var(--ok); border-color: var(--ok); }
   .tag.warn { color: var(--ng); border-color: var(--ng); }
-  .tag.series { color: var(--hi); border-color: var(--hi); font-weight: 600; }
+  .tag.series { color: var(--hi); border-color: var(--hi); }
 
   .summary { margin: 8px 0; color: var(--fg); }
   details.axes { margin: 6px 0 10px; }
@@ -188,7 +206,7 @@
     color: var(--muted); white-space: nowrap; transition: all .12s;
   }
   button:hover { color: var(--fg); border-color: var(--fg); }
-  button.ok { border-color: var(--ok); color: var(--ok); font-weight: 600; }
+  button.ok { border-color: var(--ok); color: var(--ok); font-weight: 500; }
   button.ok:hover { background: var(--ok); color: var(--bg); }
   button.ng { border-color: var(--ng); color: var(--ng); }
   button.ng:hover { background: var(--ng); color: var(--bg); }
@@ -200,10 +218,13 @@
   }
   a.drive:hover { background: var(--hi); color: var(--bg); }
 
+  /* 本家の見出しは「文字幅ぶんだけ 2px の下罫を引く」組み。
+     全幅の罫ではなく inline-block にして、そこだけ線を出す */
   h2 {
-    font-size: 13px; font-weight: 600; letter-spacing: var(--track-label);
-    text-transform: uppercase; margin: 8px 0 12px;
-    padding-bottom: 10px; border-bottom: 1px solid var(--line-strong);
+    display: inline-block;
+    font-size: 16px; font-weight: 400; letter-spacing: var(--track-label);
+    text-transform: uppercase; margin: 8px 0 16px;
+    padding-bottom: 12px; border-bottom: 2px solid var(--line-strong);
   }
   code {
     font: 12px var(--mono); background: var(--line);

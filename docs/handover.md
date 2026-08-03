@@ -8,30 +8,37 @@
 `claude/freming-curated-pipeline-mfzomz`（このファイルを含む最新をプッシュ済み）。
 開発・プッシュはこのブランチのみ。他ブランチへは押さない。
 
-## いますぐやるタスク: 審査ページのトンマナ合わせ
+## 完了: 審査ページのトンマナ合わせ
 
 依頼原文:
 「審査ページを以下FREMINGの公式ページのデザインにトンマナを合わせて。
 フォントも再調整。 https://frmg.jp/」
 
-前セッションは frmg.jp に到達できず（ゲートウェイ403）、**現物を見ずに**
-「編集メディア風」の仮デザインを実装した（コミット `cd3ed95`）。
-ユーザーから「勝手にやるな」と指摘があり、仮デザインは残す判断になったが
-**frmg.jp の実物との突き合わせは未実施**。この環境では到達できるはずなので:
+前セッションは frmg.jp に到達できず（ゲートウェイ403）、現物を見ずに
+「編集メディア風」の仮デザインを実装していた（コミット `cd3ed95`）。
+ネットオープン環境で frmg.jp を取得し、実測値に差し替え済み。
 
-1. https://frmg.jp/ を取得し、トップと記事一覧の配色・フォント・余白・
-   角丸・字送りを読み取る（CSS も見る。`body` の `font-family` は必ず確認）
-2. `src/freming/web/templates/base.html` **冒頭の `:root` ブランドトークン**
-   （`--bg` `--fg` `--hi` `--radius` `--sans` など）を差し替える。
-   トンマナ調整がここだけで済むよう設計してある。トークンの外を触るのは
-   構造上の必要がある場合だけにする
-3. ダークモード（`prefers-color-scheme: dark`）を残すかは frmg.jp 次第。
-   ライトのみのサイトなら削除も提案する
-4. **見た目の確認はスクリーンショットで**。Playwright + 同梱 Chromium
-   （実行ファイル: `/opt/pw-browsers/chromium_headless_shell-*/chrome-linux/headless_shell`
-   を `executable_path` に指定。`playwright install` は不要）で
-   ダミーデータの一覧を描画して画像をユーザーに見せ、**承認を得てから**
-   コミットする。前セッションの反省点: 確認前に押して叱られた
+読み取った値（出典: `wp_freming/style.css` の `:root` と算出スタイル）:
+
+| 項目 | 値 |
+| --- | --- |
+| 地 | `#EFEFEF` |
+| 文字 | `#1C1B1B` / グレー `#707070` / 罫 `#CFCFCF` |
+| アクセント | `#FF3500`（`.hover-red` の一点だけ） |
+| 和文 | `hiragino-mincho-pron` 300・16px・行送り 2.0 |
+| 欧文 | `ibm-plex-mono` 400・大文字・行送り 1.25 |
+| 角丸 | なし（円形ボタンが1箇所だけ） |
+| ダークモード | なし |
+
+実装側の対応:
+
+- 和文は端末のヒラギノ明朝 →游明朝→ Noto Serif JP、欧文は Google Fonts の
+  IBM Plex Mono。本家の Adobe Fonts キットは frmg.jp ドメイン専用で使えない
+- ダークモードのブロックは削除（本家がライトのみ）
+- カードの囲みを外し、information 一覧と同じ下罫1本の行組みにした
+- **承認＝深緑 `#1f5c3d` / 非承認＝煉瓦 `#97372a` だけは本家のパレット外**。
+  取り違えると納品事故になるため、ユーザー判断で色を残している。
+  赤 `#FF3500` はスコア・企画タグ・Drive リンク専用
 
 ## プロジェクト概要
 
@@ -91,6 +98,20 @@ FREMING CURATED — 建築キュレーションメディアの物件収集パイ
 - `DomainRateLimiter` はプロセス内限定。collect を並列に走らせない
 - zsh ユーザーなので、案内するコマンドに `#` コメントや `<ID>` などの
   プレースホルダを混ぜない（そのまま貼って事故った実績あり）
+
+## クラウド環境で見た目を確認するとき
+
+Playwright + 同梱 Chromium でスクリーンショットを撮る手順。3つ踏んだ:
+
+- `headless_shell` ではなく **`/opt/pw-browsers/chromium-*/chrome-linux/chrome`**
+  を `executable_path` に指定する。`playwright install` は不要
+- 起動引数に **`--ssl-version-max=tls1.2`** を入れる。TLS1.3 の
+  ClientHello がエージェントプロキシで切られ、`ERR_CONNECTION_RESET` になる
+- プロキシは `launch(proxy=...)` ではなく **`--proxy-server=$HTTPS_PROXY`**
+  を args で渡す。`proxy=` を使うと Playwright が
+  `--proxy-bypass-list=<-loopback>` を足し、127.0.0.1 の自前サーバに
+  届かなくなる。**ポート番号はセッションが再起動すると変わる**ので、
+  値を焼き込まず毎回 `$HTTPS_PROXY` を読む
 
 ## ユーザーとの約束事
 
