@@ -638,3 +638,53 @@ def test_thumbnail_falls_back_when_there_is_only_one_image() -> None:
     )
     page = parse_page(html, "https://robbreport.com/a", skip_lead_image=True)
     assert page.thumbnail_url.endswith("only.jpg")
+
+
+def test_thumbnail_follows_lazy_loading_attributes() -> None:
+    """遅延読み込みの src はプレースホルダのことがある。
+
+    サムネイル選択を納品と別に実装していたとき、data-src を見ておらず
+    透明画像を選んでいた。審査UIで「画像が表示されない」状態になった。
+    """
+    html = """
+    <html><head></head><body><article>
+      <img src="data:image/gif;base64,R0lGODlh" data-src="/wp/exterior-pool.jpg">
+      <p>The house sits on two acres.</p>
+    </article></body></html>
+    """
+    page = parse_page(html, "https://robbreport.com/a")
+    assert page.thumbnail_url.endswith("exterior-pool.jpg")
+
+
+def test_thumbnail_skips_logos_and_placeholders() -> None:
+    """ロゴやスペーサー画像を代表に選ばない。"""
+    html = """
+    <html><head></head><body>
+      <header><img src="/assets/logo.png"></header>
+      <article>
+        <img src="/assets/placeholder-1x1.png">
+        <img src="/wp/exterior-pool.jpg">
+        <p>The house sits on two acres.</p>
+      </article>
+    </body></html>
+    """
+    page = parse_page(html, "https://robbreport.com/a")
+    assert page.thumbnail_url.endswith("exterior-pool.jpg")
+
+
+def test_thumbnail_and_delivery_pick_the_same_first_image() -> None:
+    """審査UIで見た写真と、納品の 01.jpg が食い違わないこと。"""
+    from freming.images.extract import extract_image_urls
+
+    html = """
+    <html><head><meta property="og:image" content="/wp/lead-1600x900.jpg"></head>
+    <body><article>
+      <img src="x.gif" data-src="/wp/lead-1024x576.jpg">
+      <p>text</p>
+      <img src="x.gif" data-src="/wp/exterior-pool.jpg">
+    </article></body></html>
+    """
+    for skip in (False, True):
+        page = parse_page(html, "https://robbreport.com/a", skip_lead_image=skip)
+        urls = extract_image_urls(html, "https://robbreport.com/a", skip_lead_image=skip)
+        assert page.thumbnail_url == urls[0]

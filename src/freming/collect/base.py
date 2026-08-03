@@ -9,6 +9,8 @@ from urllib.parse import urldefrag, urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
+from freming.images.extract import image_urls_from_soup
+
 _STRIP_TAGS = ("script", "style", "noscript", "svg", "form")
 
 # ページの共通部分。ここを本文に混ぜると、記事の内容と関係なく
@@ -160,45 +162,6 @@ def _article_root(soup):
     return soup.body or soup
 
 
-def _thumbnail_url(soup, root, base_url: str, skip_lead_image: bool) -> str | None:
-    """代表画像を選ぶ。
-
-    og:image は編集側が「代表」として指定した1枚なので優先する。ただし
-    物件写真に人物の顔写真を丸く重ねた合成画像を代表に据えるメディアが
-    あり（Robb Report のセレブ記事）、その場合は先頭を飛ばして2枚目を使う。
-
-    og:image と記事の先頭画像は同じ写真であることが多いので、サイズ違い等を
-    吸収して重複を落としてから数える。落とさないと「2枚目」がまた同じ写真になる。
-    """
-    from freming.images.extract import photo_identity
-
-    candidates: list[str] = []
-    seen: set[tuple[str, str]] = set()
-
-    def _add(value: str | None) -> None:
-        if not value:
-            return
-        url = urljoin(base_url, value.strip())
-        key = photo_identity(url)
-        if key in seen:
-            return
-        seen.add(key)
-        candidates.append(url)
-
-    og_image = soup.find("meta", property="og:image")
-    if og_image:
-        _add(og_image.get("content"))
-    for img in root.find_all("img", src=True):
-        _add(img.get("src"))
-
-    if not candidates:
-        return None
-    # 残り1枚しかないなら飛ばさない（合成画像でも無いよりはまし）
-    if skip_lead_image and len(candidates) > 1:
-        return candidates[1]
-    return candidates[0]
-
-
 def parse_page(html: str, base_url: str, skip_lead_image: bool = False) -> PageContent:
     """HTMLから本文・リンク・サムネイルを取り出す。"""
     soup = BeautifulSoup(html, "lxml")
@@ -214,8 +177,7 @@ def parse_page(html: str, base_url: str, skip_lead_image: bool = False) -> PageC
         title = soup.title.string.strip()
 
     root = _article_root(soup)
-    # フィード配信分のHTMLには og:image が無いので、その場合は本文中の画像を使う
-    thumbnail = _thumbnail_url(soup, root, base_url, skip_lead_image)
+
     # 見出しは本文の一部として扱う。共通部分を落とすと <header> ごと
     # 消えることがあり、「Home for Sale in ...」のような見出しの
     # キーワードを取りこぼすため、先頭に明示的に付ける。
@@ -233,4 +195,12 @@ def parse_page(html: str, base_url: str, skip_lead_image: bool = False) -> PageC
         if absolute not in links:
             links.append(absolute)
 
+    # 代表画像は納品とまったく同じ選び方を通す。以前ここに別の実装を持って
+    # いたが、遅延読み込み（data-src / srcset）とノイズ除外が抜けており、
+    # プレースホルダの透明画像を選んで「画像が表示されない」状態になった。
+    #
+    # image_urls_from_soup は渡された soup からタグを落とすので、本文と
+    # リンクを取り出したあとに呼ぶ（先に呼ぶと本文が欠ける）。
+    images = image_urls_from_soup(soup, base_url, limit=2, skip_lead_image=skip_lead_image)
+    thumbnail = images[0] if images else None
     return PageContent(title=title, text=text, links=links, thumbnail_url=thumbnail)

@@ -90,13 +90,29 @@ def extract_image_urls(
 
     並び順は記事に載っている順のまま返す。編集者が組んだ順序が
     そのまま「1枚目に何を置くか」の手がかりになるため、並べ替えない。
+    """
+    soup = BeautifulSoup(html, "lxml")
+    return image_urls_from_soup(soup, base_url, limit, skip_lead_image)
+
+
+def image_urls_from_soup(
+    soup,
+    base_url: str,
+    limit: int = 30,
+    skip_lead_image: bool = False,
+) -> list[str]:
+    """解析済みのHTMLから画像URLを取り出す。
+
+    審査UIのサムネイルもここを通す。以前はサムネイル用に別の実装を持って
+    いたが、遅延読み込み（data-src / srcset）とノイズ除外が抜けており、
+    プレースホルダの透明画像を選んで「画像が表示されない」状態になった。
+    選び方は1か所に置く。
 
     skip_lead_image を立てると先頭の1枚を落とす。物件写真に人物の顔写真を
     丸く重ねた合成画像を代表に据えるメディアがあり（Robb Report のセレブ
     記事）、そのままでは 01.jpg がその合成画像になるため。
     残り1枚しかない場合は落とさない（合成画像でも無いよりはまし）。
     """
-    soup = BeautifulSoup(html, "lxml")
     for tag in soup(("script", "style", "noscript", "header", "footer", "nav", "aside")):
         tag.decompose()
 
