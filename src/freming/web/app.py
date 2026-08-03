@@ -14,9 +14,8 @@ Basic 認証をかける（web/auth.py）。認証なしで外向けに待ち受
 from __future__ import annotations
 
 import json
-from pathlib import Path
-
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -39,9 +38,9 @@ from freming.db.repository import (
     set_series,
 )
 from freming.delivery.worker import DeliveryWorker
+from freming.logging_setup import get_logger, setup_logging
 from freming.web.auth import BasicAuth, BasicAuthMiddleware, credentials_from_env
 from freming.web.flags import flag
-from freming.logging_setup import get_logger, setup_logging
 
 log = get_logger(__name__)
 

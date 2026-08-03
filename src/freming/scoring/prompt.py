@@ -8,9 +8,8 @@
 
 from __future__ import annotations
 
-
-from freming.db.connection import Row
 from freming.config import Config
+from freming.db.connection import Row
 
 _SYSTEM = """あなたは建築キュレーションメディア「FREMING CURATED」の編集者です。
 記事を読んで、その物件を紹介する価値があるかを判定します。

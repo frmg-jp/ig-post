@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import re
 
 import pytest
 import yaml
@@ -28,7 +29,7 @@ def test_repository_config_is_valid() -> None:
 def test_request_interval_must_be_at_least_3_seconds(raw: dict) -> None:
     data = copy.deepcopy(raw)
     data["http"]["request_interval_sec"] = 1.0
-    with pytest.raises(ValidationError, match="3.0 秒以上"):
+    with pytest.raises(ValidationError, match=re.escape("3.0 秒以上")):
         Config.model_validate(data)
 
 
@@ -42,7 +43,7 @@ def test_parallel_access_to_same_domain_is_rejected(raw: dict) -> None:
 def test_robots_txt_cannot_be_disabled(raw: dict) -> None:
     data = copy.deepcopy(raw)
     data["http"]["respect_robots_txt"] = False
-    with pytest.raises(ValidationError, match="robots.txt"):
+    with pytest.raises(ValidationError, match=re.escape("robots.txt")):
         Config.model_validate(data)
 
 
@@ -56,7 +57,7 @@ def test_user_agent_requires_contact(raw: dict) -> None:
 def test_scoring_weights_must_sum_to_one(raw: dict) -> None:
     data = copy.deepcopy(raw)
     data["scoring"]["weights"]["story"] = 0.9
-    with pytest.raises(ValidationError, match="合計は 1.0"):
+    with pytest.raises(ValidationError, match=re.escape("合計は 1.0")):
         Config.model_validate(data)
 
 
@@ -101,7 +102,7 @@ def test_delivery_polling_cannot_be_too_frequent() -> None:
     """総当たりで承認済みを探しに行かないための下限。"""
     from freming.config import DeliveryConfig
 
-    with pytest.raises(ValidationError, match="5.0 秒以上"):
+    with pytest.raises(ValidationError, match=re.escape("5.0 秒以上")):
         DeliveryConfig(poll_interval_sec=1)
 
 

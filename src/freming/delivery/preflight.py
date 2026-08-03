@@ -20,10 +20,10 @@ from dataclasses import dataclass, field
 
 from freming.config import DriveConfig
 from freming.delivery.drive import (
+    FOLDER_MIME,
     DriveClient,
     DriveError,
     DriveQuotaError,
-    FOLDER_MIME,
 )
 from freming.logging_setup import get_logger
 

@@ -168,7 +168,7 @@ class DriveClient:
             )
         try:
             return service_account.Credentials.from_service_account_file(str(path), scopes=SCOPES)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             log.exception("サービスアカウント鍵の読み込みに失敗")
             raise DriveAuthError(f"サービスアカウント鍵が不正です: {path} ({exc})") from exc
 
@@ -205,7 +205,7 @@ class DriveClient:
                 creds.refresh(AuthRequest())
                 _save_token(creds, token_path)
                 return creds
-            except Exception:  # noqa: BLE001 - リフレッシュ失敗時は再認証に落とす
+            except Exception:  # リフレッシュ失敗時は再認証に落とす
                 log.warning("トークンの更新に失敗しました。再認証します。", exc_info=True)
 
         if not allow_interactive:
@@ -264,7 +264,7 @@ class DriveClient:
                 raise DriveAuthError(
                     f"認証用のローカルサーバーを起動できませんでした（{exc2}）。"
                 ) from exc2
-        except Exception as exc:  # noqa: BLE001 - 同意画面での拒否などを分かる形にする
+        except Exception as exc:  # 同意画面での拒否などを分かる形にする
             log.exception("OAuth 認証に失敗")
             if "access_denied" in str(exc):
                 raise DriveAuthError(
@@ -290,7 +290,7 @@ class DriveClient:
         try:
             creds, _project = google.auth.default(scopes=SCOPES)
             return creds
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             log.exception("ADC の取得に失敗")
             raise DriveAuthError(
                 "Application Default Credentials を取得できませんでした。\n"

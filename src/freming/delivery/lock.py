@@ -17,9 +17,9 @@ from __future__ import annotations
 
 import fcntl
 import os
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
 
 from freming.config import Config
 from freming.logging_setup import get_logger

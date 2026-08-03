@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from freming.config import Config, load_config
 from freming.db.connection import DbConnection, Row, connect
@@ -153,7 +153,7 @@ def deliver_property(
         "delivered_at) VALUES (?, ?, ?, ?, ?)",
         (
             property_id, folder_name, len(processed.outputs), folder_id,
-            datetime.now(timezone.utc).isoformat(),
+            datetime.now(UTC).isoformat(),
         ),
     )
     conn.execute("UPDATE properties SET status = 'delivered' WHERE id = ?", (property_id,))

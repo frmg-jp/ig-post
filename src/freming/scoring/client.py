@@ -37,7 +37,7 @@ class ScoringClient:
         for attempt in range(1, max_attempts + 1):
             try:
                 return self._assess_once(user_prompt)
-            except Exception as exc:  # noqa: BLE001 - 判定して再試行の可否を決める
+            except Exception as exc:  # 判定して再試行の可否を決める
                 last_error = exc
                 if not _is_retryable(exc):
                     # 鍵の不備やスキーマの誤りは、何度試しても同じ結果になる。
@@ -129,7 +129,9 @@ def check_api(config: Config) -> tuple[bool, str]:
     Drive の疎通確認（check-drive）と同じ役割。
     """
     try:
-        config.anthropic_api_key
+        # 値は使わない。未設定なら RuntimeError を投げるプロパティなので、
+        # 読むこと自体が確認になる。捨てることを明示しておく。
+        _ = config.anthropic_api_key
     except RuntimeError as exc:
         return False, str(exc)
 

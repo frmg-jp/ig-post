@@ -7,9 +7,10 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from freming.db.dialect import POSTGRES, SQLITE, dialect_of, redact, to_paramstyle
 from freming.logging_setup import get_logger
@@ -131,11 +132,11 @@ def session(target: str | Path) -> Iterator[DbConnection]:
 
 
 __all__ = [
+    "POSTGRES",
+    "SQLITE",
     "DbConnection",
     "PostgresConnection",
     "Row",
-    "SQLITE",
-    "POSTGRES",
     "connect",
     "dialect_for",
     "session",

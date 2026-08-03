@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from io import BytesIO
 
 import pytest
@@ -49,7 +49,7 @@ class _Response:
 
 
 def _feed() -> str:
-    published = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S +0000")
+    published = datetime.now(UTC).strftime("%a, %d %b %Y %H:%M:%S +0000")
     return (
         '<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel>'
         f"<item><title>1894 firehouse conversion</title><link>{ARTICLE_URL}</link>"

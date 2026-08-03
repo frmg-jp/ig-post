@@ -6,7 +6,7 @@ HTTP層を差し替えて、RSS → 記事取得 → 販売シグナル判定 �
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -122,7 +122,7 @@ def _run(config, conn, pages, source, disallowed=None, limit=None, dry_run=False
 
 
 def test_only_articles_with_for_sale_signals_become_candidates(config, conn, source) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     pages = {
         FEED_URL: _feed(
             [
@@ -158,7 +158,7 @@ def test_editorial_article_linking_to_a_listing_site_is_picked_up(config, conn, 
 
     リンク単独では足りないので、販売キーワードと合わせて閾値に届く。
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     pages = {
         FEED_URL: _feed([("Loft", "https://www.dezeen.com/c/", now)]),
         "https://www.dezeen.com/c": _article(
@@ -181,7 +181,7 @@ def test_agent_profile_linking_to_a_brokerage_is_not_a_candidate(config, conn, s
     CIRCA のフィードで実際に起きた誤検出。本人の Compass プロフィールへの
     リンクがあるだけで候補化されていた。
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     pages = {
         FEED_URL: _feed([("Ann Gluck", "https://www.dezeen.com/ann-gluck/", now)]),
         "https://www.dezeen.com/ann-gluck": _article(
@@ -197,7 +197,7 @@ def test_agent_profile_linking_to_a_brokerage_is_not_a_candidate(config, conn, s
 
 
 def test_articles_older_than_lookback_are_skipped(config, conn, source) -> None:
-    old = datetime.now(timezone.utc) - timedelta(days=config.collect.lookback_days + 5)
+    old = datetime.now(UTC) - timedelta(days=config.collect.lookback_days + 5)
     pages = {FEED_URL: _feed([("Old", "https://www.dezeen.com/old/", old)])}
 
     stats, client = _run(config, conn, pages, source)
@@ -209,7 +209,7 @@ def test_articles_older_than_lookback_are_skipped(config, conn, source) -> None:
 
 def test_already_collected_articles_are_not_refetched(config, conn, source) -> None:
     """再実行しても同じ記事を取りに行かない（相手サイトへの負荷を増やさない）。"""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     pages = {
         FEED_URL: _feed([("Loft", "https://www.dezeen.com/d/", now)]),
         "https://www.dezeen.com/d": _article("Now for sale, asking price $1,000,000."),
@@ -227,7 +227,7 @@ def test_already_collected_articles_are_not_refetched(config, conn, source) -> N
 
 
 def test_robots_disallowed_article_is_skipped_not_fetched_anyway(config, conn, source) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     pages = {FEED_URL: _feed([("Blocked", "https://www.dezeen.com/e/", now)])}
 
     stats, _ = _run(
@@ -241,7 +241,7 @@ def test_robots_disallowed_article_is_skipped_not_fetched_anyway(config, conn, s
 
 
 def test_dry_run_does_not_write_to_the_database(config, conn, source) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     pages = {
         FEED_URL: _feed([("Loft", "https://www.dezeen.com/f/", now)]),
         "https://www.dezeen.com/f": _article("For sale. Asking price $900,000."),
@@ -261,7 +261,7 @@ def test_falls_back_to_feed_content_when_the_article_page_is_blocked(
 
     User-Agent を偽装して回避することはしない。
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     body = (
         "<p>The converted firehouse is now for sale, asking price $2.4 million.</p>"
         "<img src='/hero.jpg'>"
@@ -283,7 +283,7 @@ def test_falls_back_to_feed_content_when_the_article_page_is_blocked(
 
 def test_stops_requesting_article_pages_after_repeated_failures(config, conn, source) -> None:
     """全滅するサイトに無駄なリクエストを送り続けない。"""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     entries = [(f"L{i}", f"https://www.dezeen.com/i{i}/", now) for i in range(6)]
     body = "<p>Now for sale. Asking price $1,000,000.</p>"
     pages = {FEED_URL: _feed(entries, description=body)}
@@ -299,7 +299,7 @@ def test_stops_requesting_article_pages_after_repeated_failures(config, conn, so
 
 
 def test_article_fetching_can_be_disabled_entirely(config, conn, source) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     body = "<p>For sale. Asking price $800,000.</p>"
     pages = {FEED_URL: _feed([("Loft", "https://www.dezeen.com/j/", now)], description=body)}
 
@@ -314,7 +314,7 @@ def test_article_fetching_can_be_disabled_entirely(config, conn, source) -> None
 
 def test_entry_without_any_body_is_not_a_candidate(config, conn, source) -> None:
     """フィードにも記事にも本文が無ければ候補化しない。"""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     pages = {FEED_URL: _feed([("", "https://www.dezeen.com/k/", now)])}
 
     stats, _ = _run(config, conn, pages, source, forbidden={"https://www.dezeen.com/k"})
@@ -324,7 +324,7 @@ def test_entry_without_any_body_is_not_a_candidate(config, conn, source) -> None
 
 
 def test_limit_caps_the_number_of_candidates(config, conn, source) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     entries = [(f"L{i}", f"https://www.dezeen.com/g{i}/", now) for i in range(5)]
     pages = {FEED_URL: _feed(entries)}
     for i in range(5):
@@ -339,7 +339,7 @@ def test_limit_caps_the_number_of_candidates(config, conn, source) -> None:
 
 def test_explain_reports_scores_below_the_threshold(config, conn, source) -> None:
     """候補0件のとき、フィード本文が薄いのか販売物件が無いのかを切り分けられること。"""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     entries = [
         ("Just a house", "https://www.dezeen.com/m1/", now),
         ("Listed home", "https://www.dezeen.com/m2/", now),
@@ -371,7 +371,7 @@ def test_listing_only_media_does_not_require_for_sale_signals(
 
     CIRCA Old Houses が本文にキーワードを含まないため0件だった実例に対応。
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     pages = {
         FEED_URL: _feed(
             [("A modernist bungalow", "https://www.wowhaus.co.uk/p1/", now)],
@@ -392,7 +392,7 @@ def test_listing_only_media_does_not_require_for_sale_signals(
 
 def test_editorial_media_still_requires_signals(config, conn, source) -> None:
     """通常の編集ソースでは足切りが効いたままであること。"""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     pages = {
         FEED_URL: _feed(
             [("A house", "https://www.dezeen.com/n1/", now)],
@@ -411,7 +411,7 @@ def test_url_pattern_filters_out_non_property_pages(config, conn, listing_source
 
     CIRCA Old Houses で人名のページが5件取り込まれた実例に対応。
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     listing_source.url_exclude = [r"/(barry|cynthia)-"]
     pages = {
         FEED_URL: _feed(
@@ -433,7 +433,7 @@ def test_url_pattern_filters_out_non_property_pages(config, conn, listing_source
 
 
 def test_url_include_restricts_to_listing_paths(config, conn, listing_source) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     listing_source.url_include = [r"/oldhouse/"]
     pages = {
         FEED_URL: _feed(
@@ -456,7 +456,7 @@ def test_url_include_restricts_to_listing_paths(config, conn, listing_source) ->
 
 def test_source_can_opt_out_of_article_fetching(config, conn, listing_source) -> None:
     """Crawl-delay が長いサイトでは、フィード1回のリクエストで済ませる。"""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     listing_source.fetch_article_pages = False
     pages = {
         FEED_URL: _feed(
@@ -474,7 +474,7 @@ def test_source_can_opt_out_of_article_fetching(config, conn, listing_source) ->
 
 def test_probe_shows_every_entry_regardless_of_state(config, conn, source) -> None:
     """調査用の probe は、期間外・取得済みでも内訳を表示すること。"""
-    old = datetime.now(timezone.utc) - timedelta(days=config.collect.lookback_days + 100)
+    old = datetime.now(UTC) - timedelta(days=config.collect.lookback_days + 100)
     pages = {
         FEED_URL: _feed([("Old entry", "https://www.dezeen.com/z1/", old)],
                         description="<p>A house.</p>"),
@@ -582,7 +582,7 @@ def test_url_pattern_report_groups_by_path(config, conn, source) -> None:
     CIRCA のように物件ページとエージェント紹介ページが同居するソースで、
     url_exclude に何を書けばよいかを判断するための出力。
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     entries = [
         ("House A", "https://www.dezeen.com/property/house-a/", now),
         ("House B", "https://www.dezeen.com/property/house-b/", now),
@@ -604,7 +604,7 @@ def test_url_pattern_report_groups_by_path(config, conn, source) -> None:
 
 def test_excluded_urls_are_still_reported(config, conn, source) -> None:
     """除外されたURLも記録すること。効きすぎているかを確認するため。"""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     src = source.model_copy(deep=True)
     src.url_exclude = [r"/agent/"]
     pages = {
@@ -625,11 +625,11 @@ def test_excluded_urls_are_still_reported(config, conn, source) -> None:
 # ----------------------------------------------------------------------
 def _stats_with_dates(days_ago: list[float], entries: int, inserted: int):
     """公開日を指定した CollectStats を組み立てる。"""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from freming.collect.editorial import CollectStats
 
-    now = datetime(2026, 8, 3, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 3, tzinfo=UTC)
     stats = CollectStats(source="test")
     stats.feed_entries = entries
     stats.inserted = inserted
@@ -758,11 +758,11 @@ class _NullConn:
 # ものかは別の情報で、後者を出さないと止まったフィードを採用してしまう。
 # ----------------------------------------------------------------------
 def _stats_ending(days_ago: float, span: float, count: int = 15, lookback: int = 30):
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from freming.collect.editorial import CollectStats
 
-    now = datetime(2026, 8, 3, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 3, tzinfo=UTC)
     stats = CollectStats(source="t", lookback_days=lookback)
     stats.feed_entries = count
     stats.inserted = 1
@@ -832,7 +832,7 @@ def test_url_excluded_entries_still_count_towards_the_pace(monkeypatch) -> None:
     窓が縮み 2.8本/日 が 1.9本/日 になり、さらに「3件は公開日が取れず」と
     いう誤った注記まで出ていた（公開日はあり、除外しただけ）。
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
     from types import SimpleNamespace
 
     from freming.collect.editorial import CollectStats, EditorialCollector
@@ -845,10 +845,10 @@ def test_url_excluded_entries_still_count_towards_the_pace(monkeypatch) -> None:
         url_exclude=["/art-collectibles/"],
     )
     stats = CollectStats(source="t", lookback_days=30)
-    cutoff = datetime(2026, 8, 3, tzinfo=timezone.utc) - timedelta(days=30)
+    cutoff = datetime(2026, 8, 3, tzinfo=UTC) - timedelta(days=30)
 
     def _entry(url: str, days_ago: float):
-        published = datetime(2026, 8, 3, tzinfo=timezone.utc) - timedelta(days=days_ago)
+        published = datetime(2026, 8, 3, tzinfo=UTC) - timedelta(days=days_ago)
         return SimpleNamespace(
             link=url, title="t", published_parsed=published.timetuple()[:6]
         )
@@ -893,7 +893,7 @@ def backfill_source(source):
 def test_articles_that_fell_out_of_the_feed_are_picked_up(
     config, conn, backfill_source
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     old = "https://www.dezeen.com/old-listing"
     pages = {
         FEED_URL: _feed(
@@ -918,7 +918,7 @@ def test_the_feed_window_is_not_re_fetched(config, conn, backfill_source) -> Non
     通常は insert 済みなので取得済みで落ちるが、--dry-run では書き込まない
     ため、素通しだと同じ記事を二度取って件数も二重になる。
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     pages = {
         FEED_URL: _feed(
             [("New", "https://www.dezeen.com/new/", now - timedelta(days=1))]
@@ -956,7 +956,7 @@ def test_backfill_does_not_inflate_the_weekly_estimate(
 
     分子だけが増えて、初回の実行だけ週あたりの件数が跳ね上がる。
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     pages = {
         FEED_URL: _feed(
             [
@@ -998,7 +998,7 @@ def test_backfill_can_be_turned_off(config, conn, backfill_source) -> None:
 
 
 def test_a_source_without_index_urls_is_unchanged(config, conn, source) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     pages = {
         FEED_URL: _feed([("A", "https://www.dezeen.com/a/", now - timedelta(days=1))]),
         "https://www.dezeen.com/a": _article("For sale at $1 million."),
@@ -1048,7 +1048,7 @@ def test_backfill_fetches_articles_even_when_the_feed_carries_the_body(
     ゼロになり、1件も候補にならない（Dwell がこの設定）。
     """
     backfill_source.fetch_article_pages = False
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     pages = {
         FEED_URL: _feed(
             [("New", "https://www.dezeen.com/new/", now - timedelta(days=1))],

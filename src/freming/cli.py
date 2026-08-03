@@ -76,7 +76,7 @@ def _cmd_db(args: argparse.Namespace) -> int:
             for table in TABLES:
                 try:
                     count = conn.execute(
-                        f"SELECT COUNT(*) AS n FROM {table}"  # noqa: S608 - 定数の表名
+                        f"SELECT COUNT(*) AS n FROM {table}"  # 定数の表名
                     ).fetchone()["n"]
                 except Exception:  # noqa: BLE001 - テーブルが無い＝未適用
                     continue

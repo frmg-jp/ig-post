@@ -7,9 +7,8 @@ LLMに任せるのは story だけで、残りの軸はこちらが持ってい�
 
 from __future__ import annotations
 
-
-from freming.db.connection import Row
 from freming.config import Config
+from freming.db.connection import Row
 from freming.scoring.schema import Assessment, ScoreAxis, ScoreResult
 
 

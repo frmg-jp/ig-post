@@ -13,9 +13,9 @@ from freming.db.dialect import (
     SQLITE,
     dialect_of,
     redact,
+    to_paramstyle,
     to_postgres_ddl,
     translate_ddl,
-    to_paramstyle,
 )
 
 

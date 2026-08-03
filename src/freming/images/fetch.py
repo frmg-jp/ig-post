@@ -9,14 +9,14 @@ HttpClient が担保するので、ここでは HTTP を直接触らない。
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from io import BytesIO
-from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
 from freming.config import Config
-from freming.images.extract import extract_image_urls
 from freming.db.connection import DbConnection, Row
+from freming.images.extract import extract_image_urls
 from freming.logging_setup import get_logger
 from freming.net.client import HttpClient, RobotsDisallowed
 
@@ -24,7 +24,7 @@ log = get_logger(__name__)
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class NoImagesFound(RuntimeError):

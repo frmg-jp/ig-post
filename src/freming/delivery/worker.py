@@ -114,7 +114,7 @@ class DeliveryWorker:
         while not self._stopping.is_set():
             try:
                 self.drain_once()
-            except Exception:  # noqa: BLE001 - ワーカーは何があっても止めない
+            except Exception:  # ワーカーは何があっても止めない
                 log.exception("自動納品の巡回でエラーが発生しました")
             self._wakeup.wait(self.config.delivery.poll_interval_sec)
             self._wakeup.clear()

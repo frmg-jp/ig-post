@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from freming.collect.base import Candidate
 from freming.db.connection import DbConnection, Row
@@ -12,7 +12,7 @@ log = get_logger(__name__)
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def insert_candidate(conn: DbConnection, candidate: Candidate) -> int | None:
@@ -259,7 +259,7 @@ def delivery_queue(
     # 待ち時間の判定は Python 側で刻む。SQL の datetime('now', ...) は
     # SQLite にしか無く、書式も _now() の ISO と食い違う（比較が常に偽になる）。
     cutoff = (
-        datetime.now(timezone.utc) - timedelta(seconds=max(retry_after_sec, 0))
+        datetime.now(UTC) - timedelta(seconds=max(retry_after_sec, 0))
     ).isoformat()
     return conn.execute(
         "SELECT * FROM properties WHERE status = 'approved' "

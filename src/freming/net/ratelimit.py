@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator
 from urllib.parse import urlparse
 
 from freming.logging_setup import get_logger

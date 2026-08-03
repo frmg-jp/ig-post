@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urljoin
 
 import feedparser
@@ -173,7 +173,7 @@ class CollectStats:
         """
         if not self.entry_dates:
             return None
-        current = now or datetime.now(timezone.utc)
+        current = now or datetime.now(UTC)
         return (current - max(self.entry_dates)).total_seconds() / 86400
 
     def is_stale(self, now: datetime | None = None) -> bool:
@@ -377,7 +377,7 @@ def _entry_published(entry) -> datetime | None:
     for key in ("published_parsed", "updated_parsed"):
         parsed = getattr(entry, key, None)
         if parsed:
-            return datetime(*parsed[:6], tzinfo=timezone.utc)
+            return datetime(*parsed[:6], tzinfo=UTC)
     return None
 
 
@@ -474,7 +474,7 @@ class EditorialCollector:
             return stats
 
         max_items = limit or self.config.collect.max_items_per_source_per_run
-        cutoff = datetime.now(timezone.utc) - timedelta(days=self.config.collect.lookback_days)
+        cutoff = datetime.now(UTC) - timedelta(days=self.config.collect.lookback_days)
 
         for feed_url in source.feeds:
             if stats.inserted >= max_items:
@@ -591,7 +591,7 @@ class EditorialCollector:
             stats.skipped_robots += 1
             stats.feed_failures.append("robots.txt が取得を許可していない")
             return []
-        except Exception as exc:  # noqa: BLE001 - 1フィードの失敗で全体を止めない
+        except Exception as exc:  # 1フィードの失敗で全体を止めない
             log.exception("フィードの取得に失敗: %s", feed_url)
             stats.fetch_failed += 1
             stats.feed_failures.append(failure_reason(exc))
