@@ -212,8 +212,13 @@ editorial_sources:
     rank: B
     enabled: true
     # 2026-08-03 の collect --explain（記事ページ取得あり）:
-    #   10件 / 2.8本/日（3.2日分）/ 候補6件 → 審査 週11.6件
+    #   10件 / 2.8本/日（3.2日分）/ 候補6件 → 審査 週11.8件
     # 全米の高級不動産。本数・鮮度ともに現時点で最大の供給源。
+    #
+    # 候補6件のうち3件は /homes-for-sale/（Landis Gores のグラスハウス、
+    # Edward Durell Stone の1950年代住宅、Cotswolds の納屋転用）で承認基準
+    # との相性が良い。残り3件は /celebrity-homes/ でまちまち。
+    # 承認率を見てから /homes-for-sale/ に絞るかを決める。
     #
     # 抜粋配信（198字）なので probe-feed では構造的に候補0件になる。
     # 判断は必ず collect --explain で行うこと。

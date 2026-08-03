@@ -517,16 +517,23 @@ class EditorialCollector:
         # url_exclude が効きすぎているのか足りないのか判断できない。
         stats.entry_urls.append(url)
 
+        published = _entry_published(entry)
+        if published:
+            # どのスキップよりも先に記録する。配信ペースはフィードの窓全体で
+            # 決まるので、url_exclude や期間で絞ってから数えると窓が縮んで
+            # 見え、ペースが実際より遅く出る。
+            #
+            # 実例（2026-08-03、Robb Report）: url_exclude の後ろに置いていた
+            # ため、除外した3件の分だけ窓が縮み 2.8本/日 が 1.9本/日 になった。
+            # さらに「3件は公開日が取れず」という誤った注記まで出ていた
+            # （公開日はあり、除外しただけ）。
+            stats.entry_dates.append(published)
+
         if not source.url_allowed(url):
             stats.skipped_url_pattern += 1
             log.debug("URLパターンに合わないためスキップ: %s", url)
             return
 
-        published = _entry_published(entry)
-        if published:
-            # 判定の可否に関わらず記録する。配信ペースはフィードの窓全体で
-            # 決まるので、ここで絞ると窓が縮んで見える。
-            stats.entry_dates.append(published)
         if published and published < cutoff:
             stats.skipped_old += 1
             return

@@ -820,3 +820,45 @@ def test_probe_uses_the_real_lookback_for_staleness(monkeypatch) -> None:
     source = source.model_copy(update={"feeds": []})   # フィード取得はしない
     stats = collector.collect(source, dry_run=True)
     assert stats.lookback_days == 30
+
+
+def test_url_excluded_entries_still_count_towards_the_pace(monkeypatch) -> None:
+    """url_exclude で落とした記事も配信ペースには数える。
+
+    配信ペースはフィードの窓全体で決まる。除外してから数えると窓が縮んで
+    見え、ペースが実際より遅く出る。実例（Robb Report）: 除外した3件の分だけ
+    窓が縮み 2.8本/日 が 1.9本/日 になり、さらに「3件は公開日が取れず」と
+    いう誤った注記まで出ていた（公開日はあり、除外しただけ）。
+    """
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+
+    from freming.collect.editorial import CollectStats, EditorialCollector
+    from freming.config import EditorialSource, load_config
+
+    cfg = load_config("config.yaml").model_copy(deep=True)
+    collector = EditorialCollector(cfg, client=None, conn=None)
+    source = EditorialSource(
+        key="t", name="t", rank="B", enabled=True,
+        url_exclude=["/art-collectibles/"],
+    )
+    stats = CollectStats(source="t", lookback_days=30)
+    cutoff = datetime(2026, 8, 3, tzinfo=timezone.utc) - timedelta(days=30)
+
+    def _entry(url: str, days_ago: float):
+        published = datetime(2026, 8, 3, tzinfo=timezone.utc) - timedelta(days=days_ago)
+        return SimpleNamespace(
+            link=url, title="t", published_parsed=published.timetuple()[:6]
+        )
+
+    # すべて url_exclude に当たる記事。除外されても窓には数える。
+    for days in (0.0, 1.5, 3.0):
+        collector._process_entry(
+            _entry(f"https://ex.com/shelter/art-collectibles/{days}", days),
+            source, cutoff, stats, dry_run=True,
+        )
+
+    assert stats.skipped_url_pattern == 3
+    assert len(stats.entry_dates) == 3          # 除外しても日付は残る
+    assert stats.window_days == pytest.approx(3.0)
+    assert "公開日が取れず" not in stats.pace_report()
