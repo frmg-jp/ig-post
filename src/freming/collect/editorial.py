@@ -132,6 +132,7 @@ class CollectStats:
     # 一覧ページから拾った記事の数（バックフィル）。フィード由来と分けて
     # 数える。混ぜると配信ペースの分母が狂い、「1日あたり何本」が跳ね上がる。
     backfill_seen: int = 0
+    backfill_fresh: int = 0
     backfill_inserted: int = 0
 
     @property
@@ -340,8 +341,9 @@ class CollectStats:
         )
         if self.backfill_seen:
             line += (
-                f"\n  一覧ページから {self.backfill_seen} 件を見て"
-                f" {self.backfill_inserted} 件を追加（フィードから落ちた過去記事）"
+                f"\n  一覧ページ {self.backfill_seen} 件"
+                f"（うち未取得 {self.backfill_fresh} 件）"
+                f" → {self.backfill_inserted} 件を追加（フィードから落ちた過去記事）"
             )
         if self.used_feed_only:
             line += (
@@ -428,6 +430,11 @@ class EditorialCollector:
         self.client = client
         self.conn = conn
         self._article_fetch_disabled = not config.collect.fetch_article_pages
+        # 「設定で取らない」と「取ろうとして拒否され続けたので諦めた」を
+        # 分ける。前者はバックフィルには当てはまらない（一覧ページ由来の
+        # 記事にはフィード本文が無いので、取らなければ判定材料がゼロになる）。
+        # 後者はサイト側の拒否なので、バックフィルも止める。
+        self._fetch_off_by_failures = False
         self._consecutive_article_failures = 0
         # 調査（probe）では期間フィルタを外すため collect.lookback_days が
         # 実際の値ではなくなる。「止まっているか」の判定には本来の値が要る。
@@ -443,6 +450,7 @@ class EditorialCollector:
                     source.key,
                 )
         self._consecutive_article_failures = 0
+        self._fetch_off_by_failures = False
 
     def collect(
         self,
@@ -511,10 +519,23 @@ class EditorialCollector:
         # exists_source_url で落ちるが、--dry-run では書き込まないため
         # 同じ記事をもう一度取りに行ってしまう（件数も二重に数える）。
         from_feed = set(stats.entry_urls)
-        urls = [u for u in self._index_article_urls(source, stats) if u not in from_feed]
-        stats.backfill_seen = len(urls)
+        found = [u for u in self._index_article_urls(source, stats) if u not in from_feed]
+
+        # **取得済みを先に落としてから上限で切る。** 逆にすると、記事数が
+        # 上限より多い一覧ページで永久に進まない。6sqft の
+        # /category/distinctive-homes は179件あり、上限20件で切ってから
+        # 取得済みを弾くと、2回目以降は毎回同じ先頭20件を見て0件で終わる。
+        # 先に落とせば、実行のたびに次の20件へ進む。
+        fresh = (
+            found
+            if ignore_known
+            else [u for u in found if not exists_source_url(self.conn, u)]
+        )
+        stats.backfill_seen = len(found)
+        stats.backfill_fresh = len(fresh)
+
         budget = min(source.max_backfill, max_items - stats.inserted)
-        for url in urls[:budget] if budget > 0 else []:
+        for url in fresh[:budget] if budget > 0 else []:
             if stats.inserted >= max_items:
                 break
             # cutoff は渡すが、公開日を持たないので効かない（BackfillEntry の
@@ -608,8 +629,9 @@ class EditorialCollector:
         else:
             log.debug("記事ページを取得できませんでした: %s (%s)", url, exc)
 
-        if not self._article_fetch_disabled and self._consecutive_article_failures >= limit:
+        if not self._fetch_off_by_failures and self._consecutive_article_failures >= limit:
             self._article_fetch_disabled = True
+            self._fetch_off_by_failures = True
             log.warning(
                 "記事ページの取得が %d 回続けて失敗したため、この実行では"
                 "フィード配信分の本文だけで判定します。"
@@ -672,7 +694,12 @@ class EditorialCollector:
                           skip_lead_image=source.skip_lead_image)
         from_feed_only = True
 
-        if not self._article_fetch_disabled:
+        # バックフィルはフィード本文を持たないので、記事ページを取らないと
+        # 何も判定できない。fetch_article_pages: false は「フィードが全文を
+        # 配信するので取りに行かなくてよい」という意味であって、一覧ページ
+        # 由来の記事には当てはまらない。サイト側に拒否され続けた場合だけ止める。
+        fetch_article = not self._article_fetch_disabled or not from_feed
+        if fetch_article and not self._fetch_off_by_failures:
             try:
                 response = self.client.get(url)
             except RobotsDisallowed:

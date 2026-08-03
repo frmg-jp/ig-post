@@ -78,8 +78,24 @@ editorial_sources:
     # 2026-08-01 の probe-feed: 10件 / 本文中央値4491字 / 候補2件。
     # NY・Brooklyn の売出物件を継続的に扱う。重点エリア追加後に見つけた
     # 中で最も歩留まりが良い。
+    #
+    # 2026-08-03: **フィードの窓が10件＝3.2日分しかない**（3.1本/日）。
+    # 4件のソースの中で最も薄い。定期実行が3日止まると取りこぼす。
+    # 物件は distinctive-homes カテゴリにまとまっている（一覧に179件）。
     feeds:
       - "https://www.6sqft.com/feed/"
+    index_urls:
+      - "https://www.6sqft.com/category/distinctive-homes/"
+    # 記事は slug がドメイン直下。/category/... や /manhattan/... は
+    # 2階層になるのでこの形に合わない。同じ形をした固定ページだけ除く。
+    url_include:
+      - "^https://www\\.6sqft\\.com/[a-z0-9-]+$"
+    url_exclude:
+      - "^https://www\\.6sqft\\.com/neighborhoods$"
+      - "^https://www\\.6sqft\\.com/about$"
+      - "^https://www\\.6sqft\\.com/contact$"
+      - "^https://www\\.6sqft\\.com/advertise$"
+      - "^https://www\\.6sqft\\.com/newsletter$"
 
   - key: thespaces
     name: "The Spaces"
@@ -170,6 +186,16 @@ editorial_sources:
       - "/ask-a-realtor"
     feeds:
       - "https://www.dwell.com/@dwell/rss"
+    # 2026-08-03: フィードは30件＝25日分あるので、日々の取りこぼしは無い。
+    # 一覧ページを足すのは、パイプライン開始前に出た記事を拾うため。
+    # real-estate セクションに /article/<slug> が40件並ぶ。
+    #
+    # 記事ページを取りに行かない設定（fetch_article_pages: false）だが、
+    # 一覧ページ由来の記事にはフィード本文が無いので、そこだけは取得する。
+    index_urls:
+      - "https://www.dwell.com/real-estate"
+    url_include:
+      - "^https://www\\.dwell\\.com/article/[a-z0-9-]+$"
   - key: designboom
     name: "designboom"
     rank: S

@@ -1009,3 +1009,76 @@ def test_a_source_without_index_urls_is_unchanged(config, conn, source) -> None:
     assert stats.inserted == 1
     assert stats.backfill_seen == 0
     assert stats.backfill_inserted == 0
+
+
+def test_backfill_advances_past_the_cap_on_the_next_run(
+    config, conn, backfill_source
+) -> None:
+    """一覧ページの件数が上限より多くても、実行のたびに先へ進むこと。
+
+    取得済みを落とす前に上限で切ると、2回目以降は毎回同じ先頭を見て
+    0件で終わる。6sqft の一覧は186件あり、上限20件では永久に進まない。
+    """
+    backfill_source.max_backfill = 2
+    slugs = [f"/listing-{i}/" for i in range(6)]
+    pages = {FEED_URL: _feed([]), INDEX_URL: _index(slugs)}
+    for i in range(6):
+        pages[f"https://www.dezeen.com/listing-{i}"] = _article(
+            f"On the market for £{i + 1} million."
+        )
+
+    first, _ = _run(config, conn, pages, backfill_source)
+    assert first.backfill_inserted == 2
+
+    second, _ = _run(config, conn, pages, backfill_source)
+    assert second.backfill_inserted == 2
+
+    urls = {r["source_url"] for r in conn.execute("SELECT source_url FROM properties")}
+    assert len(urls) == 4          # 2回で4件。同じ2件を見続けていない
+    assert second.backfill_fresh == 4   # 残りは未取得として数える
+
+
+def test_backfill_fetches_articles_even_when_the_feed_carries_the_body(
+    config, conn, backfill_source
+) -> None:
+    """fetch_article_pages: false でもバックフィルは記事ページを取る。
+
+    この設定は「フィードが全文を配信するので取りに行かなくてよい」の意味。
+    一覧ページ由来の記事にはフィード本文が無いので、取らないと判定材料が
+    ゼロになり、1件も候補にならない（Dwell がこの設定）。
+    """
+    backfill_source.fetch_article_pages = False
+    now = datetime.now(timezone.utc)
+    pages = {
+        FEED_URL: _feed(
+            [("New", "https://www.dezeen.com/new/", now - timedelta(days=1))],
+            description="For sale at $1 million.",
+        ),
+        INDEX_URL: _index(["/old-listing/"]),
+        "https://www.dezeen.com/old-listing": _article("On the market for £900,000."),
+    }
+
+    stats, client = _run(config, conn, pages, backfill_source)
+
+    assert stats.backfill_inserted == 1
+    # フィードの記事は取りに行かない（設定どおり）
+    assert "https://www.dezeen.com/new" not in client.requested
+    # 一覧ページ由来の記事は取りに行く
+    assert "https://www.dezeen.com/old-listing" in client.requested
+
+
+def test_backfill_stops_when_the_site_keeps_refusing(config, conn, backfill_source) -> None:
+    """記事ページを拒否され続けたらバックフィルも止まる。
+
+    WowHaus と Dezeen はデータセンターのIPからHTMLページが403になる。
+    User-Agent の偽装で回避はしないので、無駄なリクエストを送り続けない。
+    """
+    slugs = [f"/listing-{i}/" for i in range(6)]
+    pages = {FEED_URL: _feed([]), INDEX_URL: _index(slugs)}
+    forbidden = {f"https://www.dezeen.com/listing-{i}" for i in range(6)}
+
+    stats, client = _run(config, conn, pages, backfill_source, forbidden=forbidden)
+
+    assert stats.inserted == 0
+    attempted = [u for u in client.requested if "/listing-" in u]
+    assert len(attempted) <= config.collect.article_fetch_failure_limit
