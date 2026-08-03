@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import threading
 from pathlib import Path
@@ -39,10 +40,45 @@ def _cmd_db(args: argparse.Namespace) -> int:
     cfg = load_config(args.config)
     setup_logging(cfg.app.log_dir, cfg.app.log_level)
     db_path = args.db or cfg.app.target()
+
     if args.db_action == "status":
         for version, applied in migrate_mod.status(db_path):
             print(f"{'[x]' if applied else '[ ]'} {version}")
         return 0
+
+    if args.db_action == "transfer":
+        # SQLite から PostgreSQL への1回きりの移行。移行先は DATABASE_URL、
+        # 移行元は config の db_path（--db で上書きできる）。
+        # 移行先が空でないと止まるので、取り違えても二重投入にはならない。
+        from freming.db.dialect import POSTGRES, dialect_of, redact
+        from freming.db.transfer import TransferError, transfer
+
+        dest = os.environ.get("DATABASE_URL", "")
+        if not dest:
+            print(
+                "DATABASE_URL が未設定です。移行先の接続文字列を .env か環境変数に"
+                "設定してください。",
+                file=sys.stderr,
+            )
+            return 2
+        if dialect_of(dest) != POSTGRES:
+            print(f"DATABASE_URL が PostgreSQL ではありません: {redact(dest)}", file=sys.stderr)
+            return 2
+
+        source = Path(args.db) if args.db else cfg.app.db_path
+        if not Path(source).exists():
+            print(f"移行元が見つかりません: {source}", file=sys.stderr)
+            return 2
+
+        print(f"{source} → {redact(dest)}")
+        try:
+            stats = transfer(source, dest)
+        except TransferError as exc:
+            print(f"移行できませんでした: {exc}", file=sys.stderr)
+            return 1
+        print(stats.summary())
+        return 0
+
     migrate_mod.migrate(db_path)
     print(f"OK: {db_path}")
     return 0
@@ -485,8 +521,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_drive.set_defaults(func=_cmd_check_drive)
 
     p_db = sub.add_parser("db", help="DB操作")
-    p_db.add_argument("db_action", choices=["migrate", "status"])
-    p_db.add_argument("--db", default=None)
+    p_db.add_argument("db_action", choices=["migrate", "status", "transfer"])
+    p_db.add_argument(
+        "--db",
+        default=None,
+        help="migrate/status では対象DB。transfer では移行元のSQLite（既定は config の db_path）",
+    )
     p_db.set_defaults(func=_cmd_db)
 
     p_collect = sub.add_parser("collect", help="ソースから収集（経路A / 経路B）")
