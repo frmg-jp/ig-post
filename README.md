@@ -35,6 +35,7 @@ python scripts/check_drive.py        # [2] Drive疎通確認（★ここが通�
 | `python -m freming.cli discover-feed <サイトURL>` | トップページから公開フィードURLを探す |
 | `python -m freming.cli probe-feed <フィードURL>` | フィードの中身と配信ペースを試す（DBに書き込まない） |
 | `bash scripts/measure_pace.sh` | 有効な全ソースの配信ペースを測り、週あたり何件審査に上がるかを出す |
+| `bash scripts/probe_us_sources.sh` | 全米を扱うソースの候補20件をまとめて検証（`docs/us-source-candidates.tsv`） |
 | `python -m freming.cli survey-sources --file docs/source-candidates.tsv` | 収集候補の robots.txt をまとめて調べる |
 | `python -m freming.cli ingest-url <URL>` | URLを1件だけ取得して候補化（Zillow等はこの経路のみ） |
 | `python -m freming.cli check-api` | スコアリングAPIの疎通確認 |

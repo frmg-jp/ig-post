@@ -91,3 +91,12 @@ def test_pass_verdict_says_it_only_covers_robots() -> None:
     """規約まで判定したと読めない文言にしておく。"""
     survey = SiteSurvey("t", "https://example.com", "ok", "可", [], None, [])
     assert survey.verdict == "○(robotsのみ)"
+
+
+def test_shipped_us_candidate_list_parses() -> None:
+    """全米ソースの候補リストがそのまま survey-sources に渡せること。"""
+    rows = load_candidates(Path("docs/us-source-candidates.tsv"))
+    assert len(rows) == 20
+    assert ("全米", "Dwell", "https://www.dwell.com/") in rows
+    # 区分の列（4列目）が増えても、エリア/名前/URL の3列として読める
+    assert all(url.startswith("http") for _area, _name, url in rows)

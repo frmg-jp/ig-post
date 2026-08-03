@@ -1,0 +1,42 @@
+# 全米を扱うソースの候補（2026-08-03）
+#
+# 区分の意味 —— ここを混ぜると、フィードが読めた時点で使えると誤解する。
+#
+#   press   … 建築家・施主が取材用に提供したプレス素材を掲載するメディア。
+#             いま採用中のソース（Dezeen / 6sqft / The Spaces）と同じ性格で、
+#             権利の扱いも同じ。有効化してよい。
+#   relist  … 売出中の物件の掲載写真をそのまま再掲するサイト。写真はMLS・
+#             ブローカー・売主に帰属する。フィードが読めても、そのまま
+#             Instagram に載せてよいわけではない。**権利を確認するまで
+#             enabled: false**（portlandscondos と同じ扱い）。
+#   unknown … どちらか判断が付かない。中身を見てから決める。
+#
+# 検証:
+#   bash scripts/probe_us_sources.sh 2>&1 | tee /tmp/probe_us.log
+#
+エリア	サイト名	URL	区分
+# --- 1. 既に config.yaml にあるが feeds が空のまま（調査漏れ） ---
+全米	Dwell	https://www.dwell.com/	press
+全米	ArchDaily	https://www.archdaily.com/	press
+全米	Architectural Record	https://www.architecturalrecord.com/	press
+全米	Architectural Digest	https://www.architecturaldigest.com/	press
+全米	Iconic Houses	https://www.iconichouses.org/	press
+# --- 2. 売出物件を扱う編集メディア（The Spaces と同じ性格を期待） ---
+全米	Robb Report / Shelter	https://robbreport.com/shelter/	unknown
+全米	Dirt	https://www.dirt.com/	unknown
+全米	Curbed	https://www.curbed.com/	press
+全米	Atomic Ranch	https://www.atomic-ranch.com/	press
+全米	USModernist	https://usmodernist.org/	unknown
+全米	Mid Century Home	https://midcenturyhome.com/	press
+# --- 3. 歴史的建造物・保存（「前歴が残る」という承認基準と相性が良い） ---
+全米	National Trust / Preservation	https://savingplaces.org/	press
+全米	Old House Journal	https://www.oldhouseonline.com/	press
+全米	Docomomo US	https://docomomo-us.org/	press
+# --- 4. 掲載写真を再掲する型（権利の確認が要る。enabled: false で登録する） ---
+全米	Old House Dreams	https://www.oldhousedreams.com/	relist
+全米	Cheap Old Houses	https://www.cheapoldhouses.com/	relist
+# --- 5. 地域メディア（重点エリアのうち手薄なところ） ---
+San Francisco	SocketSite	https://socketsite.com/	unknown
+Los Angeles	Urbanize LA	https://la.urbanize.city/	press
+全米	The Real Deal	https://therealdeal.com/	unknown
+Seattle/Portland	The Registry PS	https://news.theregistryps.com/	unknown
