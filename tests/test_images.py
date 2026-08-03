@@ -398,3 +398,59 @@ def test_refetch_reports_what_is_already_on_hand(config, conn, tmp_path) -> None
     assert "手元 10 枚" in text
     assert "新規 0" in text
     assert "取得済み 10" in text
+
+
+# ----------------------------------------------------------------------
+# 代表画像が合成のメディア（2026-08-03 Robb Report）
+#
+# セレブ記事の代表画像が「物件写真に人物の顔写真を丸く重ねた合成画像」に
+# なっている。そのままだと審査UIのサムネイルも納品の 01.jpg もその合成に
+# なるので、先頭を飛ばして2枚目から使う。
+# ----------------------------------------------------------------------
+_COMPOSITE_ARTICLE = """
+<html><head>
+  <meta property="og:image" content="/wp/2026/07/lead-composite-1600x900.jpg">
+</head><body><article>
+  <img src="/wp/2026/07/lead-composite-1024x576.jpg">
+  <p>The ranch house sits on two acres.</p>
+  <img src="/wp/2026/07/exterior-pool.jpg">
+  <img src="/wp/2026/07/living-room.jpg">
+</article></body></html>
+"""
+
+
+def _names(urls):
+    return [url.rsplit("/", 1)[1] for url in urls]
+
+
+def test_lead_image_is_kept_by_default() -> None:
+    urls = extract_image_urls(_COMPOSITE_ARTICLE, "https://robbreport.com/a")
+    assert _names(urls)[0] == "lead-composite-1600x900.jpg"
+
+
+def test_lead_image_can_be_skipped() -> None:
+    urls = extract_image_urls(
+        _COMPOSITE_ARTICLE, "https://robbreport.com/a", skip_lead_image=True
+    )
+    assert _names(urls) == ["exterior-pool.jpg", "living-room.jpg"]
+
+
+def test_size_variant_of_the_lead_is_not_the_second_image() -> None:
+    """og:image と記事の先頭画像は同じ写真のことが多い。
+
+    重複を落としてから数えないと、「2枚目」がまた同じ合成画像になる。
+    """
+    urls = extract_image_urls(
+        _COMPOSITE_ARTICLE, "https://robbreport.com/a", skip_lead_image=True
+    )
+    assert not any("lead-composite" in name for name in _names(urls))
+
+
+def test_a_single_image_is_never_dropped() -> None:
+    """1枚しかないなら飛ばさない。合成画像でも無いよりはまし。"""
+    html = (
+        '<html><head><meta property="og:image" content="/only.jpg"></head>'
+        "<body><article><p>x</p></article></body></html>"
+    )
+    urls = extract_image_urls(html, "https://robbreport.com/a", skip_lead_image=True)
+    assert _names(urls) == ["only.jpg"]

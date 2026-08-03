@@ -128,7 +128,14 @@ def fetch_images(
             )
             raise NoImagesFound(f"robots.txt により取得できません: {row['source_url']}") from None
 
-        urls = extract_image_urls(article.text, row["source_url"])
+        # 代表画像が合成のメディアでは先頭を飛ばす（01.jpg が顔写真入りの
+        # 合成画像になるのを避ける）。設定はソース側に持たせてある。
+        source = config.editorial_source(row["source"])
+        urls = extract_image_urls(
+            article.text,
+            row["source_url"],
+            skip_lead_image=bool(source and source.skip_lead_image),
+        )
         stats.found_urls = len(urls)
         log.info("画像URLを %d 件見つけました: property_id=%s", len(urls), row["id"])
 

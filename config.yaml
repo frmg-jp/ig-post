@@ -223,6 +223,10 @@ editorial_sources:
     # 抜粋配信（198字）なので probe-feed では構造的に候補0件になる。
     # 判断は必ず collect --explain で行うこと。
     fetch_article_pages: true
+    # 代表画像が「物件写真に人物の顔写真を丸く重ねた合成画像」になっている。
+    # セレブ記事では毎回この形なので、先頭を飛ばして2枚目から使う。
+    # 審査UIのサムネイルと納品の 01.jpg の両方に効く。
+    skip_lead_image: true
     url_exclude:
       # 美術品オークションの記事。金額は出るが物件ではない。
       # 10件中2件がこのセクションだった（Monet、FBIの画廊捜索）。

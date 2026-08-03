@@ -544,7 +544,8 @@ class EditorialCollector:
             return
 
         # まずフィードが配信している本文で判定材料を作る
-        page = parse_page(_entry_html(entry), base_url=url)
+        page = parse_page(_entry_html(entry), base_url=url,
+                          skip_lead_image=source.skip_lead_image)
         from_feed_only = True
 
         if not self._article_fetch_disabled:
@@ -556,7 +557,10 @@ class EditorialCollector:
             except Exception as exc:  # noqa: BLE001 - 1記事の失敗で全体を止めない
                 self._note_article_failure(url, exc, stats)
             else:
-                page = parse_page(response.text, base_url=url)
+                page = parse_page(
+                    response.text, base_url=url,
+                    skip_lead_image=source.skip_lead_image,
+                )
                 from_feed_only = False
                 self._consecutive_article_failures = 0
 

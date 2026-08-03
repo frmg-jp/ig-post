@@ -42,7 +42,7 @@ def _is_image_url(url: str) -> bool:
     return path.endswith(_EXTENSIONS)
 
 
-def _identity(url: str) -> tuple[str, str]:
+def photo_identity(url: str) -> tuple[str, str]:
     """同じ写真なら同じ値になるキー。
 
     サイズ違い（-1600x1067）、倍率違い（@2x）、WordPress の -scaled、
@@ -80,11 +80,21 @@ def _largest_from_srcset(srcset: str, base_url: str) -> str | None:
     return best[1] if best else None
 
 
-def extract_image_urls(html: str, base_url: str, limit: int = 30) -> list[str]:
+def extract_image_urls(
+    html: str,
+    base_url: str,
+    limit: int = 30,
+    skip_lead_image: bool = False,
+) -> list[str]:
     """記事から画像URLを順番どおりに取り出す。
 
     並び順は記事に載っている順のまま返す。編集者が組んだ順序が
     そのまま「1枚目に何を置くか」の手がかりになるため、並べ替えない。
+
+    skip_lead_image を立てると先頭の1枚を落とす。物件写真に人物の顔写真を
+    丸く重ねた合成画像を代表に据えるメディアがあり（Robb Report のセレブ
+    記事）、そのままでは 01.jpg がその合成画像になるため。
+    残り1枚しかない場合は落とさない（合成画像でも無いよりはまし）。
     """
     soup = BeautifulSoup(html, "lxml")
     for tag in soup(("script", "style", "noscript", "header", "footer", "nav", "aside")):
@@ -106,7 +116,7 @@ def extract_image_urls(html: str, base_url: str, limit: int = 30) -> list[str]:
         if _NOISE.search(candidate) or not _is_image_url(candidate):
             return
         # URL文字列ではなく「同じ写真か」で重複を判定する
-        key = _identity(candidate)
+        key = photo_identity(candidate)
         if key in seen:
             return
         seen.add(key)
@@ -129,4 +139,6 @@ def extract_image_urls(html: str, base_url: str, limit: int = 30) -> list[str]:
                 _add(urljoin(base_url, value.strip()))
                 break
 
+    if skip_lead_image and len(urls) > 1:
+        return urls[1:]
     return urls

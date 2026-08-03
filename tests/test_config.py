@@ -133,3 +133,11 @@ def test_robb_report_excludes_art_auctions_and_listicles() -> None:
     assert not source.url_allowed(f"{base}/celebrity-homes/lists/tom-cruise-portfolio-123")
     assert source.url_allowed(f"{base}/homes-for-sale/cotswolds-barn-for-sale-123")
     assert source.url_allowed(f"{base}/celebrity-homes/betsey-johnson-house-123")
+
+
+def test_robb_report_skips_its_composite_lead_image() -> None:
+    """セレブ記事の代表画像に人物の顔写真が丸く重ねてある。"""
+    cfg = load_config("config.yaml")
+    assert cfg.editorial_source("robbreport_shelter").skip_lead_image is True
+    # 他のソースは既定のまま（先頭を使う）
+    assert cfg.editorial_source("thespaces").skip_lead_image is False

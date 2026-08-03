@@ -160,7 +160,46 @@ def _article_root(soup):
     return soup.body or soup
 
 
-def parse_page(html: str, base_url: str) -> PageContent:
+def _thumbnail_url(soup, root, base_url: str, skip_lead_image: bool) -> str | None:
+    """代表画像を選ぶ。
+
+    og:image は編集側が「代表」として指定した1枚なので優先する。ただし
+    物件写真に人物の顔写真を丸く重ねた合成画像を代表に据えるメディアが
+    あり（Robb Report のセレブ記事）、その場合は先頭を飛ばして2枚目を使う。
+
+    og:image と記事の先頭画像は同じ写真であることが多いので、サイズ違い等を
+    吸収して重複を落としてから数える。落とさないと「2枚目」がまた同じ写真になる。
+    """
+    from freming.images.extract import photo_identity
+
+    candidates: list[str] = []
+    seen: set[tuple[str, str]] = set()
+
+    def _add(value: str | None) -> None:
+        if not value:
+            return
+        url = urljoin(base_url, value.strip())
+        key = photo_identity(url)
+        if key in seen:
+            return
+        seen.add(key)
+        candidates.append(url)
+
+    og_image = soup.find("meta", property="og:image")
+    if og_image:
+        _add(og_image.get("content"))
+    for img in root.find_all("img", src=True):
+        _add(img.get("src"))
+
+    if not candidates:
+        return None
+    # 残り1枚しかないなら飛ばさない（合成画像でも無いよりはまし）
+    if skip_lead_image and len(candidates) > 1:
+        return candidates[1]
+    return candidates[0]
+
+
+def parse_page(html: str, base_url: str, skip_lead_image: bool = False) -> PageContent:
     """HTMLから本文・リンク・サムネイルを取り出す。"""
     soup = BeautifulSoup(html, "lxml")
 
@@ -174,17 +213,9 @@ def parse_page(html: str, base_url: str) -> PageContent:
     elif soup.title and soup.title.string:
         title = soup.title.string.strip()
 
-    thumbnail = None
-    og_image = soup.find("meta", property="og:image")
-    if og_image and og_image.get("content"):
-        thumbnail = urljoin(base_url, og_image["content"].strip())
-    else:
-        # フィード配信分のHTMLには og:image が無いので本文中の最初の画像を使う
-        first_img = soup.find("img", src=True)
-        if first_img:
-            thumbnail = urljoin(base_url, first_img["src"].strip())
-
     root = _article_root(soup)
+    # フィード配信分のHTMLには og:image が無いので、その場合は本文中の画像を使う
+    thumbnail = _thumbnail_url(soup, root, base_url, skip_lead_image)
     # 見出しは本文の一部として扱う。共通部分を落とすと <header> ごと
     # 消えることがあり、「Home for Sale in ...」のような見出しの
     # キーワードを取りこぼすため、先頭に明示的に付ける。

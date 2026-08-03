@@ -611,3 +611,30 @@ def test_asking_alone_still_needs_a_price_nearby() -> None:
     text = "We began by asking the architect how the barn had been used before."
     result = signals.detect(text, [], SIGNALS)
     assert not result.is_candidate(SIGNALS.min_signal_score)
+
+
+def test_thumbnail_can_skip_a_composite_lead_image() -> None:
+    """審査UIのサムネイルも、合成画像ではなく2枚目にする。"""
+    html = """
+    <html><head>
+      <meta property="og:image" content="/wp/lead-composite-1600x900.jpg">
+    </head><body><article>
+      <img src="/wp/lead-composite-1024x576.jpg">
+      <p>The ranch house sits on two acres.</p>
+      <img src="/wp/exterior-pool.jpg">
+    </article></body></html>
+    """
+    kept = parse_page(html, "https://robbreport.com/a")
+    skipped = parse_page(html, "https://robbreport.com/a", skip_lead_image=True)
+
+    assert kept.thumbnail_url.endswith("lead-composite-1600x900.jpg")
+    assert skipped.thumbnail_url.endswith("exterior-pool.jpg")
+
+
+def test_thumbnail_falls_back_when_there_is_only_one_image() -> None:
+    html = (
+        '<html><head><meta property="og:image" content="/only.jpg"></head>'
+        "<body><article><p>x</p></article></body></html>"
+    )
+    page = parse_page(html, "https://robbreport.com/a", skip_lead_image=True)
+    assert page.thumbnail_url.endswith("only.jpg")

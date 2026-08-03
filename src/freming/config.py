@@ -106,6 +106,10 @@ class EditorialSource(BaseModel):
     # Crawl-delay の長いサイトでは false にして、フィード配信分だけで判定する
     # （リクエストがフィード1回で済み、待ち時間がなくなる）。
     fetch_article_pages: bool | None = None
+    # 代表画像（og:image / 記事の先頭画像）が、物件写真に人物の顔写真を丸く
+    # 重ねた合成画像になっているメディア向け。true にすると先頭の1枚を飛ばし、
+    # 2枚目から使う。審査UIのサムネイルと納品の 01.jpg の両方に効く。
+    skip_lead_image: bool = False
 
     def url_allowed(self, url: str) -> bool:
         import re
