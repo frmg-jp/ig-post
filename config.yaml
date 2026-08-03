@@ -407,6 +407,74 @@ listing_sources:
         - "/properties/[^/]*-\\d{6,}$"
       location_from: address
       max_details: 40
+
+  # ------------------------------------------------------------------
+  # 台湾の仲介サイト。2026-08-03、ユーザー判断により自動収集の対象にした。
+  #
+  # 経緯: 区分E(台湾)10件の実測で、robots.txt が許可し実際にページも取れる
+  # のは7件だった。うち信義房屋は服務條款が「本網站禁止使用非人為方式瀏覽
+  # 本站」（人間でない方法での閲覧を禁止）と明記しているため外した。
+  # 残る6件は規約ページをサイト内から見つけられず、禁止の確認が取れない。
+  # **確認できないことは許可されていることではない**が、その前提を承知の
+  # うえで取得する判断があった。
+  #
+  # 掲載写真は加盟店・売主に帰属する。区分C(IDX)と同じ構図で、こちらでは
+  # 権利者を機械的に分離できない。
+  #
+  # 守るものは変えない: robots.txt の尊重・3秒間隔・並列なし・
+  # User-Agent に連絡先・bot検知の回避は実装しない。
+  #
+  # 6件のうち収集できたのは2件。残りはJS描画または詳細ページへ到達できない:
+  #   Green-Acres PT … 地域一覧しか出ず、物件リンクはJS描画
+  #   HouseFun       … トップのリンクが2本だけ。全面JS
+  #   有巢氏房屋      … 一覧ページに物件リンクが出ない
+  #   中信房屋        … 同上（HTML 19KB）
+  #   永慶房屋        … 一覧に house/<id> が34件出るが、詳細ページは
+  #                     /house/<id> も /buy/house/<id> も404
+  # ------------------------------------------------------------------
+  - key: hbhousing
+    name: "住商不動產"
+    rank: B
+    mode: crawl
+    enabled: false
+    base_url: "https://www.hbhousing.com.tw"
+    note: "台湾。一覧ページ起点。詳細URLはクエリ文字列（?sn=...）"
+    crawl:
+      index_urls:
+        - "https://www.hbhousing.com.tw/buyhouse"
+      # 物件は /detail?sn=ZS203675 の形。パスだけでは区別できないので
+      # クエリまで含めて絞る。
+      detail_url_include:
+        - "/detail\\?sn=[A-Z0-9]+$"
+      # 台湾の価格表記。3,980萬 / 1.2億 など。半角スペースが入る例もある。
+      price_patterns:
+        - "\\d[\\d,]*(?:\\.\\d+)?\\s*(?:萬元|萬|億)(?!\\s*/\\s*坪)"
+      # 住所は漢字で、米国住所の書式を前提にした抽出が効かない。
+      # 誤った所在地を入れるより、国だけ入れて市はスコアリングに委ねる。
+      location_from: none
+      country: "Taiwan"
+      max_details: 40
+  - key: century21tw
+    name: "21世紀不動產（台湾）"
+    rank: B
+    mode: crawl
+    enabled: false
+    base_url: "https://www.century21.com.tw"
+    note: "台湾。全市・全区の一覧を入口にする。詳細は /buypage/<id>"
+    crawl:
+      index_urls:
+        - "https://www.century21.com.tw/buy/all-city/all-district/residence"
+      detail_url_include:
+        - "/buypage/\\d+$"
+      # **「/坪」が続くものは坪単価なので除く。** このサイトは詳細ページで
+      # 單價（51.38萬/坪）が總價（1,488萬）より先に出るため、除かないと
+      # 坪単価を売出価格として登録してしまう。
+      price_patterns:
+        - "\\d[\\d,]*(?:\\.\\d+)?\\s*(?:萬元|萬|億)(?!\\s*/\\s*坪)"
+      location_from: none
+      country: "Taiwan"
+      max_details: 40
+
   - key: zillow
     name: "Zillow"
     rank: B
