@@ -128,17 +128,18 @@
   .card {
     background: transparent; border: 0;
     border-bottom: 1px solid var(--line);
-    padding: 22px 0 22px 14px; margin-bottom: 0;
+    padding: 22px 0; margin-bottom: 0;
     display: grid; grid-template-columns: {{ thumb_px or 170 }}px 1fr; gap: 18px;
-    transition: border-color .12s, box-shadow .12s;
+    transition: border-color .12s;
   }
   .card:hover { border-bottom-color: var(--fg); }
   .card.no-thumb { grid-template-columns: 1fr; }
   /* グリッドの子は既定で min-width:auto なので、これがないと1行に固定した
      見出しが縮まず、カードごと横に伸びる（… で切れなくなる） */
   .card > div { min-width: 0; }
-  /* 囲みがないので、選択中は左の赤い罫で示す */
-  .card.sel { box-shadow: inset 2px 0 0 var(--hi); }
+  /* 選択中カードの表示は出さない（ユーザー指定）。J / K の選択位置と
+     A の効き先は画面に出ないので、キーボードで捌くときは注意する。
+     .sel はスクリプトが付け外ししているが、見た目は与えない。 */
   .card img {
     width: 100%; border-radius: var(--radius); object-fit: cover;
     aspect-ratio: 1; display: block; background: var(--fill);
