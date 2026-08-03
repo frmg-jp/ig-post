@@ -520,3 +520,23 @@ def test_reason_dropdown_has_a_fixed_width(client, conn) -> None:
     """選択肢の文が長いと、放っておくと行の大半を占める。"""
     _add(conn)
     assert ".actions select { width: 170px" in client.get("/").text
+
+
+def test_the_favicon_is_served(client) -> None:
+    """ファビコンは frmg.jp の実物を同梱している。
+
+    パッケージのデータとして配る（pyproject の package-data）ので、
+    配布物から抜けると 404 になる。タブの見分けが付かなくなるだけだが、
+    気づきにくいのでここで止める。
+    """
+    response = client.get("/static/favicon.ico")
+    assert response.status_code == 200
+    assert response.content[:4] == b"\x00\x00\x01\x00"   # ICO のシグネチャ
+
+    apple = client.get("/static/apple-touch-icon.png")
+    assert apple.status_code == 200
+    assert apple.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_the_pages_point_at_the_favicon(client) -> None:
+    assert '<link rel="icon" type="image/x-icon" href="/static/favicon.ico">' in client.get("/").text

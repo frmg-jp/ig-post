@@ -20,6 +20,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from freming.config import Config, load_config
@@ -45,6 +46,9 @@ from freming.logging_setup import get_logger, setup_logging
 log = get_logger(__name__)
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
+# ファビコンなどの静的ファイル。frmg.jp の実物を置いてある。
+# pyproject の package-data に web/static/* を入れてあるので配布物にも入る。
+STATIC_DIR = Path(__file__).parent / "static"
 
 # 非承認の定型理由。毎回自由入力させると表記がばらつき、[7] の
 # タグ分類が効かなくなる。よく使うものを固定文にしておく。
@@ -98,6 +102,7 @@ def create_app(
     app = FastAPI(title="FREMING CURATED 審査", lifespan=lifespan)
     if auth is not None:
         app.add_middleware(BasicAuthMiddleware, auth=auth)
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     templates.env.filters["axes"] = _axes
     templates.env.filters["flag"] = flag

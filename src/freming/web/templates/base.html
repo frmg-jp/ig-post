@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}FREMING CURATED 審査{% endblock %}</title>
+{# ファビコンは frmg.jp の実物（wp_freming/img/icon/）をそのまま置いている。
+   審査UIを公開するようになり、ブラウザのタブに他の業務と並ぶため、
+   本家と同じ FG マークで見分けられるようにする。 #}
+<link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
 {# 納品待ちが残っているタブだけ自動更新する。納品はバックグラウンドで
    進むので、放っておいても「納品済」に変わっていくようにする。 #}
 {% if refresh_sec %}<meta http-equiv="refresh" content="{{ refresh_sec }}">{% endif %}
