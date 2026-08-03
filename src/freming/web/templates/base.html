@@ -7,15 +7,16 @@
 {# 納品待ちが残っているタブだけ自動更新する。納品はバックグラウンドで
    進むので、放っておいても「納品済」に変わっていくようにする。 #}
 {% if refresh_sec %}<meta http-equiv="refresh" content="{{ refresh_sec }}">{% endif %}
-{# frmg.jp と同じ二書体構成にする。和文は明朝、欧文と数字は IBM Plex Mono。
+{# frmg.jp と同じ二書体構成にする。和文は明朝、欧文と数字は等幅。
    本家は Adobe Fonts の hiragino-mincho-pron / ibm-plex-mono を読んでいるが、
    あのキットは frmg.jp ドメインでしか使えない。そこで
-   - 欧文: IBM Plex Mono（同じ書体が Google Fonts にある）
+   - 欧文・数字: 端末の等幅（本家テーマの --font-mono と同じ並び）
    - 和文: 端末の Hiragino Mincho ProN → 游明朝 → Noto Serif JP
-   の順に落とす。Mac なら本家とほぼ同じ字面になる。 #}
+   の順に落とす。Mac なら本家とほぼ同じ字面になる。
+   Web フォントは和文の保険の1本だけにして、読み込みを軽くしている。 #}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Serif+JP:wght@300;400;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@300;400;600&display=swap" rel="stylesheet">
 <style>
   /* ------------------------------------------------------------------
      ブランドトークン。値は frmg.jp のテーマ CSS（wp_freming/style.css）の
@@ -39,10 +40,13 @@
     --hi: #ff3500;        /* 本家の唯一の彩度。ホバーとスコアだけに使う */
     --radius: 0;          /* 角は立てる。本家に角丸はない */
     --serif: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif;
-    /* 等幅の指定でも、和文が混じる箇所（タグ・ボタン）は明朝に落とす。
-       ここを monospace で終えると、その部分だけゴシックになる */
-    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo,
-            "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif;
+    /* 本家テーマの --font-mono と同じ並び。ただし総称 monospace の直前に
+       明朝を挟む。ここに挙がっているのは欧文専用の書体ばかりなので、
+       そのまま monospace で終えると、タグやボタンの和文だけゴシックに
+       落ちる。英字・数字の解決順はこの追加では変わらない。 */
+    --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+            "Liberation Mono", "Courier New",
+            "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", monospace;
     /* 本家の letter-spacing は和欧とも normal。広げない */
     --track-label: 0;
   }
