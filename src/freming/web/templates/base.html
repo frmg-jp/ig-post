@@ -47,7 +47,12 @@
        落としてあり、アクセントの赤とは別物に見える */
     --ok: #1f5c3d;
     --ng: #97372a;
+    /* 塗ったボタンの上に載る文字。地の #efefef ではなく白にする
+       （承認・非承認は面で塗るので、抜き文字はしっかり抜く） */
+    --on-fill: #fff;
     --hi: #ff3500;        /* 本家の唯一の彩度。ホバーとスコアだけに使う */
+    /* 操作列の部品の高さ。プルダウン・自由記入・ボタンを1つに揃える */
+    --control-h: 32px;
     --radius: 0;          /* 角は立てる。本家に角丸はない */
     --serif: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif;
     /* 本家テーマの --font-mono と同じ並び。ただし総称 monospace の直前に
@@ -212,8 +217,12 @@
     margin-top: 8px;
   }
   .actions form { display: contents; }
+  /* 操作列の部品は高さを1つに揃える。プルダウン・自由記入・ボタンで
+     既定の行の高さが違うため、放っておくと段違いに並ぶ。
+     box-sizing: border-box を前提に、縦の padding ではなく height で決める。 */
   select, input[type=text] {
-    font: inherit; font-size: 13px; padding: 6px 8px;
+    font: inherit; font-size: 13px; padding: 0 8px;
+    height: var(--control-h); line-height: normal;
     border: 1px solid var(--line); border-radius: var(--radius);
     background: var(--surface); color: var(--fg); letter-spacing: inherit;
   }
@@ -226,21 +235,33 @@
   input[type=text].free { flex: 1; min-width: 140px; }
   button {
     font: inherit; font-size: 12px; font-weight: 500;
-    letter-spacing: var(--track-label); padding: 7px 16px;
+    letter-spacing: var(--track-label); padding: 0 16px;
+    height: var(--control-h);
+    display: inline-flex; align-items: center; justify-content: center;
     border-radius: var(--radius); cursor: pointer;
     border: 1px solid var(--line); background: var(--surface);
     color: var(--muted); white-space: nowrap; transition: all .12s;
   }
   button:hover { color: var(--fg); border-color: var(--fg); }
-  button.ok { border-color: var(--ok); color: var(--ok); font-weight: 500; }
-  button.ok:hover { background: var(--ok); color: var(--bg); }
-  button.ng { border-color: var(--ng); color: var(--ng); }
-  button.ng:hover { background: var(--ng); color: var(--bg); }
+
+  /* 承認・非承認は塗りを既定にする。審査中に最も押す2つで、
+     一覧を流し見しているときに面で見つけられる方が速い。
+     マウスを乗せたときは線だけに戻す（押す直前に下の行が透けて見える）。 */
+  button.ok {
+    background: var(--ok); border-color: var(--ok); color: var(--on-fill);
+  }
+  button.ok:hover { background: var(--surface); color: var(--ok); }
+  button.ng {
+    background: var(--ng); border-color: var(--ng); color: var(--on-fill);
+  }
+  button.ng:hover { background: var(--surface); color: var(--ng); }
 
   a.drive {
     font-size: 11px; color: var(--hi); text-decoration: none;
     letter-spacing: var(--track-label);
-    border: 1px solid var(--hi); border-radius: var(--radius); padding: 6px 14px;
+    border: 1px solid var(--hi); border-radius: var(--radius); padding: 0 14px;
+    height: var(--control-h);
+    display: inline-flex; align-items: center; justify-content: center;
   }
   a.drive:hover { background: var(--hi); color: var(--bg); }
 
