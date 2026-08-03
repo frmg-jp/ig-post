@@ -458,3 +458,19 @@ def test_auto_delivery_off_falls_back_to_the_cli_guidance(config, conn) -> None:
     body = client.get("/?status=delivered").text
     assert "自動納品 ON" not in body
     assert "freming.cli deliver" in body
+
+
+def test_area_shows_a_country_flag(client, conn) -> None:
+    """審査中は文字を読む前に「どこの国か」が分かるようにする。"""
+    _add(conn, location_city="Lisbon", location_country="Portugal")
+    body = client.get("/").text
+    assert "🇵🇹" in body
+    assert 'class="flag"' in body
+
+
+def test_unknown_country_shows_no_flag(client, conn) -> None:
+    """当てずっぽうの旗を出さない。所在地は審査の判断材料なので誤りは害になる。"""
+    _add(conn, location_city=None, location_country=None)
+    body = client.get("/").text
+    assert 'class="flag"' not in body
+    assert "所在地不明" in body

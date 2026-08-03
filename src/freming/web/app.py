@@ -36,6 +36,7 @@ from freming.db.repository import (
     set_series,
 )
 from freming.delivery.worker import DeliveryWorker
+from freming.web.flags import flag
 from freming.logging_setup import get_logger, setup_logging
 
 log = get_logger(__name__)
@@ -88,6 +89,7 @@ def create_app(
     app = FastAPI(title="FREMING CURATED 審査", lifespan=lifespan)
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     templates.env.filters["axes"] = _axes
+    templates.env.filters["flag"] = flag
 
     def _conn() -> DbConnection:
         return connect(config.app.target())

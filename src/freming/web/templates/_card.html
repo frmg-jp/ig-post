@@ -16,8 +16,12 @@
       <span class="score {{ 'hi' if row['score'] and row['score'] >= highlight else '' }}">
         {{ '%.1f'|format(row['score']) if row['score'] is not none else '未採点' }}
       </span>
-      {# エリアは審査中に最も参照する属性なので、点数の右に置く #}
+      {# エリアは審査中に最も参照する属性なので、点数の右に置く。
+         国旗は文字を読む前に「どこの国か」が分かるようにするためのもの。
+         知らない国では空になるので、間違った旗は出ない。 #}
+      {% set country_flag = row["location_country"] | flag %}
       <span class="area">
+        {% if country_flag %}<span class="flag">{{ country_flag }}</span>{% endif %}
         {{ [row["location_city"], row["location_country"]] | select | join(", ") or "所在地不明" }}
       </span>
     </div>
