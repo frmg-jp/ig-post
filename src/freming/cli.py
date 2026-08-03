@@ -110,14 +110,25 @@ def _cmd_probe_feed(args: argparse.Namespace) -> int:
         median = chars[len(chars) // 2]
         # 「10件」はフィードの窓であって1日分ではない。何日分なのかまで
         # 出さないと、審査に上がる件数の見積もりが桁で外れる。
+        # 本/日 は候補が0件でも意味がある（そのソースがどれだけ動いているか）。
+        # 週あたりの件数だけを出すと、動いていないのか候補率が低いのか
+        # 区別できない。
+        rate = stats.entries_per_day
+        pace = f"{rate:>5.1f}本/日" if rate is not None else " ペース不明"
         weekly = stats.candidates_per_week
-        pace = f"  審査 週{weekly:.1f}件" if weekly is not None else "  ペース不明"
+        if weekly is None:
+            estimate = ""
+        elif stats.weekly_is_reliable:
+            estimate = f"  審査 週{weekly:.1f}件"
+        else:
+            # 抜粋配信では候補が構造的に0になる。0件と言い切らない。
+            estimate = "  審査 要再測定（抜粋配信）"
         results.append(
             (
                 True,
                 url,
                 f"{stats.feed_entries:>3}件  本文中央値 {median:>5}字  "
-                f"候補 {stats.inserted}件{pace}",
+                f"{pace}  候補 {stats.inserted}件{estimate}",
             )
         )
         if args.details:
@@ -134,6 +145,13 @@ def _cmd_probe_feed(args: argparse.Namespace) -> int:
     print(f"\n読めたフィード {len(usable)} / {len(results)} 件")
     if usable:
         print("候補が出たものを config.yaml の editorial_sources に登録してください。")
+    print(
+        "\n※ probe は記事ページを取らず、フィードが配信した本文だけで判定します。"
+        "抜粋配信の\n"
+        "   フィードは候補が構造的に0件になるため、「審査 要再測定」と出したものは"
+        "collect で\n"
+        "   確かめてください（fetch_article_pages: true で登録してから）。"
+    )
     return 0
 
 

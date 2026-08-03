@@ -126,6 +126,32 @@ class CollectStats:
             return None
         return pace * (self.inserted / self.feed_entries) * 7
 
+    # 抜粋しか配信しないフィードの目安。thespaces が240字で、記事ページを
+    # 取ると 4/10 が候補になった。この長さでは販売シグナルが本文に無い。
+    EXCERPT_CHARS = 800
+
+    @property
+    def excerpt_only(self) -> bool:
+        """フィードが抜粋しか配信していないか。
+
+        probe は必ず fetch_article_pages=False で判定するため、抜粋配信の
+        フィードでは候補が構造的に0件になる。「候補0件＝使えない」と
+        読ませないために、この状態を呼び出し側へ伝える。
+        """
+        chars = sorted(e.text_chars for e in self.explanations)
+        if not chars:
+            return False
+        return chars[len(chars) // 2] < self.EXCERPT_CHARS
+
+    @property
+    def weekly_is_reliable(self) -> bool:
+        """週あたりの件数を信じてよいか。
+
+        抜粋配信で候補0件のときは、判定が本文不足で落ちているだけの
+        可能性が高い。数字としては下限であって見込みではない。
+        """
+        return not (self.excerpt_only and self.inserted == 0)
+
     def pace_report(self) -> str:
         """配信ペースと、そこから見た週あたりの候補数。"""
         if not self.entry_dates:
@@ -152,6 +178,15 @@ class CollectStats:
             lines.append(
                 f"  候補 {self.inserted}件 / {self.feed_entries}件 "
                 f"→ 審査に上がるのは 週 {weekly:.1f} 件の見込み"
+            )
+        if not self.weekly_is_reliable:
+            lines.append(
+                "  ※ このフィードは抜粋しか配信していません。probe は記事ページを"
+                "取らずに判定するため、\n"
+                "     候補0件は本文不足によるもので、実際の件数ではありません。"
+                "確かめるには:\n"
+                "       config.yaml に fetch_article_pages: true で登録して\n"
+                "       python -m freming.cli collect --source <key> --dry-run --explain"
             )
         if len(self.entry_dates) < self.feed_entries:
             lines.append(

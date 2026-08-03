@@ -681,3 +681,38 @@ def test_pace_report_shows_the_window_and_the_weekly_estimate() -> None:
     assert "2026-07-27" in report and "2026-08-03" in report
     assert "7.0日分" in report
     assert "週" in report
+
+
+def test_excerpt_feed_is_not_reported_as_zero_candidates() -> None:
+    """抜粋配信では候補が構造的に0になる。0件と言い切ってはいけない。
+
+    thespaces は本文中央値240字で probe の候補0件だったが、記事ページを
+    取ると 4/10 が候補になった。probe の数字だけを見て切ると、いま一番
+    歩留まりの良いソースを捨てることになる。
+    """
+    from freming.collect.editorial import Explanation
+
+    stats = _stats_with_dates([0, 4], entries=10, inserted=0)
+    stats.explanations = [
+        Explanation(url=f"https://ex.com/{i}", title="t", score=0,
+                    text_chars=240, from_feed_only=True)
+        for i in range(10)
+    ]
+    assert stats.excerpt_only is True
+    assert stats.weekly_is_reliable is False
+    assert "抜粋しか配信していません" in stats.pace_report()
+
+
+def test_full_text_feed_with_no_candidates_is_believed() -> None:
+    """本文が厚くて候補0件なら、それは本当に候補が無い。"""
+    from freming.collect.editorial import Explanation
+
+    stats = _stats_with_dates([0, 4], entries=10, inserted=0)
+    stats.explanations = [
+        Explanation(url=f"https://ex.com/{i}", title="t", score=0,
+                    text_chars=4500, from_feed_only=True)
+        for i in range(10)
+    ]
+    assert stats.excerpt_only is False
+    assert stats.weekly_is_reliable is True
+    assert "抜粋" not in stats.pace_report()
