@@ -89,10 +89,11 @@
   }
 
   /* ---- マストヘッド ------------------------------------------------- */
+  /* 罫は引かない。地色が同じで sticky なので、スクロールすると本文が
+     ヘッダの下へ潜り込む。区切りは余白で作る。 */
   header {
     position: sticky; top: 0; z-index: 10; background: var(--bg);
-    border-bottom: 1px solid var(--line-strong);
-    padding: 14px 28px 12px;
+    padding: 14px 28px 16px;
     display: flex; gap: 22px; align-items: baseline; flex-wrap: wrap;
   }
   /* 本家のロゴ「FRMG™」と同じ、等幅・大文字・字送りなし */
