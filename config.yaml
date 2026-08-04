@@ -451,11 +451,9 @@ listing_sources:
         - "\\d[\\d,]*(?:\\.\\d+)?\\s*(?:萬元|萬|億)(?!\\s*/\\s*坪)"
       # 住所は漢字で、米国住所の書式を前提にした抽出が効かない。
       # 誤った所在地を入れるより、国だけ入れて市はスコアリングに委ねる。
-      location_from: none
-      # 住所が漢字でこのサイトからは市名を取れない。所在地の無い物件は
-      # 既定で落とす（require_location: true）が、それでは1件も入らない
-      # ので、このソースだけ外す。国だけ入れて市はスコアリングに委ねる。
-      require_location: false
+      # 台湾の住所は「縣市＋區」が定型なので、米国住所と同じように錨に
+      # できる。所在地を取れなかったものは他のソースと同じく落とす。
+      location_from: tw_address
       country: "Taiwan"
       max_details: 40
   - key: century21tw
@@ -475,11 +473,9 @@ listing_sources:
       # 坪単価を売出価格として登録してしまう。
       price_patterns:
         - "\\d[\\d,]*(?:\\.\\d+)?\\s*(?:萬元|萬|億)(?!\\s*/\\s*坪)"
-      location_from: none
-      # 住所が漢字でこのサイトからは市名を取れない。所在地の無い物件は
-      # 既定で落とす（require_location: true）が、それでは1件も入らない
-      # ので、このソースだけ外す。国だけ入れて市はスコアリングに委ねる。
-      require_location: false
+      # 台湾の住所は「縣市＋區」が定型なので、米国住所と同じように錨に
+      # できる。所在地を取れなかったものは他のソースと同じく落とす。
+      location_from: tw_address
       country: "Taiwan"
       max_details: 40
 

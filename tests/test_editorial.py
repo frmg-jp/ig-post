@@ -762,7 +762,10 @@ def _stats_ending(days_ago: float, span: float, count: int = 15, lookback: int =
 
     from freming.collect.editorial import CollectStats
 
-    now = datetime(2026, 8, 3, tzinfo=UTC)
+    # 基準は**実行時の現在時刻**にする。日付を焼き込むと、
+    # days_since_newest() が実時計と比べるため、日を跨いだ日から
+    # 何も変えていないのに落ちる（実際 2 回踏んだ）。
+    now = datetime.now(UTC)
     stats = CollectStats(source="t", lookback_days=lookback)
     stats.feed_entries = count
     stats.inserted = 1

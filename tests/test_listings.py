@@ -13,6 +13,7 @@ from freming.collect.listings import (
     _first_price,
     find_address,
     pick_address,
+    pick_tw_address,
 )
 from freming.config import ListingCrawl, ListingSource, load_config
 from freming.db.connection import connect
@@ -425,17 +426,78 @@ def test_require_location_can_be_turned_off(db) -> None:
     assert row["location_country"] == "Taiwan"
 
 
-def test_the_configured_taiwan_sources_are_exempt() -> None:
-    """config 側の取り違えを止める。
+# --- 台湾の住所 ---------------------------------------------------------
+#
+# 「住所が漢字だから取れない」は誤り。台湾の住所は 縣市＋區 が定型で、
+# 米国住所と同じように錨にできる。実測した2サイトの実物で確かめる。
 
-    location_from: none のまま require_location を既定（true）にすると、
-    そのソースは1件も登録できない。設定として噛み合っていないので落とす。
+
+def test_taiwan_address_from_og_title() -> None:
+    """住商不動產の og:title は先頭が住所。"""
+    found = pick_tw_address("台北市中山區台北市中正國小旁靜巷雅寓 - 住商不動產", "")
+    assert found == ("台北市中山區", "台北市")
+
+
+def test_taiwan_address_from_the_label() -> None:
+    """21世紀不動產は og:title に住所が無く、本文の「地址」の後にある。"""
+    found = pick_tw_address(
+        "㊝大明方正邊間三樓 - 21世紀不動產",
+        "類型/現況 公寓 [住宅] 地址 新北市板橋區大明街 坪數 28.96 坪",
+    )
+    assert found == ("新北市板橋區", "新北市")
+
+
+def test_taiwan_county_seat_city_is_matched() -> None:
+    """縣轄市（新竹縣竹北市）。第2階層が 市 で終わる形も拾う。"""
+    found = pick_tw_address(None, "地址：新竹縣竹北市光明六路")
+    assert found == ("新竹縣竹北市", "新竹縣")
+
+
+def test_taiwan_traditional_form_is_normalised() -> None:
+    """臺 と 台 が混ざる。同じ市が2通りでDBに入らないよう寄せる。"""
+    assert pick_tw_address("臺北市信義區の物件", "") == ("台北市信義區", "台北市")
+
+
+def test_the_company_address_without_a_district_is_not_matched() -> None:
+    """住商のフッター「台北市敦化南路二段267號」は 區 が無いので掛からない。
+
+    これが効くから「ページ全体で1種類だけ」の判定が使える。
     """
-    for source in CONFIG.listing_sources:
-        crawl = source.crawl
-        if crawl is None or crawl.location_from != "none":
-            continue
-        assert not crawl.require_location, (
-            f"{source.key} は所在地を取らない設定なので、"
-            "require_location: false にしないと1件も入りません"
-        )
+    assert pick_tw_address(None, "地址：台北市敦化南路二段267號3F之2 電話：0800-212-306") is None
+
+
+def test_two_different_taiwan_cities_are_refused() -> None:
+    """どれが物件の住所か決められないときは入れない。"""
+    assert pick_tw_address(None, "台北市中山區の物件 / 高雄市苓雅區の物件") is None
+
+
+def test_taiwan_listing_gets_a_city(db) -> None:
+    url = "https://stub.example.com/p/700001"
+    source = _source(
+        index_urls=["https://stub.example.com/list"],
+        detail_url_include=[r"/p/\d+"],
+        price_patterns=[r"\d[\d,]*(?:\.\d+)?\s*(?:萬元|萬|億)(?!\s*/\s*坪)"],
+        location_from="tw_address",
+        country="Taiwan",
+    )
+    detail = """
+    <html><head><meta property="og:title" content="台北市中山區靜巷雅寓"></head>
+    <body><div>單價 55 萬 / 坪</div><div>總價 3,980 萬</div>
+    <p>採光良好。</p>
+    <footer>地址：台北市敦化南路二段267號3F之2</footer></body></html>
+    """
+    pages = {
+        "https://stub.example.com/list": f'<html><body><a href="{url}">物件</a></body></html>',
+        url: detail,
+    }
+    stats = ListingCollector(CONFIG, StubClient(pages), db).collect(source)
+
+    assert stats.inserted == 1
+    row = db.execute(
+        "SELECT price, location_city, location_country FROM properties WHERE source_url = ?",
+        (url,),
+    ).fetchone()
+    # 坪単価（55 萬 / 坪）ではなく総額を取る
+    assert row["price"] == "3,980 萬"
+    assert row["location_city"] == "台北市"
+    assert row["location_country"] == "Taiwan"

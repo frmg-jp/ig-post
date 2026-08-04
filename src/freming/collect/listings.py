@@ -52,6 +52,19 @@ _US_ADDRESS_RE = re.compile(
     r"([0-9][^,\n]{2,60}?),\s*([A-Za-z][A-Za-z .'\-]{1,38}?),?\s+([A-Z]{2})\s+(\d{5})(?:-\d{4})?"
 )
 
+# 台湾の住所。「縣市 + 區/鄉/鎮/市」がほぼ例外なく先頭に来る定型なので、
+# 米国住所と同じやり方で錨にできる。
+#
+#   住商不動產    og:title  "台北市中山區台北市中正國小旁靜巷雅寓"
+#   21世紀不動產  本文       "地址 新北市板橋區大明街"
+#
+# 第2階層に 市 を含めるのは 縣轄市（新竹縣竹北市 など）があるため。
+# 会社の住所と衝突しないかは実測した。住商のフッターは
+# 「台北市敦化南路二段267號3F之2」で 區 を書いておらず、この式に
+# 一致しない。両サイトとも、ページ全体で一致する 縣市+區 の組は1種類だけ
+# だった（住商 3箇所/1種類・21世紀 15箇所/1種類）。
+_TW_ADDRESS_RE = re.compile(r"([一-鿿]{1,3}[縣市])([一-鿿]{1,4}[區鄉鎮市])")
+
 
 @dataclass
 class ListingStats:
@@ -146,6 +159,56 @@ def pick_address(url: str, title: str | None, page_text: str) -> tuple[str, str]
 
     unique_cities = {city for _, city in found}
     if len(unique_cities) == 1:
+        return found[0]
+    return None
+
+
+def _tw_addresses(text: str | None) -> list[tuple[str, str]]:
+    """台湾の住所を出現順に返す。(縣市+區, 縣市)。
+
+    市は 台北市 のような直轄市を指す。區 まで含めた文字列は、審査UIで
+    タイトルが無い物件の見出しに使う。
+    """
+    if not text:
+        return []
+    # 臺 と 台 はどちらも使われる（住商は「台北市」、21世紀は「臺北市」）。
+    # 同じ市が2通りの表記でDBに入ると、集計も重点エリアの突き合わせも
+    # ずれるので、常用の 台 に寄せる。
+    return [
+        (f"{c}{d}".replace("臺", "台"), c.replace("臺", "台"))
+        for c, d in _TW_ADDRESS_RE.findall(text)
+    ]
+
+
+def pick_tw_address(title: str | None, page_text: str) -> tuple[str, str] | None:
+    """台湾の物件ページから所在地を選ぶ。
+
+    米国版（pick_address）はURLの slug に市名が出ることを頼りにしていたが、
+    台湾の物件URLは数字のIDなので使えない。代わりに:
+
+      1. og:title / <title> にあればそれ（住商は先頭が住所）
+      2. 「地址」の直後にあるもの（21世紀はここに出る）
+      3. ページ全体で 縣市 が1種類しかなければそれ
+      4. 決められなければ None
+
+    3 が効くのは、会社の住所が 區 を伴わない書き方（台北市敦化南路…）に
+    なっていて、この式に掛からないため。掛かる書き方のサイトを足すときは
+    ここで複数種類が出るので、None になって落ちる（誤った所在地は入らない）。
+    """
+    from_title = _tw_addresses(title)
+    if from_title:
+        return from_title[0]
+
+    for match in re.finditer(r"地址[：:\s]*", page_text):
+        tail = page_text[match.end() : match.end() + 40]
+        found = _tw_addresses(tail)
+        if found:
+            return found[0]
+
+    found = _tw_addresses(page_text)
+    if not found:
+        return None
+    if len({city for _, city in found}) == 1:
         return found[0]
     return None
 
@@ -317,6 +380,8 @@ class ListingCollector:
         address = None
         if crawl.location_from == "address":
             address = pick_address(url, page.title, whole_text)
+        elif crawl.location_from == "tw_address":
+            address = pick_tw_address(page.title, whole_text)
 
         if crawl.require_location and address is None:
             # 所在地の分からない物件は入れない。エリアはスコアの2割を占め、

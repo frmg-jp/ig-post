@@ -158,10 +158,12 @@ class ListingCrawl(BaseModel):
     # 価格の書式。本文から最初に一致したものを売出価格として扱う。
     price_patterns: list[str] = Field(default_factory=lambda: [r"\$\s?\d[\d,]{4,}"])
     # 所在地の取り方。
-    #   address … 表示されている米国住所（"..., Oak Lawn IL 60453"）から取る。
-    #             og:title を先に見て、無ければページ全体から探す。
-    #   none    … 取らない。スコアリング側の推定に委ねる。
-    location_from: Literal["address", "none"] = "address"
+    #   address    … 表示されている米国住所（"..., Oak Lawn IL 60453"）から取る。
+    #                 og:title を先に見て、無ければページ全体から探す。
+    #   tw_address … 台湾の住所（"台北市中山區..."）から取る。og:title →
+    #                 「地址」の直後 → ページ全体で1種類だけ、の順に見る。
+    #   none       … 取らない。スコアリング側の推定に委ねる。
+    location_from: Literal["address", "tw_address", "none"] = "address"
     # 所在地を取れなかった物件を候補にしないか。
     #
     # エリアはスコアの2割を占める軸で、空だと採点が成り立たない。
