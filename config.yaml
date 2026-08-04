@@ -436,7 +436,7 @@ listing_sources:
     name: "住商不動產"
     rank: B
     mode: crawl
-    enabled: false
+    enabled: true
     base_url: "https://www.hbhousing.com.tw"
     note: "台湾。一覧ページ起点。詳細URLはクエリ文字列（?sn=...）"
     crawl:
@@ -460,7 +460,7 @@ listing_sources:
     name: "21世紀不動產（台湾）"
     rank: B
     mode: crawl
-    enabled: false
+    enabled: true
     base_url: "https://www.century21.com.tw"
     note: "台湾。全市・全区の一覧を入口にする。詳細は /buypage/<id>"
     crawl:
