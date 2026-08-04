@@ -435,10 +435,15 @@ listing_sources:
   - key: hbhousing
     name: "住商不動產"
     rank: B
-    mode: crawl
+    # **2026-08-04 に crawl から降格。** 収集自体は動いたが、上がってきた
+    # 物件が一般住宅ばかりで審査に耐えなかった（写真に社名ロゴ、様式不明の
+    # マンション）。仲介サイトは在庫がそのまま流れる作りで、編集側の
+    # キュレーションが一切かからない。良い物件を見つけたときに手でURLを
+    # 投入する経路だけ残す。crawl: の設定は再開できるよう残置。
+    mode: manual_only
     enabled: true
     base_url: "https://www.hbhousing.com.tw"
-    note: "台湾。一覧ページ起点。詳細URLはクエリ文字列（?sn=...）"
+    note: "台湾。手動URL投入のみ。一覧ページ起点の設定は残置（?sn=... 形式）"
     crawl:
       index_urls:
         - "https://www.hbhousing.com.tw/buyhouse"
@@ -459,10 +464,11 @@ listing_sources:
   - key: century21tw
     name: "21世紀不動產（台湾）"
     rank: B
-    mode: crawl
+    # hbhousing と同じ理由で 2026-08-04 に crawl から降格。
+    mode: manual_only
     enabled: true
     base_url: "https://www.century21.com.tw"
-    note: "台湾。全市・全区の一覧を入口にする。詳細は /buypage/<id>"
+    note: "台湾。手動URL投入のみ。一覧起点の設定は残置（詳細は /buypage/<id>）"
     crawl:
       index_urls:
         - "https://www.century21.com.tw/buy/all-city/all-district/residence"
@@ -705,6 +711,11 @@ scoring:
   thresholds:
     min_to_persist: 30         # これ未満は保存はするが一覧デフォルト非表示
     highlight_above: 80
+    # **物語性の足切り。** これ未満は他の軸が満点でも0点にする。
+    # 加重平均だけで見ていたころ、台湾の仲介物件は story=0 でも
+    # 「販売中(20) + 重点エリア(20) + ランクB(6) + 価格あり(5) + ジャンル不明(3)」
+    # の54点で min_to_persist を超え、中身に関係なく審査に上がっていた。
+    story_min: 40
   feedback:
     recent_reasons_in_prompt: 30   # 直近N件の非承認理由をプロンプトに含める
     tagging_batch_size: 10         # N件溜まるごとに reason_tag を付与
@@ -754,6 +765,13 @@ delivery:
 images:
   max_per_property: 10
   min_short_edge_px: 800           # ロゴ・アイコン混入対策
+  # **単色の「写真なし」画像を持つ物件は収集時に落とす。**
+  # Dream Town は写真が未登録の物件にも og:image を返し、中身は
+  # 1280x800 の #D0D0D0 一色。寸法が本物と同じなので min_short_edge_px
+  # では落ちず、審査UIに灰色の四角が出ていた。
+  # 実測: 単色 0.00 / 薄いグラデーション 2.29 / 実画像 22.27
+  require_real_photo: true
+  flat_stddev_max: 3.0
   allowed_content_types: ["image/jpeg", "image/png", "image/webp"]
   work_dir: "data/images"
 

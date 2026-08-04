@@ -260,6 +260,11 @@ class ScoringWeights(BaseModel):
 class ScoringThresholds(BaseModel):
     min_to_persist: float = 30.0
     highlight_above: float = 80.0
+    # **story はゲートであって加点項目ではない。** 承認基準の1・2（前歴が
+    # 目に見えるか／様式が特定できるか）は本来 yes/no で、加重平均に混ぜると
+    # 他の軸の下駄で埋まってしまう。実際、台湾の仲介物件は story が 0 でも
+    # 54点（min_to_persist の1.8倍）に達して審査に上がっていた。
+    story_min: float = 40.0
 
 
 class FeedbackConfig(BaseModel):
@@ -354,6 +359,11 @@ class DeliveryConfig(BaseModel):
 class ImagesConfig(BaseModel):
     max_per_property: int = 10
     min_short_edge_px: int = 800
+    # 代表画像が単色（＝サイト側の「写真なし」プレースホルダ）の物件を
+    # 収集時に落とす。寸法は本物と同じことが多く min_short_edge_px では
+    # 落ちないため、別の条件として持つ。
+    require_real_photo: bool = True
+    flat_stddev_max: float = 3.0
     allowed_content_types: list[str] = Field(
         default_factory=lambda: ["image/jpeg", "image/png", "image/webp"]
     )

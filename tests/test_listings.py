@@ -349,9 +349,13 @@ def _ambiguous(price: str) -> str:
 
     会社の住所と他物件の住所が並び、URLの slug にどちらの市名も出ない。
     pick_address はこの状況で None を返す。
+
+    写真はあることにしておく。ここで見たいのは所在地の判定なので、
+    写真の有無で結果が変わらないようにする。
     """
     return f"""
-    <html><head><meta property="og:title" content="Charming home"></head>
+    <html><head><meta property="og:title" content="Charming home">
+    <meta property="og:image" content="https://example.com/photo.jpg"></head>
     <body><h2>Charming home</h2><div class="price">{price}</div>
     <footer>1 Office Plaza, West Hollywood CA 90069</footer>
     <div>Nearby: 9 Other Road, Elsewhere CA 90210</div>
@@ -481,7 +485,8 @@ def test_taiwan_listing_gets_a_city(db) -> None:
         country="Taiwan",
     )
     detail = """
-    <html><head><meta property="og:title" content="台北市中山區靜巷雅寓"></head>
+    <html><head><meta property="og:title" content="台北市中山區靜巷雅寓">
+    <meta property="og:image" content="https://example.com/photo.jpg"></head>
     <body><div>單價 55 萬 / 坪</div><div>總價 3,980 萬</div>
     <p>採光良好。</p>
     <footer>地址：台北市敦化南路二段267號3F之2</footer></body></html>
@@ -501,3 +506,127 @@ def test_taiwan_listing_gets_a_city(db) -> None:
     assert row["price"] == "3,980 萬"
     assert row["location_city"] == "台北市"
     assert row["location_country"] == "Taiwan"
+
+
+# --- 写真の歯止め -------------------------------------------------------
+#
+# 物件情報サイトは写真が未登録の物件にも og:image を返す。中身は単色の板で
+# 寸法は本物と同じ（Dream Town は 1280x800 の #D0D0D0）ため、
+# images.min_short_edge_px では落ちない。審査UIに灰色の四角が並んだ回帰。
+
+
+def _photo_bytes(colour) -> bytes:
+    from io import BytesIO
+
+    from PIL import Image
+
+    buffer = BytesIO()
+    if colour == "noise":
+        image = Image.effect_noise((512, 512), 60).convert("RGB")
+    else:
+        image = Image.new("RGB", (1280, 800), colour)
+    image.save(buffer, "JPEG", quality=90)
+    return buffer.getvalue()
+
+
+class PhotoStubClient(StubClient):
+    """本文に加えて、画像URL → バイト列 も返せるクライアント。"""
+
+    def __init__(self, pages: dict[str, str], photos: dict[str, bytes]) -> None:
+        super().__init__(pages)
+        self.photos = photos
+
+    def get(self, url: str):
+        if url in self.photos:
+            self.requested.append(url)
+            response = StubResponse("")
+            response.content = self.photos[url]
+            return response
+        return super().get(url)
+
+
+def _with_photo(address: str, price: str, photo_url: str) -> str:
+    return f"""
+    <html><head><meta property="og:title" content="{address}">
+    <meta property="og:image" content="{photo_url}"></head>
+    <body><h2>{address}</h2><div class="price">{price}</div>
+    <p>A well kept home with original details throughout.</p></body></html>
+    """
+
+
+def _photo_case(db, photo: bytes):
+    url = "https://stub.example.com/p/800001"
+    photo_url = "https://photos.example.com/1.jpg"
+    source = _source(
+        index_urls=["https://stub.example.com/list"],
+        detail_url_include=[r"/p/\d+"],
+        price_patterns=[r"\$\s?\d[\d,]{4,}"],
+    )
+    pages = {
+        "https://stub.example.com/list": f'<html><body><a href="{url}">物件</a></body></html>',
+        url: _with_photo("11012 S Kilpatrick Avenue, Oak Lawn IL 60453", "$170,000", photo_url),
+    }
+    client = PhotoStubClient(pages, {photo_url: photo})
+    return url, ListingCollector(CONFIG, client, db).collect(source)
+
+
+def test_placeholder_photo_keeps_the_listing_out(db) -> None:
+    """実測した Dream Town のプレースホルダと同じ単色画像。"""
+    url, stats = _photo_case(db, _photo_bytes((208, 208, 208)))
+
+    assert stats.inserted == 0
+    assert stats.no_photo == 1
+    assert stats.no_photo_samples == [url]
+    assert not exists_source_url(db, url)
+
+
+def test_a_real_photo_still_goes_in(db) -> None:
+    """歯止めが効きすぎていないこと。"""
+    url, stats = _photo_case(db, _photo_bytes("noise"))
+
+    assert stats.inserted == 1
+    assert stats.no_photo == 0
+    assert exists_source_url(db, url)
+
+
+def test_a_listing_without_any_image_is_skipped(db) -> None:
+    """og:image そのものが無いページも入れない。"""
+    url = "https://stub.example.com/p/800002"
+    source = _source(
+        index_urls=["https://stub.example.com/list"],
+        detail_url_include=[r"/p/\d+"],
+        price_patterns=[r"\$\s?\d[\d,]{4,}"],
+    )
+    pages = {
+        "https://stub.example.com/list": f'<html><body><a href="{url}">物件</a></body></html>',
+        url: """
+        <html><head><meta property="og:title" content="11012 S Kilpatrick Avenue, Oak Lawn IL 60453"></head>
+        <body><div class="price">$170,000</div><p>A well kept home.</p></body></html>
+        """,
+    }
+    stats = ListingCollector(CONFIG, StubClient(pages), db).collect(source)
+
+    assert stats.inserted == 0
+    assert stats.no_photo == 1
+
+
+def test_image_fetch_failure_does_not_drop_the_listing(db) -> None:
+    """画像が取れないだけでは落とさない。相手の一時的な不調で候補が消えるほうが害が大きい。"""
+    url = "https://stub.example.com/p/800003"
+    source = _source(
+        index_urls=["https://stub.example.com/list"],
+        detail_url_include=[r"/p/\d+"],
+        price_patterns=[r"\$\s?\d[\d,]{4,}"],
+    )
+    pages = {
+        "https://stub.example.com/list": f'<html><body><a href="{url}">物件</a></body></html>',
+        # og:image は指しているが、StubClient に登録が無いので取得は失敗する
+        url: _with_photo(
+            "11012 S Kilpatrick Avenue, Oak Lawn IL 60453", "$170,000",
+            "https://photos.example.com/missing.jpg",
+        ),
+    }
+    stats = ListingCollector(CONFIG, StubClient(pages), db).collect(source)
+
+    assert stats.inserted == 1
+    assert stats.no_photo == 0

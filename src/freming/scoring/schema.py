@@ -143,19 +143,32 @@ class ScoreResult:
     assessment: Assessment
     axes: list[ScoreAxis] = field(default_factory=list)
     model: str = ""
+    # 空でなければ足切り理由。加重合算の結果に関わらず 0点にする。
+    gate: str = ""
 
     @property
     def total(self) -> float:
+        """足切りに掛かったものは、他の軸が何点でも0点。
+
+        加重平均だけで判定していたころは、story が 0 でも「販売中」「重点
+        エリア」「価格あり」の下駄だけで 54点に達し、min_to_persist(30) を
+        楽に超えていた。物語性の無い物件を落とすには、平均に混ぜるのでは
+        なく単独の条件として扱う必要がある。
+        """
+        if self.gate:
+            return 0.0
         return round(sum(a.weighted for a in self.axes), 1)
 
     def reason(self) -> str:
         """score_reason に入れる、人が読んで納得できる説明。"""
         head = self.assessment.story_reason.strip()
         breakdown = " / ".join(a.line() for a in self.axes)
-        return f"{head}\n[内訳] {breakdown}" if head else f"[内訳] {breakdown}"
+        body = f"{head}\n[内訳] {breakdown}" if head else f"[内訳] {breakdown}"
+        return f"[足切り] {self.gate}\n{body}" if self.gate else body
 
     def detail(self) -> dict:
         return {
+            "gate": self.gate,
             "axes": [
                 {"key": a.key, "raw": a.raw, "weight": a.weight, "reason": a.reason}
                 for a in self.axes

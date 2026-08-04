@@ -67,6 +67,15 @@ def _for_sale_axis(config: Config, assessment: Assessment, row: Row) -> ScoreAxi
     審査UIで人が確認できるようにする。
     """
     weight = config.scoring.weights.editorial_for_sale_bonus
+    # **仲介サイトにこの加点は与えない。** 名前のとおり「編集記事なのに
+    # 実際に買える」ことへの加点で、物件情報サイトでは売り出し中が掲載の
+    # 前提だから常に満点になる。台湾の物件が中身に関わらず審査に上がって
+    # いた原因の一つがこの 20点の下駄だった。
+    # 副作用として販売ソースの上限は 80点になり、highlight_above(80) には
+    # 届かない。編集メディア発の候補を上に置く運用なので意図どおり。
+    if config.listing_source(row["source"]):
+        return ScoreAxis("for_sale", 0.0, weight, "販売サイト(加点対象外)")
+
     by_signal = bool(row["is_for_sale"])
     by_llm = assessment.is_for_sale
 
@@ -104,4 +113,18 @@ def build_result(
         _area_axis(config, assessment, row),
         _price_axis(config, assessment, row),
     ]
-    return ScoreResult(assessment=assessment, axes=axes, model=model)
+    return ScoreResult(assessment=assessment, axes=axes, model=model, gate=_gate(config, assessment))
+
+
+def _gate(config: Config, assessment: Assessment) -> str:
+    """加重合算の前に単独で落とす条件。該当すれば理由、しなければ空文字。
+
+    承認基準の第1・第2（前歴が目に見えるか／様式が特定できるか）は
+    yes/no の条件で、程度問題ではない。story_score はその2つを軸に
+    LLMが出す総合点なので、これが低いものは他の軸が満点でも候補に
+    ならない。加重平均に混ぜていたころは下駄で埋まっていた。
+    """
+    floor = config.scoring.thresholds.story_min
+    if assessment.story_score < floor:
+        return f"story={assessment.story_score} < {floor:.0f}"
+    return ""

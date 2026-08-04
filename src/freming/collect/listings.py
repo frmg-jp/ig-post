@@ -32,6 +32,7 @@ from freming.collect.base import Candidate, normalize_url, parse_page
 from freming.config import Config, ListingCrawl, ListingSource, load_config
 from freming.db.connection import DbConnection, connect
 from freming.db.repository import exists_source_url, insert_candidate
+from freming.images.placeholder import is_flat_image
 from freming.logging_setup import get_logger, setup_logging
 from freming.net.client import HttpClient, RobotsDisallowed
 
@@ -80,6 +81,7 @@ class ListingStats:
     disallowed: int = 0           # robots.txt で取得しなかったもの
     no_price: int = 0             # 価格を取れず候補にしなかったもの
     no_location: int = 0          # 所在地を取れず候補にしなかったもの
+    no_photo: int = 0             # 写真が無い／プレースホルダだったもの
     samples: list[str] = field(default_factory=list)
     # 価格を取れなかったURL。価格の書式漏れなのか、そもそも物件ページで
     # ないのかを、推測せずに確かめられるようにする（--explain 用）。
@@ -87,13 +89,16 @@ class ListingStats:
     # 所在地を取れなかったURL。抽出の書式漏れなのか、そもそもページに
     # 住所が無いのかを確かめられるようにする（--explain 用）。
     no_location_samples: list[str] = field(default_factory=list)
+    # 写真が無かったURL。サイト側に写真が無いのか、抽出が外しているのかを
+    # 確かめられるようにする（--explain 用）。
+    no_photo_samples: list[str] = field(default_factory=list)
 
     def report(self) -> str:
         return (
             f"[{self.source}] URL {self.seen_urls}件 → 物件 {self.matched_urls}件 → "
             f"取得 {self.fetched}件 → 登録 {self.inserted}件"
             f"（既知 {self.skipped_known} / 価格なし {self.no_price} / "
-            f"所在地なし {self.no_location} / "
+            f"所在地なし {self.no_location} / 写真なし {self.no_photo} / "
             f"失敗 {self.failed} / robots拒否 {self.disallowed}）"
         )
 
@@ -232,6 +237,26 @@ class ListingCollector:
         self.config = config
         self.client = client
         self.conn = conn
+
+    # ------------------------------------------------------------------
+    def _has_real_photo(self, thumbnail_url: str | None) -> bool:
+        """代表画像が実際に絵として成立しているかを確かめる。
+
+        取得できない・判定できないものは True を返す（通す）。ここは候補を
+        落とすための判定なので、「確かに単色だった」と言えるときだけ落とす。
+        相手サイトの一時的な不調で候補が消えるほうが害が大きい。
+        """
+        if not thumbnail_url:
+            return False
+        try:
+            response = self.client.get(thumbnail_url)
+        except RobotsDisallowed:
+            # robots で画像が取れないだけでは物件を落とさない。
+            return True
+        except Exception as exc:  # noqa: BLE001 - 画像1枚の失敗で候補を消さない
+            log.debug("代表画像を取得できません: %s (%s)", thumbnail_url, exc)
+            return True
+        return not is_flat_image(response.content, self.config.images.flat_stddev_max)
 
     # ------------------------------------------------------------------
     def _sitemap_urls(self, crawl: ListingCrawl) -> list[str]:
@@ -393,6 +418,19 @@ class ListingCollector:
                 stats.no_location_samples.append(url)
             return None
 
+        if self.config.images.require_real_photo and not self._has_real_photo(
+            page.thumbnail_url
+        ):
+            # **写真の無い物件は入れない。** 物件情報サイトは写真が用意
+            # できていない物件にも og:image を返し、中身は単色の板になる
+            # （Dream Town は 1280x800 の #D0D0D0）。寸法は本物と同じなので
+            # min_short_edge_px では落ちず、審査UIに灰色の四角が並ぶ。
+            # 建築を見せる企画で写真が無いものは、その時点で候補にならない。
+            stats.no_photo += 1
+            if len(stats.no_photo_samples) < 10:
+                stats.no_photo_samples.append(url)
+            return None
+
         # 見出しを持たない物件ページがある（Vanguard は <title> も og:title も
         # 空で、住所は本文にしかない）。URLをタイトルに据えると審査UIで
         # 何の物件か分からないので、住所を代わりに使う。
@@ -468,10 +506,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.explain and stats.samples:
         print("\n拾った物件:")
         print("\n".join(stats.samples))
-    if args.explain and stats.no_price_samples:
-        print("\n価格を取れなかったURL:")
-        for url in stats.no_price_samples:
-            print(f"  {url}")
+    for label, samples in (
+        ("価格を取れなかったURL", stats.no_price_samples),
+        ("所在地を取れなかったURL", stats.no_location_samples),
+        ("写真が無かったURL", stats.no_photo_samples),
+    ):
+        if args.explain and samples:
+            print(f"\n{label}:")
+            for url in samples:
+                print(f"  {url}")
     return 0
 
 

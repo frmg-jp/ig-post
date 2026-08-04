@@ -19,6 +19,7 @@ from freming.db.migrate import migrate
 from freming.db.repository import insert_candidate
 from freming.images.extract import extract_image_urls
 from freming.images.fetch import NoImagesFound, fetch_images
+from freming.images.placeholder import is_flat_image
 from freming.images.process import process_property_images, to_square
 from freming.net.client import RobotsDisallowed
 
@@ -454,3 +455,43 @@ def test_a_single_image_is_never_dropped() -> None:
     )
     urls = extract_image_urls(html, "https://robbreport.com/a", skip_lead_image=True)
     assert _names(urls) == ["only.jpg"]
+
+
+# ----------------------------------------------------------------------
+# 「写真なし」プレースホルダの判定。
+#
+# 物件情報サイトは写真が未登録の物件にも og:image を返す。中身は単色の
+# 板で、寸法は本物の写真と同じことが多い（Dream Town は 1280x800 の
+# #D0D0D0）。min_short_edge_px では落ちないので、別の条件として持つ。
+
+
+def _jpeg(image: Image.Image) -> bytes:
+    buffer = BytesIO()
+    image.convert("RGB").save(buffer, "JPEG", quality=90)
+    return buffer.getvalue()
+
+
+def test_solid_colour_is_flat() -> None:
+    """実測した Dream Town のプレースホルダと同じ条件。"""
+    assert is_flat_image(_jpeg(Image.new("RGB", (1280, 800), (208, 208, 208))))
+
+
+def test_shallow_gradient_is_flat() -> None:
+    gradient = Image.linear_gradient("L").convert("RGB").point(lambda v: 200 + v // 32)
+    assert is_flat_image(_jpeg(gradient))
+
+
+def test_photo_like_image_is_not_flat() -> None:
+    """階調のある画像は落とさない。"""
+    noisy = Image.effect_noise((512, 512), 60).convert("RGB")
+    assert not is_flat_image(_jpeg(noisy))
+
+
+def test_undecodable_data_is_not_flat() -> None:
+    """判定できないものは通す。候補を消す判断は確信があるときだけにする。"""
+    assert not is_flat_image(b"not an image at all")
+
+
+def test_threshold_comes_from_argument() -> None:
+    noisy = _jpeg(Image.effect_noise((512, 512), 60).convert("RGB"))
+    assert is_flat_image(noisy, stddev_max=1000.0)

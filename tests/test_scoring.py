@@ -434,3 +434,79 @@ def test_the_configured_model_does_not_use_effort() -> None:
         assert cfg.scoring.effort is None, (
             f"{cfg.scoring.model} は effort を受け付けません。config.yaml で null にしてください"
         )
+
+
+# ----------------------------------------------------------------------
+# 足切りと、販売ソースへの for_sale 加点の扱い。
+#
+# 台湾の仲介物件が中身に関係なく審査に上がっていた回帰を防ぐ。原因は
+# 加重平均そのもので、story=0 でも「販売中20 + 重点エリア20 + ランクB6 +
+# 価格5 + ジャンル不明3」の54点が積み上がり、min_to_persist(30) を
+# 楽に超えていた。
+
+
+_WEAK = Assessment(
+    is_for_sale=True,
+    genre="unknown",
+    provenance_visible=False,
+    style_identified=False,
+    one_of_a_kind=False,
+    story_score=0,
+    story_reason="標準的な分譲マンションで建築的な特徴がない",
+    summary="標準的な分譲マンション",
+    city="Taipei",
+    country="Taiwan",
+    price="1,488萬",
+)
+
+
+def _listing_row(conn, source="hbhousing"):
+    property_id = _add(
+        conn,
+        source=source,
+        source_rank="B",
+        source_url=f"https://example.com/{source}/1",
+        location_country="Taiwan",
+        price="1,488萬",
+    )
+    return _row(conn, property_id)
+
+
+def test_no_story_is_gated_to_zero(config, conn) -> None:
+    """物語性が無いものは、他の軸が何点でも0点で落ちる。"""
+    result = build_result(config, _WEAK, _listing_row(conn), "test")
+    assert result.gate
+    assert result.total == 0.0
+    assert result.total < config.scoring.thresholds.min_to_persist
+    # 内訳は残す。なぜ落ちたのかを審査UIで追えるようにするため。
+    assert "足切り" in result.reason()
+
+
+def test_gate_boundary_follows_config(config, conn) -> None:
+    floor = int(config.scoring.thresholds.story_min)
+    row = _listing_row(conn)
+    below = build_result(config, Assessment(**{**_WEAK.__dict__, "story_score": floor - 1}), row, "t")
+    at = build_result(config, Assessment(**{**_WEAK.__dict__, "story_score": floor}), row, "t")
+    assert below.total == 0.0
+    assert at.total > 0.0
+
+
+def test_listing_source_gets_no_for_sale_bonus(config, conn) -> None:
+    """仲介サイトは「売り出し中」が掲載の前提なので加点しない。
+
+    編集記事に与える加点をそのまま渡すと、物件の良し悪しと無関係に
+    20点の下駄になる。
+    """
+    strong_on_listing = Assessment(**{**_STRONG.__dict__, "country": "Taiwan"})
+    result = build_result(config, strong_on_listing, _listing_row(conn), "test")
+    for_sale = next(a for a in result.axes if a.key == "for_sale")
+    assert for_sale.raw == 0.0
+    assert "加点対象外" in for_sale.reason
+
+
+def test_editorial_source_keeps_for_sale_bonus(config, conn) -> None:
+    """編集メディア側の加点はこれまでどおり効く（降格させていない）。"""
+    property_id = _add(conn)  # wowhaus = editorial_sources
+    result = build_result(config, _STRONG, _row(conn, property_id), "test")
+    for_sale = next(a for a in result.axes if a.key == "for_sale")
+    assert for_sale.raw == 100.0
