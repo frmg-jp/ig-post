@@ -96,7 +96,7 @@
           <input type="hidden" name="status" value="{{ status }}">
           <button class="ok" type="submit">承認</button>
         </form>
-        <form method="post" action="/p/{{ row['id'] }}/reject">
+        <form class="reject" method="post" action="/p/{{ row['id'] }}/reject">
           <input type="hidden" name="status" value="{{ status }}">
           <select name="reason">
             <option value="">理由を選ぶ</option>

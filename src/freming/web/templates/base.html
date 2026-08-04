@@ -113,6 +113,15 @@
   /* 本家の .hover-red と同じで、ホバーの一点だけ赤に振る */
   nav a:hover { color: var(--hi); }
   nav a.on { color: var(--fg); border-bottom-color: var(--fg); }
+  /* nav の外に出したが、見た目はタブと揃える */
+  a.rules {
+    color: var(--muted); text-decoration: none;
+    font-family: var(--mono);
+    font-size: 13px; letter-spacing: var(--track-label);
+    padding-bottom: 3px; border-bottom: 2px solid transparent;
+  }
+  a.rules:hover { color: var(--hi); }
+  a.rules.on { color: var(--fg); border-bottom-color: var(--fg); }
   nav a .n { color: var(--faint); margin-left: 4px; }
   nav a.on .n { color: var(--muted); }
   .auto {
@@ -310,6 +319,30 @@
     .card { grid-template-columns: 1fr; }
     details.manual .grid { grid-template-columns: 1fr; }
     .keys { display: none; }
+
+    /* タイトルの右端に「ルール候補」を置き、タブは次の行に丸ごと送る。
+       order で並べ替えるので、HTML の順序は触らない。 */
+    header { align-items: center; row-gap: 14px; }
+    header h1 { order: 0; }
+    a.rules { order: 1; margin-left: auto; }
+    header nav { order: 2; flex-basis: 100%; }
+    .auto { order: 3; margin-left: 0; }
+
+    /* 操作列を2行に割る。幅を px で詰めるやり方だと、文言や項目が変わる
+       たびに折り返しの位置が動くので、**非承認のフォームを丸ごと1行**に
+       して中で伸縮させる。
+         1行目 … 企画のプルダウン ＋ 承認（別々の form なので display: contents のまま）
+         2行目 … 理由のプルダウン ＋ 自由記入 ＋ 非承認
+       プルダウンと自由記入だけ伸ばし、ボタンは固有の幅で右端に残す。 */
+    .actions select { width: auto; flex: 1; min-width: 0; }
+    .actions form.reject {
+      display: flex; flex-basis: 100%; gap: 8px; align-items: center;
+      /* min-width の既定は auto で、中身の最小幅より狭くならない。
+         flex-basis: 100% を指定しても、これが無いと行からはみ出す。 */
+      min-width: 0;
+    }
+    input[type=text].free { flex: 1.4; min-width: 0; }
+    .actions button, .actions a.drive { flex: 0 0 auto; }
   }
 </style>
 </head>
@@ -322,8 +355,10 @@
         {{ label }}{% if counts and counts.get(key) %}<span class="n">{{ counts.get(key) }}</span>{% endif %}
       </a>
     {% endfor %}
-    <a href="/rules" class="{{ 'on' if status == 'rules' else '' }}">ルール候補</a>
   </nav>
+  {# ルール候補はタブと性格が違う（審査ではなく設定の見直し）。nav の外に
+     出しておくと、狭い画面でタイトルの右端に寄せられる。 #}
+  <a href="/rules" class="rules {{ 'on' if status == 'rules' else '' }}">ルール候補</a>
   {% if auto_deliver %}
     <span class="auto {{ 'busy' if delivering_id else '' }}">
       自動納品 ON{% if queued %}・待ち {{ queued }}{% endif %}
