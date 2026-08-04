@@ -421,21 +421,74 @@ def clear_images(conn: DbConnection, property_id: int) -> int:
     return cursor.rowcount
 
 
+def deletable_properties(
+    conn: DbConnection,
+    *,
+    source: str | None = None,
+    property_id: int | None = None,
+    ids: list[int] | None = None,
+) -> list[Row]:
+    """delete_properties が消す対象を、消す前に一覧で返す。
+
+    本番DBに対する破壊的操作なので、実行前に何が消えるか目で見られる
+    ようにする（--dry-run）。条件は delete_properties と同じものを使う。
+    """
+    if property_id is not None:
+        return conn.execute(
+            "SELECT * FROM properties WHERE id = ? AND status != 'delivered'",
+            (property_id,),
+        ).fetchall()
+    if ids is not None:
+        if not ids:
+            return []
+        marks = ",".join("?" for _ in ids)
+        return conn.execute(
+            f"SELECT * FROM properties WHERE id IN ({marks}) AND status != 'delivered'",
+            tuple(ids),
+        ).fetchall()
+    if source is not None:
+        return conn.execute(
+            "SELECT * FROM properties WHERE source = ? AND status != 'delivered'",
+            (source,),
+        ).fetchall()
+    raise ValueError("source / property_id / ids のいずれかを指定してください")
+
+
 def delete_properties(
-    conn: DbConnection, *, source: str | None = None, property_id: int | None = None
+    conn: DbConnection,
+    *,
+    source: str | None = None,
+    property_id: int | None = None,
+    ids: list[int] | None = None,
 ) -> int:
     """誤って取り込んだ候補を消す。納品済みのものは対象外にする。"""
     if property_id is not None:
         cursor = conn.execute(
             "DELETE FROM properties WHERE id = ? AND status != 'delivered'", (property_id,)
         )
+    elif ids is not None:
+        if not ids:
+            return 0
+        marks = ",".join("?" for _ in ids)
+        cursor = conn.execute(
+            f"DELETE FROM properties WHERE id IN ({marks}) AND status != 'delivered'",
+            tuple(ids),
+        )
     elif source is not None:
         cursor = conn.execute(
             "DELETE FROM properties WHERE source = ? AND status != 'delivered'", (source,)
         )
     else:
-        raise ValueError("source か property_id のどちらかを指定してください")
+        raise ValueError("source / property_id / ids のいずれかを指定してください")
     return cursor.rowcount
+
+
+def properties_for_photo_audit(conn: DbConnection) -> list[Row]:
+    """写真を検査する対象。納品済みは触らない。"""
+    return conn.execute(
+        "SELECT id, source, source_url, title, thumbnail_url FROM properties "
+        "WHERE status != 'delivered' ORDER BY id"
+    ).fetchall()
 
 
 def count_by_status(conn: DbConnection) -> dict[str, int]:

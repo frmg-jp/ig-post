@@ -530,15 +530,72 @@ def _cmd_add_manual(args: argparse.Namespace) -> int:
     return 0
 
 
+def _photoless_ids(cfg, conn) -> list[int]:
+    """代表画像が無い／単色のプレースホルダである候補のIDを集める。
+
+    物件情報サイトは写真が未登録の物件にも og:image を返す。中身は単色の
+    板で、寸法だけは本物と同じことが多い（Dream Town は 1280x800 の
+    #D0D0D0）。URLの有無では判別できないので、実際に取得して中身を見る。
+
+    取得に失敗したものは対象にしない。消す判断は「確かに絵が無かった」と
+    言えるときだけにする。
+    """
+    from freming.db.repository import properties_for_photo_audit
+    from freming.images.placeholder import is_flat_image
+    from freming.net.client import HttpClient, RobotsDisallowed
+
+    rows = properties_for_photo_audit(conn)
+    found: list[int] = []
+    with HttpClient(cfg.http) as client:
+        for row in rows:
+            url = row["thumbnail_url"]
+            if not url:
+                print(f"  画像URLなし  #{row['id']} {row['source']} {row['title'] or ''}"[:110])
+                found.append(row["id"])
+                continue
+            try:
+                response = client.get(url)
+            except (RobotsDisallowed, Exception):  # noqa: BLE001 - 判定不能は残す
+                print(f"  取得できず候補に残す  #{row['id']} {url}"[:110])
+                continue
+            if is_flat_image(response.content, cfg.images.flat_stddev_max):
+                print(f"  単色画像    #{row['id']} {row['source']} {row['title'] or ''}"[:110])
+                found.append(row["id"])
+    return found
+
+
 def _cmd_remove(args: argparse.Namespace) -> int:
     """誤って取り込んだ候補を削除する（納品済みは対象外）。"""
     from freming.db.connection import session
-    from freming.db.repository import delete_properties
+    from freming.db.repository import deletable_properties, delete_properties
 
     cfg = load_config(args.config)
     setup_logging(cfg.app.log_dir, cfg.app.log_level)
     with session(cfg.app.target()) as conn:
-        removed = delete_properties(conn, source=args.source, property_id=args.id)
+        ids = None
+        if args.no_photo:
+            print("代表画像を検査します（納品済みは対象外）…")
+            ids = _photoless_ids(cfg, conn)
+            if not ids:
+                print("画像の無い候補はありませんでした")
+                return 0
+
+        targets = deletable_properties(
+            conn, source=args.source, property_id=args.id, ids=ids
+        )
+        if not targets:
+            print("対象がありません")
+            return 0
+
+        if args.dry_run:
+            print(f"\n削除対象 {len(targets)} 件（--dry-run なので消していません）:")
+            for row in targets:
+                print(f"  #{row['id']:<5} {row['source']:<14} {row['title'] or row['source_url']}"[:120])
+            return 0
+
+        removed = delete_properties(
+            conn, source=args.source, property_id=args.id, ids=ids
+        )
     print(f"{removed} 件削除しました")
     return 0
 
@@ -780,6 +837,14 @@ def build_parser() -> argparse.ArgumentParser:
     group = p_remove.add_mutually_exclusive_group(required=True)
     group.add_argument("--source", help="ソースキー（例: circa_old_houses）")
     group.add_argument("--id", type=int, help="property_id")
+    group.add_argument(
+        "--no-photo",
+        action="store_true",
+        help="代表画像が無い／単色のプレースホルダの候補（全ソース横断）",
+    )
+    p_remove.add_argument(
+        "--dry-run", action="store_true", help="消さずに対象を一覧表示する"
+    )
     p_remove.set_defaults(func=_cmd_remove)
 
     p_reset_img = sub.add_parser(
