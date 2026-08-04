@@ -406,6 +406,16 @@ class DriveConfig(BaseModel):
         return v
 
 
+class InstagramConfig(BaseModel):
+    """Instagram 自動投稿（[8]）。トークンは DB（api_tokens）に持つ。
+
+    app_id は公開値なのでここに置く。app_secret は OAuth コールバック方式を
+    使うときだけ必要で、環境変数 INSTAGRAM_APP_SECRET からのみ読む。
+    """
+
+    app_id: str | None = None
+
+
 class Config(BaseModel):
     app: AppConfig = Field(default_factory=AppConfig)
     http: HttpConfig
@@ -422,6 +432,7 @@ class Config(BaseModel):
     images: ImagesConfig = Field(default_factory=ImagesConfig)
     process: ProcessConfig = Field(default_factory=ProcessConfig)
     drive: DriveConfig
+    instagram: InstagramConfig = Field(default_factory=InstagramConfig)
 
     # --- 秘匿値は .env からのみ ---
     @property

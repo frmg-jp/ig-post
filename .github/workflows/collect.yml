@@ -44,6 +44,13 @@ jobs:
       - name: マイグレーション適用
         run: python -m freming.cli db migrate
 
+      # Instagram の長期トークンは60日で失効し、24時間経過後から更新できる。
+      # 毎日更新して常に残り60日を保つ。未設定の環境では何もせず終わる。
+      # 失敗しても収集と採点は無関係なので、ワークフロー全体は止めない。
+      - name: IGトークン更新
+        continue-on-error: true
+        run: python -m freming.cli instagram refresh
+
       - name: 収集
         # 1ソースでも落ちたら残りを止める、ということはしない。
         # 相手サイト側の一時的な不調で全体が止まると、翌日まで何も入らない。

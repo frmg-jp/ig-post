@@ -566,6 +566,79 @@ def _cmd_reset_images(args: argparse.Namespace) -> int:
     return 0
 
 
+
+def _cmd_instagram(args: argparse.Namespace) -> int:
+    """Instagram のトークン管理（[8] 自動投稿の土台）。
+
+    トークンは60日で失効し、24時間経過後から更新できる。定期実行が毎日
+    refresh を呼ぶので、set-token を1回通せば以後は自動で維持される。
+    """
+    from freming.db.connection import session
+    from freming.instagram import tokens as ig
+
+    cfg = load_config(args.config)
+    setup_logging(cfg.app.log_dir, cfg.app.log_level)
+    target = cfg.app.target()
+
+    if args.ig_action == "set-token":
+        import getpass
+
+        # 引数やパイプで渡させない。シェル履歴・画面共有・チャットに残さない。
+        value = getpass.getpass("長期アクセストークンを貼り付けて Enter（画面には表示されません）: ").strip()
+        if not value:
+            print("入力が空です。", file=sys.stderr)
+            return 2
+        try:
+            profile = ig.fetch_profile(value)
+        except ig.InstagramError as exc:
+            print(f"トークンの確認に失敗しました: {exc}", file=sys.stderr)
+            return 1
+        with session(target) as conn:
+            ig.save_token(conn, value)
+        print(f"保存しました: @{profile.get('username')}")
+        print("定期実行が毎日更新するので、以後の手作業は不要です。")
+        return 0
+
+    if args.ig_action == "check":
+        from datetime import UTC, datetime
+
+        with session(target) as conn:
+            record = ig.load_token(conn)
+        if record is None:
+            print(
+                "トークンが未設定です。次を実行してください:\n"
+                "  python -m freming.cli instagram set-token",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            profile = ig.fetch_profile(record.value)
+        except ig.InstagramError as exc:
+            print(f"疎通NG: {exc}", file=sys.stderr)
+            return 1
+        days = record.days_left(datetime.now(UTC))
+        print(f"疎通OK: @{profile.get('username')}（トークン残り {days:.0f} 日）")
+        if days < 7:
+            print("残りが7日を切っています。定期実行の refresh が動いているか確認してください。")
+        return 0
+
+    # refresh: 定期実行から毎日呼ばれる。未設定の環境では何もせず正常終了する。
+    with session(target) as conn:
+        try:
+            outcome = ig.refresh_token(conn)
+        except ig.InstagramError as exc:
+            print(f"更新に失敗しました: {exc}", file=sys.stderr)
+            return 1
+    messages = {
+        "no_token": "トークンが未設定のためスキップしました。",
+        "too_new": "取得から24時間未満のためスキップしました（Meta側の制約）。",
+        "refreshed": "トークンを更新しました（残り60日に戻りました）。",
+        "expired": "トークンが失効しています。再認可して set-token をやり直してください。",
+    }
+    print(messages[outcome])
+    return 1 if outcome == "expired" else 0
+
+
 def _cmd_status(args: argparse.Namespace) -> int:
     from freming.db.connection import connect
     from freming.db.repository import count_by_status
@@ -715,6 +788,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_reset_img.add_argument("--id", type=int, required=True, help="property_id")
     p_reset_img.set_defaults(func=_cmd_reset_images)
 
+    p_ig = sub.add_parser("instagram", help="Instagram のトークン管理（[8] 自動投稿の土台）")
+    p_ig.add_argument("ig_action", choices=["set-token", "check", "refresh"])
+    p_ig.set_defaults(func=_cmd_instagram)
+
     p_status = sub.add_parser("status", help="候補の件数をステータス別に表示")
     p_status.set_defaults(func=_cmd_status)
 
@@ -726,6 +803,7 @@ def build_parser() -> argparse.ArgumentParser:
 _NEEDS_MIGRATED_DB = frozenset({
     "collect", "score", "serve", "deliver", "learn", "rules",
     "ingest-url", "add-manual", "remove", "reset-images", "status",
+    "instagram",
 })
 
 
