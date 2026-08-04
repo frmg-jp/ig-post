@@ -344,10 +344,15 @@ listing_sources:
   - key: dreamtown
     name: "Dream Town Realty"
     rank: B
-    mode: crawl
+    # **2026-08-04 に crawl から降格。** 使える一覧が /properties/coming-soon
+    # （近日売出）しか無く、写真がまだ登録されていない物件しか流れてこない。
+    # サイトは og:image を返すが中身は 1280x800 の #D0D0D0 一色で、審査UIに
+    # 灰色の四角が並んだ。代わりの一覧URLを5つ実測したが全滅（404/405）で、
+    # この入口以外に手が無い。手動URL投入だけ残す。
+    mode: manual_only
     enabled: true
     base_url: "https://www.dreamtown.com"
-    note: "Chicago。sitemap.xml に物件ページが無く、一覧ページから拾う"
+    note: "Chicago。手動URL投入のみ。sitemap に物件ページが無く一覧も coming-soon だけ"
     crawl:
       index_urls:
         - "https://www.dreamtown.com/properties/coming-soon"
