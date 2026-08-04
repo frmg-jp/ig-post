@@ -59,5 +59,12 @@ jobs:
       - name: 採点
         run: python -m freming.cli score --limit 40
 
+      # 非承認理由をタグに分類し、繰り返された指摘をルール候補にする。
+      # **ここで作るのは候補まで。** プロンプトに載るのは審査UIで人が
+      # 承認したものだけなので、判定基準が勝手に変わることはない。
+      # 未分類の理由が無い日は API を呼ばずに終わる。
+      - name: 学習
+        run: python -m freming.cli learn
+
       - name: 件数
         run: python -m freming.cli status
