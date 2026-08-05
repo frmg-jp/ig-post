@@ -114,3 +114,43 @@ def test_health_check_stays_open(guarded) -> None:
     response = guarded.get("/healthz")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+# ----------------------------------------------------------------------
+# Instagram 認可の着地先。
+#
+# @frmg.jpn の管理者は審査UIの資格情報を持っていないので、この経路だけは
+# 認証を通さない。代わりに、物件のデータも内部の導線も出さない。
+
+
+def test_ig_callback_is_reachable_without_credentials() -> None:
+    client = TestClient(create_app(load_config("config.yaml"), auth=BasicAuth("u", "p")))
+    assert client.get("/ig/callback?code=ABC123").status_code == 200
+
+
+def test_ig_callback_shows_the_code_to_copy() -> None:
+    client = TestClient(create_app(load_config("config.yaml"), auth=BasicAuth("u", "p")))
+    body = client.get("/ig/callback?code=ABC123").text
+    assert "ABC123" in body
+
+
+def test_ig_callback_shows_the_error_when_denied() -> None:
+    client = TestClient(create_app(load_config("config.yaml"), auth=BasicAuth("u", "p")))
+    body = client.get("/ig/callback?error_description=User+denied+access").text
+    assert "User denied access" in body
+
+
+def test_ig_callback_does_not_leak_the_review_ui() -> None:
+    """未認証の相手に見せる画面なので、審査UIの導線を出さない。"""
+    client = TestClient(create_app(load_config("config.yaml"), auth=BasicAuth("u", "p")))
+    body = client.get("/ig/callback?code=ABC123").text
+    assert "ルール候補" not in body
+    assert 'href="/rules"' not in body
+    assert "承認" not in body
+
+
+def test_everything_else_still_needs_credentials() -> None:
+    """歯止めが緩んでいないこと。"""
+    client = TestClient(create_app(load_config("config.yaml"), auth=BasicAuth("u", "p")))
+    for path in ("/", "/rules", "/ig", "/ig/callback/../"):
+        assert client.get(path, follow_redirects=False).status_code == 401, path

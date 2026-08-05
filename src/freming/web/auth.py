@@ -99,9 +99,16 @@ def _parse_header(value: str) -> tuple[str, str] | None:
     return (user, password) if sep else None
 
 
-# 認証を通さない経路。ホスティング側のヘルスチェックは資格情報を
-# 送らないため、ここだけ開ける。物件のデータは一切返さない。
-EXEMPT_PATHS = frozenset({"/healthz"})
+# 認証を通さない経路。どちらも物件のデータは一切返さない。
+#
+#   /healthz     ホスティング側のヘルスチェックが資格情報を送らないため
+#   /ig/callback Instagram の認可後の着地先。@frmg.jpn の管理者は審査UIの
+#                資格情報を持っていないので、ここで認証を求めると詰む。
+#                返すのは「このURLをコピーして送ってください」の案内だけで、
+#                受け取った code をサーバー側で使うことはしない（code から
+#                トークンへの交換には app secret が要り、それは手元にしか
+#                置かない）。
+EXEMPT_PATHS = frozenset({"/healthz", "/ig/callback"})
 
 
 class BasicAuthMiddleware(BaseHTTPMiddleware):

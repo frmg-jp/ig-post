@@ -111,3 +111,73 @@ def test_fetch_profile_asks_for_username() -> None:
     (url, params), = http.calls
     assert url.endswith("/me")
     assert params["access_token"] == "tok"
+
+
+# ----------------------------------------------------------------------
+# 認可コードの引き換え。
+#
+# ダッシュボードの「Generate token」は沢田の画面で管理者にログインして
+# もらう形になる。それを避け、管理者が自分の端末で完結できるようにした
+# 経路。ネットワークは呼ばず、Meta の応答を差し替えて検証する。
+
+
+def test_authorization_url_has_everything_meta_requires() -> None:
+    url = ig.authorization_url("123", "https://example.com/ig/callback")
+    assert url.startswith("https://www.instagram.com/oauth/authorize?")
+    assert "client_id=123" in url
+    assert "response_type=code" in url
+    # リダイレクトURIとスコープはURLエンコードされて入る
+    assert "https%3A%2F%2Fexample.com%2Fig%2Fcallback" in url
+    assert "instagram_business_basic" in url
+    assert "instagram_business_content_publish" in url
+
+
+def test_authorization_url_carries_no_secret() -> None:
+    """管理者に送るURLなので、app secret が混ざってはいけない。"""
+    url = ig.authorization_url("123", "https://example.com/ig/callback")
+    assert "secret" not in url.lower()
+
+
+def test_exchange_code_returns_the_long_lived_token() -> None:
+    posted, got = {}, {}
+
+    def fake_post(url, data):
+        posted.update(data)
+        return {"access_token": "SHORT", "user_id": 1}
+
+    def fake_get(url, params):
+        got.update(params)
+        return {"access_token": "LONG", "expires_in": 5184000}
+
+    value = ig.exchange_code(
+        "CODE", "123", "SECRET", "https://example.com/ig/callback",
+        http_post=fake_post, http_get=fake_get,
+    )
+    assert value == "LONG"
+    # 短期→長期の2段。片方だけでは投稿を続けられない。
+    assert posted["grant_type"] == "authorization_code"
+    assert posted["code"] == "CODE"
+    assert posted["redirect_uri"] == "https://example.com/ig/callback"
+    assert got["grant_type"] == "ig_exchange_token"
+    assert got["access_token"] == "SHORT"
+
+
+def test_exchange_code_fails_loudly_when_the_code_is_spent() -> None:
+    """code は一度きり。黙って空を保存しない。"""
+    def fake_post(url, data):
+        return {"error_type": "OAuthException", "code": 400}
+
+    with pytest.raises(ig.InstagramError):
+        ig.exchange_code(
+            "USED", "123", "SECRET", "https://example.com/ig/callback",
+            http_post=fake_post, http_get=lambda *a, **k: {},
+        )
+
+
+def test_exchange_code_fails_when_the_long_lived_step_returns_nothing() -> None:
+    with pytest.raises(ig.InstagramError):
+        ig.exchange_code(
+            "CODE", "123", "SECRET", "https://example.com/ig/callback",
+            http_post=lambda url, data: {"access_token": "SHORT"},
+            http_get=lambda url, params: {},
+        )

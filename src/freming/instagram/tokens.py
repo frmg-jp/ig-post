@@ -152,3 +152,99 @@ __all__ = [
     "refresh_token",
     "save_token",
 ]
+
+
+# ----------------------------------------------------------------------
+# 認可コードの引き換え。
+#
+# ダッシュボードの「Generate token」は、沢田の画面で @frmg.jpn の管理者に
+# ログインしてもらう形になる（画面共有か同席）。そこを避けたいときの経路。
+#
+#   1. authorization_url() のURLを管理者に送る
+#   2. 管理者は自分の端末で開いて「許可」を押す
+#   3. 審査UIの /ig/callback に着地し、code が画面に出る
+#   4. その code を沢田が受け取り、この関数で長期トークンに換える
+#
+# 交換には app secret が要る。だから公開ホストではなく手元で叩く。
+
+OAUTH_AUTHORIZE = "https://www.instagram.com/oauth/authorize"
+OAUTH_ACCESS_TOKEN = "https://api.instagram.com/oauth/access_token"
+# 投稿に要る最小のスコープ。basic はアカウント情報の読み取りで、
+# content_publish が投稿。メッセージやコメントの権限は求めない。
+SCOPES = ("instagram_business_basic", "instagram_business_content_publish")
+
+
+def authorization_url(app_id: str, redirect_uri: str) -> str:
+    """管理者に送る認可URL。"""
+    from urllib.parse import urlencode
+
+    return f"{OAUTH_AUTHORIZE}?" + urlencode(
+        {
+            "client_id": app_id,
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "scope": ",".join(SCOPES),
+        }
+    )
+
+
+def _http_post(url: str, data: dict) -> dict:
+    import httpx
+
+    response = httpx.post(url, data=data, timeout=30)
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+    if response.status_code != 200:
+        error = body.get("error_message") or body.get("error", {})
+        if isinstance(error, dict):
+            error = error.get("message") or ""
+        raise InstagramError(
+            f"Instagram が {response.status_code} を返しました: {error or response.text[:200]}"
+        )
+    return body
+
+
+def exchange_code(
+    code: str,
+    app_id: str,
+    app_secret: str,
+    redirect_uri: str,
+    http_post=_http_post,
+    http_get=_http_get,
+) -> str:
+    """認可コードを長期トークン（60日）に換える。
+
+    2段構えなのは Meta の仕様。まず短期トークン（1時間）を受け取り、
+    それを長期トークンに交換する。片方だけでは投稿を続けられない。
+
+    code は一度きり・短時間で失効する。失敗したら管理者にもう一度
+    リンクを開いてもらう（同じURLで構わない）。
+    """
+    short = http_post(
+        OAUTH_ACCESS_TOKEN,
+        {
+            "client_id": app_id,
+            "client_secret": app_secret,
+            "grant_type": "authorization_code",
+            "redirect_uri": redirect_uri,
+            "code": code,
+        },
+    )
+    short_token = short.get("access_token")
+    if not short_token:
+        raise InstagramError(f"短期トークンが返っていません: {short}")
+
+    long_body = http_get(
+        f"{GRAPH_BASE}/access_token",
+        {
+            "grant_type": "ig_exchange_token",
+            "client_secret": app_secret,
+            "access_token": short_token,
+        },
+    )
+    long_token = long_body.get("access_token")
+    if not long_token:
+        raise InstagramError(f"長期トークンが返っていません: {long_body}")
+    return long_token

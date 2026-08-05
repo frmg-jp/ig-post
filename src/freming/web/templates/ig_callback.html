@@ -1,0 +1,64 @@
+{# Instagram の認可後の着地先。@frmg.jpn の管理者が自分の端末で開く画面。
+
+   base.html は継承しない。審査UIのナビ（タブ・ルール候補・キー操作の説明）は
+   この人に関係が無いうえ、認証を通していない相手に内部の導線を見せることに
+   なるため。物件のデータも一切出さない。 #}
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Instagram 連携 — FREMING CURATED</title>
+<link rel="icon" href="/static/favicon.ico" sizes="any">
+<style>
+  :root { --bg: #efefef; --ink: #1c1b1a; --muted: #6b6b6b; --green: #1f5c3d; --red: #ff3500; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2rem 1.25rem; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    line-height: 1.75; -webkit-text-size-adjust: 100%;
+  }
+  main { max-width: 34rem; margin: 0 auto; }
+  .brand {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .78rem; letter-spacing: .18em; color: var(--muted); margin-bottom: 2.5rem;
+  }
+  h1 { font-size: 1.4rem; line-height: 1.5; margin: 0 0 1rem; }
+  h1.ok::before { content: "✓"; color: var(--green); margin-right: .5rem; }
+  p { margin: 0 0 1rem; }
+  textarea {
+    width: 100%; padding: .85rem; border: 1px solid #c9c9c9; border-radius: 6px;
+    background: #fff; color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .95rem; resize: vertical; -webkit-text-size-adjust: 100%;
+  }
+  .note { font-size: .85rem; color: var(--muted); margin-top: 1rem; }
+  .err { color: var(--red); }
+</style>
+</head>
+<body>
+<main>
+  <div class="brand">FREMING CURATED</div>
+  {% if code %}
+    <h1 class="ok">連携が完了しました</h1>
+    <p>ありがとうございました。<strong>下の文字列をコピーして、沢田までお送りください。</strong></p>
+    <textarea readonly rows="4" onclick="this.select()">{{ code }}</textarea>
+    <p class="note">
+      タップすると全体が選択されます。これは一度きりの引換券で、短時間で無効に
+      なります。投稿以外の操作には使えません。
+    </p>
+    <p class="note">
+      連携はいつでも Instagram アプリの
+      設定 → セキュリティ → アプリとウェブサイト から解除できます。
+    </p>
+  {% elif error %}
+    <h1 class="err">連携できませんでした</h1>
+    <p>次のメッセージが返っています。そのまま沢田までお伝えください。</p>
+    <textarea readonly rows="3" onclick="this.select()">{{ error }}</textarea>
+  {% else %}
+    <h1>この画面は直接開くものではありません</h1>
+    <p>沢田からお送りした連携用のリンクから進んでください。</p>
+  {% endif %}
+</main>
+</body>
+</html>

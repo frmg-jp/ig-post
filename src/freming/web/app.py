@@ -114,6 +114,31 @@ def create_app(
         """ホスティング側の死活監視用。認証を通さないので中身は返さない。"""
         return {"status": "ok"}
 
+    @app.get("/ig/callback", response_class=HTMLResponse)
+    def instagram_callback(
+        request: Request, code: str | None = None, error_description: str | None = None
+    ):
+        """Instagram の認可後の着地先。
+
+        @frmg.jpn の管理者に自分の端末で認可してもらうための受け皿。
+        認証を通さない（web/auth.py の EXEMPT_PATHS）。理由は、その人が
+        審査UIの資格情報を持っていないため。ここで Basic 認証を出すと
+        パスワードを聞かれて詰む。
+
+        **受け取った code はサーバー側で使わない。** code をトークンに
+        交換するには app secret が要り、それは公開ホストに置かない方針
+        （web/asgi.py と同じ理由）。画面に出して、手元の Mac で
+        `instagram exchange-code` に渡してもらう。
+
+        code は一度きり・短時間で失効するので、画面に出しても後から
+        使い回せない。
+        """
+        return templates.TemplateResponse(
+            request,
+            "ig_callback.html",
+            {"code": code, "error": error_description},
+        )
+
     @app.get("/", response_class=HTMLResponse)
     def index(
         request: Request,

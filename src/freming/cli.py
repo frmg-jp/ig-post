@@ -656,6 +656,48 @@ def _cmd_instagram(args: argparse.Namespace) -> int:
         print("定期実行が毎日更新するので、以後の手作業は不要です。")
         return 0
 
+    if args.ig_action == "auth-url":
+        # @frmg.jpn の管理者に送るリンク。秘密情報は入らない（アプリIDは公開値）。
+        app_id = cfg.instagram.app_id
+        if not app_id:
+            print("config.yaml の instagram.app_id が未設定です。", file=sys.stderr)
+            return 2
+        url = ig.authorization_url(app_id, args.redirect_uri)
+        print("このURLを @frmg.jpn の管理者に送ってください:\n")
+        print(f"  {url}\n")
+        print("管理者が自分の端末で開いてログイン・許可すると、着地先の画面に")
+        print("引き換え用の文字列（code）が出ます。それを受け取ったら:")
+        print("  python -m freming.cli instagram exchange-code")
+        return 0
+
+    if args.ig_action == "exchange-code":
+        import getpass
+
+        app_id = cfg.instagram.app_id
+        if not app_id:
+            print("config.yaml の instagram.app_id が未設定です。", file=sys.stderr)
+            return 2
+        # code は使い捨てだが、app secret は使い回される。どちらも履歴に残さない。
+        code = getpass.getpass("管理者から受け取った code を貼り付けて Enter: ").strip()
+        secret = os.environ.get("INSTAGRAM_APP_SECRET") or getpass.getpass(
+            "Instagram app secret を貼り付けて Enter（画面には表示されません）: "
+        ).strip()
+        if not code or not secret:
+            print("入力が空です。", file=sys.stderr)
+            return 2
+        try:
+            value = ig.exchange_code(code, app_id, secret, args.redirect_uri)
+            profile = ig.fetch_profile(value)
+        except ig.InstagramError as exc:
+            print(f"引き換えに失敗しました: {exc}", file=sys.stderr)
+            print("code は一度きり・短時間で失効します。もう一度リンクを開いてもらってください。", file=sys.stderr)
+            return 1
+        with session(target) as conn:
+            ig.save_token(conn, value)
+        print(f"保存しました: @{profile.get('username')}")
+        print("定期実行が毎日更新するので、以後の手作業は不要です。")
+        return 0
+
     if args.ig_action == "check":
         from datetime import UTC, datetime
 
@@ -854,7 +896,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_reset_img.set_defaults(func=_cmd_reset_images)
 
     p_ig = sub.add_parser("instagram", help="Instagram のトークン管理（[8] 自動投稿の土台）")
-    p_ig.add_argument("ig_action", choices=["set-token", "check", "refresh"])
+    p_ig.add_argument(
+        "ig_action",
+        choices=["auth-url", "exchange-code", "set-token", "check", "refresh"],
+        help=(
+            "auth-url: 管理者に送る認可URLを出す / exchange-code: 受け取った code を"
+            "トークンに換える / set-token: ダッシュボードで生成したトークンを直接貼る"
+        ),
+    )
+    p_ig.add_argument(
+        "--redirect-uri",
+        default="https://freming-curated-review.onrender.com/ig/callback",
+        help="Meta の Business login settings に登録したものと完全に一致させること",
+    )
     p_ig.set_defaults(func=_cmd_instagram)
 
     p_status = sub.add_parser("status", help="候補の件数をステータス別に表示")
