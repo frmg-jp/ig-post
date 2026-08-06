@@ -557,3 +557,15 @@ def test_an_unknown_sort_does_not_break_the_page(client) -> None:
     """SORTS の値は SQL に埋まる。未知の値で 500 にならないこと。"""
     assert client.get("/?sort=' OR 1=1--").status_code == 200
     assert client.get("/?sort=nonsense").status_code == 200
+
+
+def test_price_sort_says_it_compares_in_yen(client, conn) -> None:
+    """価格は原文の通貨で表示しているので、換算で並べていることを断る。"""
+    _add(conn)
+    assert "円換算で比較" in client.get("/?sort=price_desc").text
+    assert "円換算で比較" in client.get("/?sort=price_asc").text
+
+
+def test_other_sorts_do_not_mention_the_conversion(client, conn) -> None:
+    _add(conn)
+    assert "円換算で比較" not in client.get("/?sort=score").text

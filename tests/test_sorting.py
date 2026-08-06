@@ -120,3 +120,92 @@ def test_backfill_fills_rows_written_before_the_columns_existed(db) -> None:
     row = db.execute("SELECT price_value, year_built_value FROM properties").fetchone()
     assert row["price_value"] == 250_000
     assert row["year_built_value"] == 1899
+
+
+# ----------------------------------------------------------------------
+# 円換算での価格の並べ替え。
+#
+# 価格は原文の通貨のまま保存・表示している。通貨をまたいで「高い順・安い順」を
+# 出すには換算が要るが、DBには換算値を保存していない（レートを直すたびに
+# 全件を書き直すことになるため）。並べ替えのたびに計算する。
+
+RATES = {"JPY": 1.0, "USD": 150.0, "GBP": 195.0, "TWD": 4.7, "EUR": 165.0}
+
+
+def test_price_sort_without_rates_compares_raw_numbers(db) -> None:
+    """レートを渡さないと、通貨を無視した数値の大小になる。
+
+    3,980萬(TWD) = 39,800,000 が $1,250,000 より大きい数として先に来る。
+    これは金額として比べたことにならない、というのが換算を入れた理由。
+    """
+    _add(db, "usd", price="$1,250,000")
+    _add(db, "twd", price="3,980 萬")
+
+    assert _titles(db, "price_desc") == ["twd", "usd"]
+
+
+def test_price_sort_with_rates_compares_in_yen(db) -> None:
+    """換算すると USD 1.25M（約1.9億円）が TWD 3,980萬（約1.87億円）の上に来る。"""
+    _add(db, "usd", price="$1,250,000")
+    _add(db, "twd", price="3,980 萬")
+
+    got = [
+        r["title"]
+        for r in list_properties(db, status="pending", sort="price_desc", fx_rates=RATES)
+    ]
+    assert got == ["usd", "twd"]
+
+
+def test_yen_conversion_orders_four_currencies(db) -> None:
+    _add(db, "gbp", price="£1.2m")       # 234,000,000 円
+    _add(db, "usd", price="$1,250,000")  # 187,500,000 円
+    _add(db, "eur", price="€850,000")    # 140,250,000 円
+    _add(db, "cheap", price="$9,000")    #   1,350,000 円
+
+    got = [
+        r["title"]
+        for r in list_properties(db, status="pending", sort="price_desc", fx_rates=RATES)
+    ]
+    assert got == ["gbp", "usd", "eur", "cheap"]
+
+
+def test_currency_without_a_rate_goes_last(db) -> None:
+    """換算できないものを金額だけで混ぜない。桁が違うと順序が壊れる。"""
+    _add(db, "usd", price="$100,000")
+    _add(db, "unknown_currency", price="100,000")   # 通貨記号が無い
+
+    for sort in ("price_desc", "price_asc"):
+        got = [
+            r["title"]
+            for r in list_properties(db, status="pending", sort=sort, fx_rates=RATES)
+        ]
+        assert got[-1] == "unknown_currency", sort
+
+
+def test_rates_are_not_stored_in_the_database(db) -> None:
+    """レートを変えたら、backfill せずに順序が変わること。"""
+    _add(db, "usd", price="$1,000,000")
+    _add(db, "gbp", price="£900,000")
+
+    cheap_pound = {"USD": 150.0, "GBP": 100.0}   # USD 1.5億 / GBP 0.9億
+    rich_pound = {"USD": 150.0, "GBP": 250.0}    # USD 1.5億 / GBP 2.25億
+
+    def top(rates):
+        return list_properties(db, status="pending", sort="price_desc", fx_rates=rates)[0]["title"]
+
+    assert top(cheap_pound) == "usd"
+    assert top(rich_pound) == "gbp"
+
+
+def test_price_expression_ignores_non_alphabetic_currency_keys(db) -> None:
+    """config に妙なキーが混ざってもSQLを壊さない。"""
+    from freming.db.repository import price_jpy_expr
+
+    expr = price_jpy_expr({"USD": 150.0, "'; DROP TABLE properties; --": 1.0})
+    assert "DROP TABLE" not in expr
+    _add(db, "usd", price="$1")
+    got = list_properties(
+        db, status="pending", sort="price_desc",
+        fx_rates={"USD": 150.0, "'; DROP TABLE properties; --": 1.0},
+    )
+    assert [r["title"] for r in got] == ["usd"]

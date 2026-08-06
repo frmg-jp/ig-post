@@ -361,6 +361,25 @@ class DeliveryConfig(BaseModel):
         return v
 
 
+class FxConfig(BaseModel):
+    """価格を並べ替えるための円換算レート。
+
+    表示には使わない（審査UIは原文の価格をそのまま出す）。通貨をまたいで
+    「高い順・安い順」を出すためだけに使う。
+
+    **DBには換算値を保存しない。** 保存するとレートを直すたびに全件を
+    書き直すことになる。並べ替えのときだけ price_value × レート で計算する。
+    """
+
+    # 1通貨あたりの円。ここを書き換えれば次の表示から順序に反映される。
+    jpy_per: dict[str, float] = Field(default_factory=dict)
+    # レートの基準日。いつの値かが分からないと、直すべきかの判断ができない。
+    as_of: str = ""
+
+    def rate(self, currency: str | None) -> float | None:
+        return self.jpy_per.get(currency) if currency else None
+
+
 class ImagesConfig(BaseModel):
     max_per_property: int = 10
     min_short_edge_px: int = 800
@@ -445,6 +464,7 @@ class Config(BaseModel):
     review_ui: ReviewUIConfig = Field(default_factory=ReviewUIConfig)
     delivery: DeliveryConfig = Field(default_factory=DeliveryConfig)
     images: ImagesConfig = Field(default_factory=ImagesConfig)
+    fx: FxConfig = Field(default_factory=FxConfig)
     process: ProcessConfig = Field(default_factory=ProcessConfig)
     drive: DriveConfig
     instagram: InstagramConfig = Field(default_factory=InstagramConfig)

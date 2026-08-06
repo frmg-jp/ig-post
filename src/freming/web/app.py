@@ -171,7 +171,7 @@ def create_app(
         try:
             rows = list_properties(
                 conn, status=status, limit=size, offset=(page - 1) * size,
-                series=series, sort=sort,
+                series=series, sort=sort, fx_rates=config.fx.jpy_per,
             )
             counts = count_by_status(conn)
             queued = (
@@ -206,6 +206,7 @@ def create_app(
                 "series": series,
                 "sort": sort,
                 "sort_options": SORT_LABELS,
+                "fx_as_of": config.fx.as_of,
                 "highlight": config.scoring.thresholds.highlight_above,
                 "thumb_px": config.review_ui.thumbnail_px,
             },

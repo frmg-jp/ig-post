@@ -178,6 +178,31 @@ SORTS: dict[str, str] = {
     "built_oldest": "p.year_built_value IS NULL, p.year_built_value ASC, p.id DESC",
 }
 DEFAULT_SORT = "score"
+_PRICE_SORTS = {"price_desc": "DESC", "price_asc": "ASC"}
+
+
+def price_jpy_expr(rates: dict[str, float]) -> str:
+    """price_value を円に直すSQL式を組み立てる。
+
+    **DBには換算値を保存しない。** 保存するとレートを直すたびに全件を
+    書き直すことになる。ここで毎回計算すれば、config.yaml のレートを
+    変えた次の表示から順序に反映される。
+
+    レートを持たない通貨（と通貨が判別できなかった行）は NULL になり、
+    価格順では末尾に回る。金額だけで比べると桁が違うので、換算できない
+    ものを混ぜるくらいなら並べない。
+
+    数値は float として config から来る（pydantic が検証済み）。SQLに
+    直接埋めるのは、ORDER BY にプレースホルダを置くと方言差が出るため。
+    """
+    if not rates:
+        return "p.price_value"
+    whens = " ".join(
+        f"WHEN '{code}' THEN {float(rate)!r}"
+        for code, rate in sorted(rates.items())
+        if code.isalpha()
+    )
+    return f"(p.price_value * CASE p.price_currency {whens} ELSE NULL END)"
 
 
 def list_properties(
@@ -189,6 +214,7 @@ def list_properties(
     min_score: float | None = None,
     series: str | None = None,
     sort: str = DEFAULT_SORT,
+    fx_rates: dict[str, float] | None = None,
 ) -> list[Row]:
     """審査UI用の一覧。未採点（score IS NULL）は末尾に回す。
 
@@ -197,6 +223,9 @@ def list_properties(
 
     sort は SORTS のキーのみ受け付ける。ここに文字列を直接埋めるので、
     未知の値は既定に落として SQL に渡さない。
+
+    fx_rates を渡すと、価格順は円に換算した値で並べる。渡さなければ
+    原文の通貨のままの数値で並ぶ（通貨をまたぐと意味を成さない）。
     """
     # 納品済みから Drive のフォルダを開けるように、納品記録も一緒に引く
     sql = (
@@ -213,7 +242,13 @@ def list_properties(
     if series:
         sql += " AND p.series = ?"
         params.append(series)
-    sql += f" ORDER BY {SORTS.get(sort, SORTS[DEFAULT_SORT])} LIMIT ? OFFSET ?"
+    order = SORTS.get(sort, SORTS[DEFAULT_SORT])
+    if fx_rates and sort in _PRICE_SORTS:
+        # 通貨をまたいで比べるため、円に直した値で並べる。換算できない行は
+        # NULL になるので、値が無い行と同じく末尾に回る。
+        expr = price_jpy_expr(fx_rates)
+        order = f"{expr} IS NULL, {expr} {_PRICE_SORTS[sort]}, p.id DESC"
+    sql += f" ORDER BY {order} LIMIT ? OFFSET ?"
     params += [limit, offset]
     return conn.execute(sql, params).fetchall()
 

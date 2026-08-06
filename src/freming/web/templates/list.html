@@ -10,6 +10,11 @@
     <a href="/?status={{ status }}&sort={{ key }}"
        class="{{ 'on' if sort == key else '' }}">{{ label }}</a>
   {% endfor %}
+  {# 価格は原文の通貨のまま表示しているので、円換算で並べていることを
+     断っておかないと「£1.2m が $1,250,000 より上なのはなぜか」になる #}
+  {% if sort in ("price_desc", "price_asc") and fx_as_of %}
+    <span class="note">円換算で比較（{{ fx_as_of }}）</span>
+  {% endif %}
 </p>
 
 {% if not rows %}
