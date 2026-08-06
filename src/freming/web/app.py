@@ -25,6 +25,8 @@ from fastapi.templating import Jinja2Templates
 from freming.config import Config, load_config
 from freming.db.connection import DbConnection, Row, connect
 from freming.db.repository import (
+    DEFAULT_SORT,
+    SORTS,
     approve_property,
     count_by_status,
     decide_rule_candidate,
@@ -49,6 +51,16 @@ TEMPLATES_DIR = Path(__file__).parent / "templates"
 # pyproject の package-data に web/static/* を入れてあるので配布物にも入る。
 STATIC_DIR = Path(__file__).parent / "static"
 
+# 並べ替えの選択肢。キーは repository.SORTS と対応する。
+SORT_LABELS: list[tuple[str, str]] = [
+    ("score", "スコア順"),
+    ("newest", "新着順"),
+    ("oldest", "古い順"),
+    ("price_desc", "価格が高い順"),
+    ("price_asc", "価格が安い順"),
+    ("built_oldest", "築年数が古い順"),
+]
+
 # 非承認の定型理由。毎回自由入力させると表記がばらつき、[7] の
 # タグ分類が効かなくなる。よく使うものを固定文にしておく。
 REJECT_PRESETS = [
@@ -58,6 +70,9 @@ REJECT_PRESETS = [
     "売出中ではない（記事の価格は建設費/落札額）",
     "画像が足りない、または品質が低い",
     "既出・類似の物件を納品済み",
+    # 言語化しにくい違和感も理由として残す。学習ループは理由をタグに
+    # 分類するので、繰り返されればここから傾向が見えてくる。
+    "なんとなくダサい",
 ]
 
 
@@ -145,14 +160,18 @@ def create_app(
         status: str | None = None,
         page: int = 1,
         series: str | None = None,
+        sort: str | None = None,
     ):
         status = status or config.review_ui.default_filter
+        # 未知の値は既定に落とす。SORTS のキーはSQLに直接埋まるため。
+        sort = sort if sort in SORTS else DEFAULT_SORT
         page = max(page, 1)
         size = config.review_ui.page_size
         conn = _conn()
         try:
             rows = list_properties(
-                conn, status=status, limit=size, offset=(page - 1) * size, series=series
+                conn, status=status, limit=size, offset=(page - 1) * size,
+                series=series, sort=sort,
             )
             counts = count_by_status(conn)
             queued = (
@@ -185,6 +204,8 @@ def create_app(
                 "presets": REJECT_PRESETS,
                 "series_options": config.series,
                 "series": series,
+                "sort": sort,
+                "sort_options": SORT_LABELS,
                 "highlight": config.scoring.thresholds.highlight_above,
                 "thumb_px": config.review_ui.thumbnail_px,
             },

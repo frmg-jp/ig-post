@@ -49,6 +49,18 @@ def _cmd_db(args: argparse.Namespace) -> int:
             print(f"{'[x]' if applied else '[ ]'} {version}")
         return 0
 
+    if args.db_action == "backfill-values":
+        # 0008 で足した price_value / price_currency / year_built_value を埋める。
+        # 書式（"$1,250,000" / "3,980 萬" / "built in 1902"）は SQL では解けない
+        # ので、Python で読み直して書く。並べ替えと築年の足切りが使う。
+        from freming.db.connection import session
+        from freming.db.repository import backfill_values
+
+        with session(cfg.app.target()) as conn:
+            count = backfill_values(conn)
+        print(f"{count} 件の価格・築年を数値化しました")
+        return 0
+
     if args.db_action == "check":
         # 移行の前に接続文字列を確かめる。移行は1回きりなので、
         # 繋がるか・空かをここで見てから走らせる。
@@ -786,7 +798,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_drive.set_defaults(func=_cmd_check_drive)
 
     p_db = sub.add_parser("db", help="DB操作")
-    p_db.add_argument("db_action", choices=["migrate", "status", "check", "transfer"])
+    p_db.add_argument(
+        "db_action",
+        choices=["migrate", "status", "check", "transfer", "backfill-values"],
+    )
     p_db.add_argument(
         "--db",
         default=None,

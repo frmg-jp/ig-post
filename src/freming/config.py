@@ -265,6 +265,11 @@ class ScoringThresholds(BaseModel):
     # 他の軸の下駄で埋まってしまう。実際、台湾の仲介物件は story が 0 でも
     # 54点（min_to_persist の1.8倍）に達して審査に上がっていた。
     story_min: float = 40.0
+    # これ以降に建てられた物件は落とす。承認基準の第2（時代・様式が特定
+    # できること）を数字で裏打ちするもの。築年が読み取れなかったものは
+    # 落とさない（不明を落とすと、築年を書いていない良い記事まで消える）。
+    # None で無効。
+    built_before: int | None = 2000
 
 
 class FeedbackConfig(BaseModel):

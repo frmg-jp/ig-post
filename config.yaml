@@ -637,13 +637,19 @@ instagram:
 #   スコアリングでは判定せず、審査UIで人が付ける。
 #   key はDBに保存される値なので変更しない。label は表示名なので変更可。
 # ---------------------------------------------------------------------
-series:
-  - { key: freming_pick,          label: "FREMING Pick" }
-  - { key: hidden_gem,            label: "Hidden Gem" }
-  - { key: penthouse_of_the_week, label: "Penthouse of the Week" }
-  - { key: adaptive_reuse,        label: "Adaptive Reuse" }
-  - { key: warehouse_loft,        label: "Warehouse Loft" }
-  - { key: architects_house,      label: "Architect's House" }
+# **連載企画は使わない（2026-08-06）。** 承認のたびに企画を選ぶ手間に
+# 見合う運用になっていなかったため、空にした。空にすると審査UIの
+# プルダウンごと消える（web/templates/_card.html の series_options 判定）。
+# 納品済みの行に残っている series の値は消さない。再開したくなったら
+# ここに戻すだけでよい。
+series: []
+# 元の一覧（戻すとき用）:
+#   - { key: freming_pick,          label: "FREMING Pick" }
+#   - { key: hidden_gem,            label: "Hidden Gem" }
+#   - { key: penthouse_of_the_week, label: "Penthouse of the Week" }
+#   - { key: adaptive_reuse,        label: "Adaptive Reuse" }
+#   - { key: warehouse_loft,        label: "Warehouse Loft" }
+#   - { key: architects_house,      label: "Architect's House" }
 
 # 承認済み8物件の分析（docs/approval-criteria.md）に基づくキーワード。
 # 「前歴が目に見える形で残っている」ことが最も強い共通項だったため、
@@ -721,6 +727,14 @@ scoring:
     # 「販売中(20) + 重点エリア(20) + ランクB(6) + 価格あり(5) + ジャンル不明(3)」
     # の54点で min_to_persist を超え、中身に関係なく審査に上がっていた。
     story_min: 40
+    # **2000年以降に建てられた物件は落とす。** 承認基準の第2（時代・様式が
+    # 特定できること）を数字で裏打ちするもので、現代の建売・新築マンションを
+    # 候補から外すのが目的。
+    #
+    # 判定に使うのは採点で取れた築年（year_built）。収集の時点では築年が
+    # 分からないので、ここで落とす。築年が読み取れなかったものは落とさない
+    # ——不明を落とすと、築年を書いていない良い記事まで消えるため。
+    built_before: 2000
   feedback:
     recent_reasons_in_prompt: 30   # 直近N件の非承認理由をプロンプトに含める
     tagging_batch_size: 10         # N件溜まるごとに reason_tag を付与

@@ -10,6 +10,7 @@ from __future__ import annotations
 from freming.config import Config
 from freming.db.connection import Row
 from freming.scoring.schema import Assessment, ScoreAxis, ScoreResult
+from freming.values import parse_year
 
 
 def _area_axis(config: Config, assessment: Assessment, row: Row) -> ScoreAxis:
@@ -127,4 +128,13 @@ def _gate(config: Config, assessment: Assessment) -> str:
     floor = config.scoring.thresholds.story_min
     if assessment.story_score < floor:
         return f"story={assessment.story_score} < {floor:.0f}"
+
+    # 築年での足切り。収集の時点では築年が分からないのでここで見る。
+    # 読み取れなかったものは落とさない——不明を落とすと、築年を書いて
+    # いない良い記事まで消えるため。
+    built_before = config.scoring.thresholds.built_before
+    if built_before is not None:
+        year = parse_year(assessment.year_built)
+        if year is not None and year >= built_before:
+            return f"築年 {year} ≧ {built_before}"
     return ""

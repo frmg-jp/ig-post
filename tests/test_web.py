@@ -232,25 +232,22 @@ def test_dismissing_a_rule_keeps_it_out_of_the_prompt(client, conn) -> None:
     assert approved_rules(conn) == []
 
 
-def test_series_is_applied_by_a_human(client, conn) -> None:
-    """連載企画は審査UIで人が付けること（スコアリングでは決めない）。"""
-    property_id = _add(conn)
+def test_series_is_not_offered_any_more(client, conn) -> None:
+    """連載企画は 2026-08-06 に畳んだ（config の series を空にした）。
 
+    承認のたびに企画を選ぶ手間に見合う運用になっていなかったため。
+    設定を戻せば復活するので、経路自体は残してある。
+    """
+    _add(conn)
     body = client.get("/").text
-    assert "FREMING Pick" in body          # 選択肢が出ている
-
-    client.post(f"/p/{property_id}/series", data={"series": "freming_pick"})
-    row = conn.execute(
-        "SELECT series FROM properties WHERE id = ?", (property_id,)
-    ).fetchone()
-    assert row["series"] == "freming_pick"
+    assert "企画なし" not in body
+    assert "FREMING Pick" not in body
 
 
-def test_series_can_be_cleared(client, conn) -> None:
+def test_an_unknown_series_key_is_refused(client, conn) -> None:
+    """企画を畳んだあとに古いリンクを叩かれても、未知の値を書き込まない。"""
     property_id = _add(conn)
-    client.post(f"/p/{property_id}/series", data={"series": "hidden_gem"})
-    client.post(f"/p/{property_id}/series", data={"series": ""})
-
+    client.post(f"/p/{property_id}/series", data={"series": "freming_pick"})
     row = conn.execute(
         "SELECT series FROM properties WHERE id = ?", (property_id,)
     ).fetchone()
@@ -284,17 +281,6 @@ def test_delivered_series_cannot_be_changed(client, conn) -> None:
     assert row["series"] == "hidden_gem"
 
 
-def test_list_can_filter_by_series(client, conn) -> None:
-    picked = _add(conn, url="https://example.com/a/", title="Picked loft")
-    other = _add(conn, url="https://example.com/b/", title="Other loft")
-    client.post(f"/p/{picked}/series", data={"series": "freming_pick"})
-
-    body = client.get("/?status=pending&series=freming_pick").text
-    assert "Picked loft" in body
-    assert "Other loft" not in body
-    assert other  # 未使用変数の警告避け
-
-
 def test_empty_approved_tab_explains_what_to_do(client) -> None:
     """空の画面で、そのタブに出すための次の一手が分かること。"""
     body = client.get("/?status=approved").text
@@ -305,11 +291,6 @@ def test_empty_approved_tab_explains_what_to_do(client) -> None:
 def test_empty_pending_tab_suggests_collecting(client) -> None:
     body = client.get("/?status=pending").text
     assert "collect" in body and "score" in body
-
-
-def test_empty_series_filter_explains_labels(client) -> None:
-    body = client.get("/?status=pending&series=freming_pick").text
-    assert "この企画のラベル" in body
 
 
 def test_delivered_card_links_to_drive(client, conn) -> None:
@@ -540,3 +521,39 @@ def test_the_favicon_is_served(client) -> None:
 
 def test_the_pages_point_at_the_favicon(client) -> None:
     assert '<link rel="icon" type="image/x-icon" href="/static/favicon.ico">' in client.get("/").text
+
+
+# ----------------------------------------------------------------------
+# 並べ替えバーと、連載企画を畳んだこと。
+
+
+def test_sort_bar_replaces_the_series_bar(client) -> None:
+    body = client.get("/?status=pending").text
+    assert "並べ替え:" in body
+    # 企画の絞り込みバーは消えている
+    assert "企画:" not in body
+
+
+def test_all_sort_options_are_offered(client) -> None:
+    body = client.get("/?status=pending").text
+    for label in ("スコア順", "新着順", "古い順", "価格が高い順", "価格が安い順", "築年数が古い順"):
+        assert label in body, label
+
+
+def test_series_dropdown_is_gone_from_the_cards(client, conn) -> None:
+    """config の series を空にしたので、承認時に企画を選ぶ必要がない。"""
+    _add(conn)
+    body = client.get("/?status=pending").text
+    assert "企画なし" not in body
+
+
+def test_the_new_reject_reason_is_offered(client, conn) -> None:
+    """理由のプルダウンはカードの中にあるので、候補が1件要る。"""
+    _add(conn)
+    assert "なんとなくダサい" in client.get("/?status=pending").text
+
+
+def test_an_unknown_sort_does_not_break_the_page(client) -> None:
+    """SORTS の値は SQL に埋まる。未知の値で 500 にならないこと。"""
+    assert client.get("/?sort=' OR 1=1--").status_code == 200
+    assert client.get("/?sort=nonsense").status_code == 200

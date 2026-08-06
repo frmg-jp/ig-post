@@ -510,3 +510,43 @@ def test_editorial_source_keeps_for_sale_bonus(config, conn) -> None:
     result = build_result(config, _STRONG, _row(conn, property_id), "test")
     for_sale = next(a for a in result.axes if a.key == "for_sale")
     assert for_sale.raw == 100.0
+
+
+# ----------------------------------------------------------------------
+# 築年での足切り。
+#
+# 「2000年築より新しいものは省く」。収集の時点では築年が分からないので、
+# 採点で取れた year_built を見る。
+
+
+def test_built_in_2000_or_later_is_gated(config, conn) -> None:
+    property_id = _add(conn)
+    row = _row(conn, property_id)
+    for year in ("2000", "2015", "built in 2021"):
+        assessment = Assessment(**{**_STRONG.__dict__, "year_built": year})
+        result = build_result(config, assessment, row, "test")
+        assert result.total == 0.0, year
+        assert "築年" in result.gate
+
+
+def test_built_before_the_line_still_passes(config, conn) -> None:
+    property_id = _add(conn)
+    row = _row(conn, property_id)
+    for year in ("1868", "1999", "c. 1920s"):
+        assessment = Assessment(**{**_STRONG.__dict__, "year_built": year})
+        result = build_result(config, assessment, row, "test")
+        assert result.total > 0.0, year
+        assert not result.gate
+
+
+def test_unknown_year_is_not_dropped(config, conn) -> None:
+    """築年を書いていない良い記事まで消さない。"""
+    property_id = _add(conn)
+    assessment = Assessment(**{**_STRONG.__dict__, "year_built": ""})
+    result = build_result(config, assessment, _row(conn, property_id), "test")
+    assert result.total > 0.0
+    assert not result.gate
+
+
+def test_the_year_line_comes_from_config(config, conn) -> None:
+    assert config.scoring.thresholds.built_before == 2000

@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from freming.collect.base import Candidate
 from freming.db.connection import DbConnection, Row
 from freming.logging_setup import get_logger
+from freming.values import parse_price, parse_year
 
 log = get_logger(__name__)
 
@@ -49,7 +50,44 @@ def insert_candidate(conn: DbConnection, candidate: Candidate) -> int | None:
         ),
     )
     row = cursor.fetchone()
-    return int(row["id"]) if row else None
+    if row is None:
+        return None
+    property_id = int(row["id"])
+    refresh_values(conn, property_id)
+    return property_id
+
+
+def refresh_values(conn: DbConnection, property_id: int) -> None:
+    """price / year_built の原文から、並べ替えと足切りに使う数値を作り直す。
+
+    原文は表示のために残し、順序と判定はこちらを使う。price は収集時と
+    採点時の二度書かれうるので、書いた側で計算せず、保存後の行を読み直して
+    作る（COALESCE の結果がどちらになったかを気にしなくて済む）。
+    """
+    row = conn.execute(
+        "SELECT price, year_built FROM properties WHERE id = ?", (property_id,)
+    ).fetchone()
+    if row is None:
+        return
+    value, currency = parse_price(row["price"])
+    conn.execute(
+        "UPDATE properties SET price_value = ?, price_currency = ?, year_built_value = ? "
+        "WHERE id = ?",
+        (value, currency, parse_year(row["year_built"]), property_id),
+    )
+
+
+def backfill_values(conn: DbConnection) -> int:
+    """既存の行に数値列を埋める。マイグレーション後に一度だけ実行する。
+
+    SQL だけでは書式を解けない（"$1,250,000" / "3,980 萬" / "built in 1902"）
+    ので、Python 側で読み直して書く。
+    """
+    ids = [r["id"] for r in conn.execute("SELECT id FROM properties ORDER BY id").fetchall()]
+    for property_id in ids:
+        refresh_values(conn, property_id)
+    conn.commit()
+    return len(ids)
 
 
 def exists_source_url(conn: DbConnection, source_url: str) -> bool:
@@ -122,7 +160,24 @@ def save_score(
             1 if provenance_visible else 0, _now(), property_id,
         ),
     )
+    # 採点で year_built が入り、price が上書きされることがある。原文が
+    # 変わったら数値も作り直す。
+    refresh_values(conn, property_id)
     conn.commit()
+
+
+# 審査UIの並べ替え。値が無い行（価格不明・築年不明・未採点）は、どの順序でも
+# 末尾に回す。先頭に固まると、順序を変えるたびに同じ「分からない」行を
+# 読まされることになるため。
+SORTS: dict[str, str] = {
+    "score": "p.score IS NULL, p.score DESC, p.id DESC",
+    "newest": "p.collected_at DESC, p.id DESC",
+    "oldest": "p.collected_at ASC, p.id ASC",
+    "price_desc": "p.price_value IS NULL, p.price_value DESC, p.id DESC",
+    "price_asc": "p.price_value IS NULL, p.price_value ASC, p.id DESC",
+    "built_oldest": "p.year_built_value IS NULL, p.year_built_value ASC, p.id DESC",
+}
+DEFAULT_SORT = "score"
 
 
 def list_properties(
@@ -133,11 +188,15 @@ def list_properties(
     offset: int = 0,
     min_score: float | None = None,
     series: str | None = None,
+    sort: str = DEFAULT_SORT,
 ) -> list[Row]:
     """審査UI用の一覧。未採点（score IS NULL）は末尾に回す。
 
     採点前の候補を隠すと「収集したのに出てこない」ことになるため、
     除外はせず順序だけ下げる。
+
+    sort は SORTS のキーのみ受け付ける。ここに文字列を直接埋めるので、
+    未知の値は既定に落として SQL に渡さない。
     """
     # 納品済みから Drive のフォルダを開けるように、納品記録も一緒に引く
     sql = (
@@ -154,7 +213,7 @@ def list_properties(
     if series:
         sql += " AND p.series = ?"
         params.append(series)
-    sql += " ORDER BY p.score IS NULL, p.score DESC, p.id DESC LIMIT ? OFFSET ?"
+    sql += f" ORDER BY {SORTS.get(sort, SORTS[DEFAULT_SORT])} LIMIT ? OFFSET ?"
     params += [limit, offset]
     return conn.execute(sql, params).fetchall()
 

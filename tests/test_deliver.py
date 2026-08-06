@@ -13,7 +13,7 @@ import pytest
 from PIL import Image
 
 from freming.collect.base import Candidate
-from freming.config import load_config
+from freming.config import SeriesLabel, load_config
 from freming.db.connection import connect
 from freming.db.migrate import migrate
 from freming.db.repository import insert_candidate
@@ -247,8 +247,30 @@ def test_meta_includes_series_label(config, conn) -> None:
     conn.commit()
     row = conn.execute("SELECT * FROM properties WHERE id = ?", (property_id,)).fetchone()
 
-    meta = build_meta(row, 10, config.series_label(row["series"]))
-    assert "series: FREMING Pick" in meta
+    labelled = config.model_copy(deep=True)
+    labelled.series = [SeriesLabel(key="freming_pick", label="FREMING Pick")]
+    assert "series: FREMING Pick" in build_meta(row, 10, labelled.series_label(row["series"]))
+
+
+def test_series_label_falls_back_to_the_key_when_the_series_is_retired(conn) -> None:
+    """企画を config から消しても、納品済みの行が表示できなくなることはない。
+
+    2026-08-06 に series を空にした。過去に付けたラベルは残っているので、
+    表示名が引けない場合は key をそのまま出す。
+    """
+    from freming.config import load_config
+
+    retired = load_config("config.yaml")
+    assert retired.series == []
+    assert retired.series_label("freming_pick") == "freming_pick"
+
+    property_id = _approved(conn)
+    conn.execute(
+        "UPDATE properties SET series = 'freming_pick' WHERE id = ?", (property_id,)
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM properties WHERE id = ?", (property_id,)).fetchone()
+    assert "series: freming_pick" in build_meta(row, 10, retired.series_label(row["series"]))
 
 
 def test_meta_without_series_is_blank(config, conn) -> None:

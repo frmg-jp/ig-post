@@ -1,24 +1,21 @@
 {% extends "base.html" %}
 {% block body %}
 
-{% if series_options %}
-  <p class="subnav">
-    企画:
-    <a href="/?status={{ status }}" class="{{ '' if series else 'on' }}">すべて</a>
-    {% for s in series_options %}
-      <a href="/?status={{ status }}&series={{ s.key }}"
-         class="{{ 'on' if series == s.key else '' }}">{{ s.label }}</a>
-    {% endfor %}
-  </p>
-{% endif %}
+{# 並べ替え。どの順序でも、値の無い行（価格不明・築年不明・未採点）は
+   末尾に回る。先頭に固まると、順序を変えるたびに同じ「分からない」行を
+   読まされることになるため。 #}
+<p class="subnav">
+  並べ替え:
+  {% for key, label in sort_options %}
+    <a href="/?status={{ status }}&sort={{ key }}"
+       class="{{ 'on' if sort == key else '' }}">{{ label }}</a>
+  {% endfor %}
+</p>
 
 {% if not rows %}
   {# 空のときは、いまのタブで次に何をすれば表示されるかを出す #}
   <p class="empty">
-    {% if series %}
-      この企画のラベルが付いた物件はまだありません。<br>
-      各カードのプルダウンで企画を選ぶとここに出ます。
-    {% elif status == "approved" %}
+    {% if status == "approved" %}
       承認済みの物件はまだありません。<br>
       <a href="/?status=pending">未審査</a> で承認するとここに移ります。
     {% elif status == "rejected" %}
@@ -44,8 +41,8 @@
 
 {% if page > 1 or has_next %}
   <p class="pager">
-    {% if page > 1 %}<a href="/?status={{ status }}&page={{ page - 1 }}">← 前</a>{% endif %}
-    {% if has_next %}<a class="next" href="/?status={{ status }}&page={{ page + 1 }}">次 →</a>{% endif %}
+    {% if page > 1 %}<a href="/?status={{ status }}&sort={{ sort }}&page={{ page - 1 }}">← 前</a>{% endif %}
+    {% if has_next %}<a class="next" href="/?status={{ status }}&sort={{ sort }}&page={{ page + 1 }}">次 →</a>{% endif %}
   </p>
 {% endif %}
 
