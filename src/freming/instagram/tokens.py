@@ -206,6 +206,32 @@ def _http_post(url: str, data: dict) -> dict:
     return body
 
 
+def clean_code(raw: str) -> str:
+    """人から受け取った文字列から、実際の認可コードだけを取り出す。
+
+    ここを素通しにすると Meta は一律 `Invalid authorization code` を返し、
+    「期限切れ」なのか「余計な文字が混ざっている」のか切り分けられない。
+    実際に踏んだ／踏みうる混入は3つ:
+
+      - **末尾の `#_`** … Meta がリダイレクトURLに必ず付ける。ドキュメントにも
+        「使う前に取り除くこと」と明記がある
+      - **コールバックURLごと** … 「画面のURLを送ってください」と受け取られると
+        https://.../ig/callback?code=XXXX の形で届く
+      - 前後の空白・改行 … チャットやメールの折り返しで付く
+    """
+    text = (raw or "").strip()
+    if "code=" in text:
+        # URLごと渡された場合。fragment(#_)より前の code= を拾う。
+        from urllib.parse import parse_qs, urlparse
+
+        query = parse_qs(urlparse(text).query)
+        if query.get("code"):
+            text = query["code"][0]
+    # 断片指定が残っていれば落とす。`#_` に限らず `#` 以降は code ではない。
+    text = text.split("#", 1)[0]
+    return text.strip()
+
+
 def exchange_code(
     code: str,
     app_id: str,
@@ -221,7 +247,15 @@ def exchange_code(
 
     code は一度きり・短時間で失効する。失敗したら管理者にもう一度
     リンクを開いてもらう（同じURLで構わない）。
+
+    受け取った文字列は clean_code を通す。URLごと渡されたり末尾に `#_` が
+    付いていたりしても、Meta の返す `Invalid authorization code` は同じ
+    文言なので、入力側で潰しておかないと切り分けができない。
     """
+    code = clean_code(code)
+    if not code:
+        raise InstagramError("認可コードが空です。")
+
     short = http_post(
         OAUTH_ACCESS_TOKEN,
         {

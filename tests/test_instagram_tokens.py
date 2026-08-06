@@ -181,3 +181,58 @@ def test_exchange_code_fails_when_the_long_lived_step_returns_nothing() -> None:
             http_post=lambda url, data: {"access_token": "SHORT"},
             http_get=lambda url, params: {},
         )
+
+
+# ----------------------------------------------------------------------
+# 受け取った文字列の正規化。
+#
+# Meta は「期限切れ」も「余計な文字が混ざっている」も同じ
+# `Invalid authorization code` を返す。入力側で潰しておかないと
+# 切り分けができない。
+
+
+def test_clean_code_strips_the_fragment_meta_appends() -> None:
+    """Meta はリダイレクトURLの code に `#_` を付ける。仕様として明記がある。"""
+    assert ig.clean_code("AQK4wiCO#_") == "AQK4wiCO"
+
+
+def test_clean_code_takes_the_code_out_of_a_pasted_url() -> None:
+    """「画面のURLを送ってください」と受け取られた場合。"""
+    url = "https://freming-curated-review.onrender.com/ig/callback?code=AQK4wiCO#_"
+    assert ig.clean_code(url) == "AQK4wiCO"
+
+
+def test_clean_code_trims_whitespace_from_chat_wrapping() -> None:
+    assert ig.clean_code("  AQK4wiCO \n") == "AQK4wiCO"
+
+
+def test_clean_code_leaves_a_clean_code_alone() -> None:
+    assert ig.clean_code("AQK4wiCO") == "AQK4wiCO"
+
+
+def test_clean_code_on_empty_input() -> None:
+    assert ig.clean_code("   ") == ""
+    assert ig.clean_code(None) == ""
+
+
+def test_exchange_code_normalises_before_sending() -> None:
+    """正規化を通さずに送っていないこと。"""
+    sent = {}
+
+    def fake_post(url, data):
+        sent.update(data)
+        return {"access_token": "SHORT"}
+
+    ig.exchange_code(
+        "AQK4wiCO#_", "123", "SECRET", "https://example.com/ig/callback",
+        http_post=fake_post, http_get=lambda url, params: {"access_token": "LONG"},
+    )
+    assert sent["code"] == "AQK4wiCO"
+
+
+def test_exchange_code_refuses_an_empty_code() -> None:
+    with pytest.raises(ig.InstagramError):
+        ig.exchange_code(
+            "  ", "123", "SECRET", "https://example.com/ig/callback",
+            http_post=lambda url, data: {}, http_get=lambda url, params: {},
+        )

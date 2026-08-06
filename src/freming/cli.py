@@ -685,12 +685,30 @@ def _cmd_instagram(args: argparse.Namespace) -> int:
         if not code or not secret:
             print("入力が空です。", file=sys.stderr)
             return 2
+
+        # 何を送ったのかが見えないと切り分けられない。code そのものは出さず、
+        # 長さと前後だけ出す（貼り付けが途中で切れていないかの確認用）。
+        cleaned = ig.clean_code(code)
+        print(f"  code: {len(cleaned)}文字 {cleaned[:6]}…{cleaned[-4:]}")
+        print(f"  redirect_uri: {args.redirect_uri}")
+        print(f"  client_id: {app_id}")
+
         try:
-            value = ig.exchange_code(code, app_id, secret, args.redirect_uri)
+            value = ig.exchange_code(cleaned, app_id, secret, args.redirect_uri)
             profile = ig.fetch_profile(value)
         except ig.InstagramError as exc:
             print(f"引き換えに失敗しました: {exc}", file=sys.stderr)
-            print("code は一度きり・短時間で失効します。もう一度リンクを開いてもらってください。", file=sys.stderr)
+            print(
+                "\nこのエラーは次のどれでも同じ文言になります:\n"
+                "  1. code が期限切れ（発行から1時間ほど）または使用済み\n"
+                "  2. redirect_uri が認可時と1文字でも違う\n"
+                "     → 上に出ている値と、Metaのダッシュボードの登録値を見比べてください\n"
+                "     → 違うときは --redirect-uri で合わせられます\n"
+                "  3. app secret が違う\n\n"
+                "1が濃厚なら、担当者さまに同じリンクをもう一度開いてもらってください"
+                "（招待の承認はやり直し不要です）。",
+                file=sys.stderr,
+            )
             return 1
         with session(target) as conn:
             ig.save_token(conn, value)
