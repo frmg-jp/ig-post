@@ -40,6 +40,7 @@ from freming.db.repository import (
     set_series,
 )
 from freming.delivery.worker import DeliveryWorker
+from freming.fx import effective_rates
 from freming.logging_setup import get_logger, setup_logging
 from freming.web.auth import BasicAuth, BasicAuthMiddleware, credentials_from_env
 from freming.web.flags import flag
@@ -169,9 +170,11 @@ def create_app(
         size = config.review_ui.page_size
         conn = _conn()
         try:
+            # レートはDB（定期実行が週1で更新）→ config の順に見る。
+            fx_rates, fx_as_of = effective_rates(conn, config)
             rows = list_properties(
                 conn, status=status, limit=size, offset=(page - 1) * size,
-                series=series, sort=sort, fx_rates=config.fx.jpy_per,
+                series=series, sort=sort, fx_rates=fx_rates,
             )
             counts = count_by_status(conn)
             queued = (
@@ -206,7 +209,7 @@ def create_app(
                 "series": series,
                 "sort": sort,
                 "sort_options": SORT_LABELS,
-                "fx_as_of": config.fx.as_of,
+                "fx_as_of": fx_as_of,
                 "highlight": config.scoring.thresholds.highlight_above,
                 "thumb_px": config.review_ui.thumbnail_px,
             },

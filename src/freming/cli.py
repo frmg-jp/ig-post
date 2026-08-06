@@ -768,6 +768,46 @@ def _cmd_instagram(args: argparse.Namespace) -> int:
     return 1 if outcome == "expired" else 0
 
 
+def _cmd_fx(args: argparse.Namespace) -> int:
+    """円換算レートの取得と確認。
+
+    価格の並べ替えにのみ使う（表示には出さない）。定期実行が毎日
+    update を呼ぶが、実際に外へ出るのは7日を過ぎたときだけ。
+    """
+    from freming.db.connection import session
+    from freming.fx import FxError, effective_rates, load_rates, update_rates
+
+    cfg = load_config(args.config)
+    setup_logging(cfg.app.log_dir, cfg.app.log_level)
+
+    if args.fx_action == "show":
+        with session(cfg.app.target()) as conn:
+            rates, as_of = effective_rates(conn, cfg)
+            stored, _ = load_rates(conn)
+        source = "DB（自動更新）" if stored else "config.yaml（未取得のため）"
+        print(f"出どころ: {source}")
+        print(f"基準:     {as_of}")
+        for code, value in sorted(rates.items()):
+            print(f"  {code}  {value:>10,.2f} 円")
+        return 0
+
+    with session(cfg.app.target()) as conn:
+        try:
+            outcome = update_rates(conn, cfg, force=args.force)
+            rates, as_of = effective_rates(conn, cfg)
+        except FxError as exc:
+            # 取れなくても収集や採点とは無関係なので、定期実行は止めない。
+            print(f"レートを更新できませんでした: {exc}", file=sys.stderr)
+            return 1
+    if outcome == "fresh":
+        print(f"レートはまだ新しいので取得しませんでした（{as_of}）")
+        return 0
+    print(f"レートを更新しました（{as_of}）")
+    for code, value in sorted(rates.items()):
+        print(f"  {code}  {value:>10,.2f} 円")
+    return 0
+
+
 def _cmd_status(args: argparse.Namespace) -> int:
     from freming.db.connection import connect
     from freming.db.repository import count_by_status
@@ -943,6 +983,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Meta の Business login settings に登録したものと完全に一致させること",
     )
     p_ig.set_defaults(func=_cmd_instagram)
+
+    p_fx = sub.add_parser("fx", help="円換算レート（価格の並べ替えに使う）")
+    p_fx.add_argument("fx_action", choices=["update", "show"])
+    p_fx.add_argument(
+        "--force", action="store_true", help="7日経っていなくても取得し直す"
+    )
+    p_fx.set_defaults(func=_cmd_fx)
 
     p_status = sub.add_parser("status", help="候補の件数をステータス別に表示")
     p_status.set_defaults(func=_cmd_status)
