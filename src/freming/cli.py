@@ -782,6 +782,57 @@ def _cmd_instagram(args: argparse.Namespace) -> int:
     return 1 if outcome == "expired" else 0
 
 
+def _cmd_reel(args: argparse.Namespace) -> int:
+    """[9] 正方形の画像を並べて縦動画を1本作る。
+
+    まだ投稿はしない。どの画像を渡すかは人が決める段階なので、
+    画像のパスを引数で受ける。自動化は投稿処理と一緒に入れる。
+    """
+    from pathlib import Path
+
+    from freming.reel.build import ReelError, audio_for_week, build_reel, load_tracks
+
+    cfg = load_config(args.config)
+    setup_logging(cfg.app.log_dir, cfg.app.log_level)
+
+    if args.reel_action == "tracks":
+        try:
+            tracks = load_tracks()
+        except ReelError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        for index, track in enumerate(tracks):
+            mark = "要" if track.attribution_required else "不要"
+            print(f"  {index + 1}週目  {track.title} — {track.artist}"
+                  f"  [{track.license} / クレジット{mark}]")
+        return 0
+
+    squares = [Path(p) for p in args.images]
+    missing = [p for p in squares if not p.exists()]
+    if missing:
+        print("画像が見つかりません: " + ", ".join(str(p) for p in missing), file=sys.stderr)
+        return 1
+
+    try:
+        track = audio_for_week(args.week)
+        result = build_reel(squares, track, Path(args.out), cfg.reel)
+    except ReelError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(f"作りました: {result.path}")
+    print(f"  {result.image_count}枚 / {result.seconds:.1f}秒"
+          f"（1枚 {result.per_image_sec:.2f}秒）")
+    print(f"  音源: {track.title} — {track.artist}（{track.license}）")
+    line = track.caption_line()
+    print(f"  キャプションに入れる1行: {line}" if line
+          else "  クレジット表記は不要です。")
+    # 組んだコマは消さずに残す。仕上がりが変なときは、動画より先に
+    # ここを見たほうが原因が早く分かる。
+    print(f"  組んだコマ: {Path(args.out).parent / f'.{Path(args.out).stem}-frames'}")
+    return 0
+
+
 def _cmd_fx(args: argparse.Namespace) -> int:
     """円換算レートの取得と確認。
 
@@ -1010,6 +1061,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true", help="7日経っていなくても取得し直す"
     )
     p_fx.set_defaults(func=_cmd_fx)
+
+    p_reel = sub.add_parser("reel", help="正方形の画像から週次リールを作る（[9]）")
+    p_reel.add_argument(
+        "reel_action", choices=["build", "tracks"],
+        help="build: 動画を作る / tracks: 週ごとの音源の並びを表示",
+    )
+    p_reel.add_argument("images", nargs="*", help="正方形画像のパス（投稿順）")
+    p_reel.add_argument("--out", default="reel.mp4", help="書き出し先")
+    p_reel.add_argument(
+        "--week", type=int, default=0,
+        help="週番号。音源はこの剰余で選ぶので、同じ週なら何度作っても同じ曲になる",
+    )
+    p_reel.set_defaults(func=_cmd_reel)
 
     p_status = sub.add_parser("status", help="候補の件数をステータス別に表示")
     p_status.set_defaults(func=_cmd_status)

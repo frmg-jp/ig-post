@@ -402,6 +402,30 @@ class ProcessConfig(BaseModel):
     resample: str = "lanczos"
 
 
+class ReelConfig(BaseModel):
+    """[9] 週次リール。既定値は実物を見て決めたもので、勝手な仮置きではない。
+
+    size / square_offset_px / zoom は 2026-08-07 に3案を書き出して
+    見比べたうえで確定した。変えるときも同じように書き出して見ること。
+    """
+
+    size: tuple[int, int] = (1080, 1920)
+    image_count: int = 7          # 1日3投稿から各日の1位を7日ぶん
+    total_sec: float = 21.0
+    crossfade_sec: float = 0.4
+    zoom: float = 0.10            # 1枚の尺で 1.10 倍まで寄る。0 で寄らない
+    square_offset_px: int = 60    # 正方形を中央より上げる量。Reels の下UIを避ける
+    blur_radius: int = 60         # 背景のぼかし
+    bg_brightness: float = 0.55   # 背景を暗くする係数。前景の正方形を立たせる
+    jpeg_quality: int = 92
+    fps: int = 30
+    crf: int = 20
+    x264_preset: str = "medium"
+    audio_bitrate: str = "128k"
+    audio_fade_in_sec: float = 0.5
+    audio_fade_out_sec: float = 1.5
+
+
 class DrivePreflight(BaseModel):
     enabled: bool = True
     test_filename: str = ".frmg_write_test"
@@ -466,6 +490,7 @@ class Config(BaseModel):
     images: ImagesConfig = Field(default_factory=ImagesConfig)
     fx: FxConfig = Field(default_factory=FxConfig)
     process: ProcessConfig = Field(default_factory=ProcessConfig)
+    reel: ReelConfig = Field(default_factory=ReelConfig)
     drive: DriveConfig
     instagram: InstagramConfig = Field(default_factory=InstagramConfig)
 
