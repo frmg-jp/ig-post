@@ -314,13 +314,13 @@
   .pager .next { margin-left: auto; }
   /* 折り返したときの行間。狭い画面では2行になり、選択中の項目の下線が
      次の行の文字に近づく。実測（393px幅・Chromium）で行間 22px のとき
-     下線と次行の間は 3px しかなかった。27px（間隔 8px）でもまだ狭かった
-     ので、30px にして 11px 空ける。
+     下線と次行の間は 3px しかなかった。27px（間隔 8px）→ 30px（11px）と
+     詰めていき、32px（13px）に落ち着いた。1px 足すと間隔も 1px 広がる。
      項目の中で改行させないのは、「価格が安い/順」のように語の途中で
      割れるのを防ぐため。 */
   .subnav {
     padding: 0 0 16px; font-size: 11px; letter-spacing: var(--track-label);
-    line-height: 30px;
+    line-height: 32px;
   }
   .subnav a { white-space: nowrap; }
   /* padding は選択中でない項目にも掛ける。選んだ瞬間に下線の分だけ
