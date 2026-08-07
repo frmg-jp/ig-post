@@ -618,10 +618,21 @@ def _cmd_reset_images(args: argparse.Namespace) -> int:
     from pathlib import Path
 
     from freming.db.connection import session
-    from freming.db.repository import clear_images
+    from freming.db.repository import clear_images, clear_stale_skips
 
     cfg = load_config(args.config)
     setup_logging(cfg.app.log_dir, cfg.app.log_level)
+
+    if args.stale_skips:
+        # min_short_edge_px / allowed_content_types を変えたあとに使う。
+        # 一度弾いたURLは記録が残る限り二度と取りに行かないので、基準を
+        # 下げても既存の物件は復活しない。ここで記録だけ落とす。
+        with session(cfg.app.target()) as conn:
+            removed = clear_stale_skips(conn)
+        print(f"基準の変更で結論が変わりうる除外記録を {removed} 件消しました。")
+        print("次の deliver で取り直します（取得できなかった記録は残しています）。")
+        return 0
+
     with session(cfg.app.target()) as conn:
         removed = clear_images(conn, args.id)
     if removed == 0:
@@ -968,7 +979,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_reset_img = sub.add_parser(
         "reset-images", help="取得済み画像を捨てて取り直す（抽出ルールを直したとき）"
     )
-    p_reset_img.add_argument("--id", type=int, required=True, help="property_id")
+    group_img = p_reset_img.add_mutually_exclusive_group(required=True)
+    group_img.add_argument("--id", type=int, help="property_id")
+    group_img.add_argument(
+        "--stale-skips",
+        action="store_true",
+        help="最小サイズ・許可形式を変えたあとに、その判定で弾いた記録だけ全件消す",
+    )
     p_reset_img.set_defaults(func=_cmd_reset_images)
 
     p_ig = sub.add_parser("instagram", help="Instagram のトークン管理（[8] 自動投稿の土台）")

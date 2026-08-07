@@ -523,6 +523,32 @@ def clear_images(conn: DbConnection, property_id: int) -> int:
     return images + skips
 
 
+# 判定基準（min_short_edge_px / allowed_content_types）が変わると結論が
+# 変わりうる除外理由。取得できなかった系（failed / robots / broken）は
+# 基準と無関係なので、まとめて消すときも残す。
+THRESHOLD_SKIP_REASONS = ("too_small", "wrong_type")
+
+
+def clear_stale_skips(conn: DbConnection) -> int:
+    """基準の変更で結論が変わりうる除外記録を、まとめて消す。
+
+    一度弾いたURLは image_skips に残る限り二度と取りに行かない。これは
+    相手サイトへの無駄なリクエストを避けるための設計だが、**閾値を下げても
+    既存の物件が復活しない**という副作用がある。基準を変えたあとに一度
+    これを呼ぶ。
+
+    納品済みは触らない（Drive の中身と食い違う）。
+    """
+    marks = ",".join("?" for _ in THRESHOLD_SKIP_REASONS)
+    cursor = conn.execute(
+        f"DELETE FROM image_skips WHERE reason IN ({marks}) AND property_id IN "
+        "(SELECT id FROM properties WHERE status != 'delivered')",
+        THRESHOLD_SKIP_REASONS,
+    )
+    conn.commit()
+    return cursor.rowcount
+
+
 def deletable_properties(
     conn: DbConnection,
     *,

@@ -382,7 +382,7 @@ class FxConfig(BaseModel):
 
 class ImagesConfig(BaseModel):
     max_per_property: int = 10
-    min_short_edge_px: int = 800
+    min_short_edge_px: int = 640
     # 代表画像が単色（＝サイト側の「写真なし」プレースホルダ）の物件を
     # 収集時に落とす。寸法は本物と同じことが多く min_short_edge_px では
     # 落ちないため、別の条件として持つ。

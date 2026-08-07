@@ -555,3 +555,74 @@ def test_reset_counts_the_skips_too(config, conn, row) -> None:
     assert conn.execute(
         "SELECT COUNT(*) AS n FROM image_skips WHERE property_id = ?", (row["id"],)
     ).fetchone()["n"] == 0
+
+
+def test_the_new_threshold_accepts_mls_sized_photos(config, conn, row) -> None:
+    """MLS由来の写真（1024x683 が上限）が通ること。
+
+    2026-08-07 に min_short_edge_px を 800 → 640 に下げた判断の裏づけ。
+    Coldwell Banker は ?width=2048 を投げても 1024x683 を返す。
+    """
+    assert config.images.min_short_edge_px <= 683
+
+    pages = _pages()
+    pages["https://example.com/photos/a.jpg"] = _Response(_png(1024, 683), "image/jpeg")
+    stats = fetch_images(config, conn, row, client=FakeClient(pages))
+
+    # 1024x683 が採用されていること（_pages には別に 120x90 が入っていて、
+    # そちらは落ちるのが正しい）
+    assert (1024, 683) in [(i.width, i.height) for i in stats.images]
+
+
+def test_logos_are_still_refused(config, conn, row) -> None:
+    """閾値を下げても、ロゴ・アイコンの類は落とすこと。"""
+    pages = _pages()
+    pages["https://example.com/photos/a.jpg"] = _Response(_png(300, 200), "image/jpeg")
+    stats = fetch_images(config, conn, row, client=FakeClient(pages))
+
+    # 300x200 と、_pages に元からある 120x90 の2枚が落ちる
+    assert stats.too_small == 2
+    assert (300, 200) not in [(i.width, i.height) for i in stats.images]
+
+
+def test_stale_skips_are_cleared_in_bulk(config, conn, row) -> None:
+    """基準を変えたあと、既存の物件が復活できること。
+
+    一度弾いたURLは記録が残る限り二度と取りに行かない。閾値を下げても
+    既存の物件が復活しないので、記録を落とす経路が要る。
+    """
+    from freming.db.repository import clear_stale_skips
+
+    for url, reason in (
+        ("https://example.com/1.jpg", "too_small"),
+        ("https://example.com/2.jpg", "wrong_type"),
+        ("https://example.com/3.jpg", "failed"),
+    ):
+        conn.execute(
+            "INSERT INTO image_skips (property_id, source_url, reason, created_at) "
+            "VALUES (?, ?, ?, '2026-08-07')",
+            (row["id"], url, reason),
+        )
+    conn.commit()
+
+    assert clear_stale_skips(conn) == 2
+    left = conn.execute(
+        "SELECT reason FROM image_skips WHERE property_id = ?", (row["id"],)
+    ).fetchall()
+    # 取得できなかった記録は残す（基準とは無関係なので消す理由がない）
+    assert [r["reason"] for r in left] == ["failed"]
+
+
+def test_delivered_properties_keep_their_skips(config, conn, row) -> None:
+    """納品済みは触らない（Drive の中身と食い違う）。"""
+    from freming.db.repository import clear_stale_skips
+
+    conn.execute("UPDATE properties SET status = 'delivered' WHERE id = ?", (row["id"],))
+    conn.execute(
+        "INSERT INTO image_skips (property_id, source_url, reason, created_at) "
+        "VALUES (?, 'https://example.com/1.jpg', 'too_small', '2026-08-07')",
+        (row["id"],),
+    )
+    conn.commit()
+
+    assert clear_stale_skips(conn) == 0
