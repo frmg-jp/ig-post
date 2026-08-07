@@ -313,9 +313,14 @@
   .pager a:hover { color: var(--fg); border-bottom-color: var(--fg); }
   .pager .next { margin-left: auto; }
   .subnav { padding: 0 0 16px; font-size: 11px; letter-spacing: var(--track-label); }
-  .subnav a { color: var(--faint); text-decoration: none; margin-right: 14px; }
+  /* padding は選択中でない項目にも掛ける。選んだ瞬間に下線の分だけ
+     項目が動くのを防ぐため。 */
+  .subnav a {
+    color: var(--faint); text-decoration: none; margin-right: 14px;
+    padding-bottom: 5px;
+  }
   .subnav a:hover { color: var(--fg); }
-  .subnav a.on { color: var(--fg); border-bottom: 1px solid var(--hi); }
+  .subnav a.on { color: var(--fg); border-bottom: 3px solid var(--fg); }
 
   @media (max-width: 640px) {
     header, main { padding-left: 18px; padding-right: 18px; }
