@@ -29,13 +29,24 @@ pytestmark = pytest.mark.skipif(
 
 
 def _reset(dsn: str) -> None:
+    """テスト用DBを空にする。
+
+    **消す表を列挙しない。** 以前はここに固定の一覧を書いていたが、
+    マイグレーションでテーブルが増えるたびに古くなる。実際、0009 で
+    fx_rates を足したときに漏れ、schema_migrations だけが消えて
+    fx_rates が残ったため、次の migrate が
+    `relation "fx_rates" already exists` で落ちてCIが赤になった。
+
+    列挙する限り同じことが起きるので、実際にあるものを問い合わせて消す。
+    """
     conn = connect(dsn)
     try:
-        for table in (
-            "image_skips", "images", "jobs", "deliveries", "feedback",
-            "rule_candidates", "properties", "schema_migrations",
-        ):
-            conn.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
+        rows = conn.execute(
+            "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+        ).fetchall()
+        for row in rows:
+            # 表名は pg_tables から来た実在の識別子。念のため引用符で囲む。
+            conn.execute(f'DROP TABLE IF EXISTS "{row["tablename"]}" CASCADE')
         conn.commit()
     finally:
         conn.close()
@@ -172,3 +183,32 @@ def test_transfer_refuses_a_non_empty_destination(tmp_path, conn) -> None:
     _add(conn)   # 移行先に行がある状態
     with pytest.raises(TransferError, match="既に行があります"):
         transfer(source, DSN)
+
+
+def test_reset_leaves_no_tables_behind() -> None:
+    """後始末が取りこぼさないこと。
+
+    以前は消す表を固定で列挙していて、マイグレーションで増えるたびに
+    古くなった。0009 で fx_rates を足したときに漏れ、schema_migrations
+    だけが消えて fx_rates が残り、次の migrate が
+    `relation "fx_rates" already exists` で落ちてCIが赤になった。
+    """
+    migrate(DSN)
+    _reset(DSN)
+
+    conn = connect(DSN)
+    try:
+        rows = conn.execute(
+            "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert [r["tablename"] for r in rows] == []
+
+
+def test_migrate_survives_a_reset_and_runs_again() -> None:
+    """落として作り直しても migrate が通ること（CIが毎回やっている手順）。"""
+    for _ in range(2):
+        _reset(DSN)
+        migrate(DSN)
+        assert all(applied for _, applied in status(DSN))

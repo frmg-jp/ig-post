@@ -12,7 +12,10 @@
 -- config.yaml の fx.jpy_per は残す。ここが空のとき（取得が一度も成功して
 -- いない環境、テスト）の土台として使う。DBに値があればそちらが勝つ。
 
-CREATE TABLE fx_rates (
+-- IF NOT EXISTS を付けるのは 0007_api_tokens.sql と同じ理由。
+-- テストは schema_migrations を落として作り直すので、テーブルだけが
+-- 残っていると2回目の CREATE で落ちる。
+CREATE TABLE IF NOT EXISTS fx_rates (
   currency   TEXT PRIMARY KEY,   -- ISO 4217（USD / EUR / TWD ...）
   jpy_per    REAL NOT NULL,      -- 1通貨あたりの円
   fetched_at TEXT NOT NULL
