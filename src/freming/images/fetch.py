@@ -88,13 +88,33 @@ def _suffix_of(url: str) -> str:
     return suffix if suffix in _SAFE_SUFFIXES else ".jpg"
 
 
-def _probe(data: bytes) -> tuple[int, int] | None:
-    """バイト列から画像サイズを読む。壊れていれば None。"""
+# Pillow の format 名から MIME への対応。形式の判定はヘッダではなく
+# 中身から行う（下の _probe の説明を参照）。
+_FORMAT_TO_MIME = {
+    "JPEG": "image/jpeg",
+    "PNG": "image/png",
+    "WEBP": "image/webp",
+    "GIF": "image/gif",
+    "BMP": "image/bmp",
+    "TIFF": "image/tiff",
+}
+
+
+def _probe(data: bytes) -> tuple[tuple[int, int], str] | None:
+    """バイト列から (寸法, MIME) を読む。画像として開けなければ None。
+
+    **形式は Content-Type ヘッダではなく中身で判定する。** 配信側の設定が
+    緩いと、正しいJPEGでも application/octet-stream で返ってくる。実測
+    （2026-08-07、Coldwell Banker）では3枚中2枚がこれで、ヘッダを信じると
+    中身が正しい画像を「形式外」で捨てることになっていた。
+
+    非画像を弾く役目は、ここで実際に開けるかどうかが担う。ヘッダより厳しい。
+    """
     from PIL import Image, UnidentifiedImageError
 
     try:
         with Image.open(BytesIO(data)) as img:
-            return img.size
+            return (img.size, _FORMAT_TO_MIME.get(img.format or "", ""))
     except (UnidentifiedImageError, OSError):
         return None
 
@@ -190,17 +210,18 @@ def fetch_images(
                 stats.failed += 1
                 continue
 
-            content_type = (response.headers.get("content-type") or "").split(";")[0].strip()
+            probed = _probe(response.content)
+            if probed is None:
+                _skip(url, "broken")
+                stats.failed += 1
+                continue
+
+            size, content_type = probed
             if content_type not in config.images.allowed_content_types:
                 _skip(url, "wrong_type")
                 stats.wrong_type += 1
                 continue
 
-            size = _probe(response.content)
-            if size is None:
-                _skip(url, "broken")
-                stats.failed += 1
-                continue
             width, height = size
             if min(width, height) < config.images.min_short_edge_px:
                 # ロゴ・アイコン・サムネイル版はここで落ちる

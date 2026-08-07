@@ -509,10 +509,18 @@ def clear_images(conn: DbConnection, property_id: int) -> int:
     ).fetchone()
     if row is None or row["status"] == "delivered":
         return 0
-    cursor = conn.execute("DELETE FROM images WHERE property_id = ?", (property_id,))
-    conn.execute("DELETE FROM image_skips WHERE property_id = ?", (property_id,))
+    images = conn.execute(
+        "DELETE FROM images WHERE property_id = ?", (property_id,)
+    ).rowcount
+    # **除外の記録も数に入れる。** images が0枚でも image_skips が残って
+    # いれば、次の納品はそのURLを取りに行かない。ここで0を返すと呼び出し側は
+    # 「対象なし」と報告するが、実際には消している——「失敗した」と読めて
+    # 混乱する。実際に property_id=128 でこれを踏んだ。
+    skips = conn.execute(
+        "DELETE FROM image_skips WHERE property_id = ?", (property_id,)
+    ).rowcount
     conn.commit()
-    return cursor.rowcount
+    return images + skips
 
 
 def deletable_properties(

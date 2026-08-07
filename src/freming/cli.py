@@ -625,13 +625,16 @@ def _cmd_reset_images(args: argparse.Namespace) -> int:
     with session(cfg.app.target()) as conn:
         removed = clear_images(conn, args.id)
     if removed == 0:
-        print("対象がありません（存在しないIDか、納品済みです）", file=sys.stderr)
+        print("消すものがありません（存在しないIDか、納品済みです）", file=sys.stderr)
         return 1
 
     work_dir = Path(cfg.images.work_dir) / f"p{args.id:06d}"
     if work_dir.exists():
         shutil.rmtree(work_dir)
-    print(f"property_id={args.id} の画像 {removed} 件を消しました。deliver で取り直せます。")
+    print(
+        f"property_id={args.id} の画像と除外記録を {removed} 件消しました。"
+        "deliver で取り直せます。"
+    )
     return 0
 
 

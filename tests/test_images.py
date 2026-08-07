@@ -184,11 +184,47 @@ def test_max_per_property_is_respected(config, conn, row) -> None:
     assert stats.downloaded == 1
 
 
-def test_wrong_content_type_is_skipped(config, conn, row) -> None:
+def _gif(width: int, height: int) -> bytes:
+    buffer = BytesIO()
+    Image.new("RGB", (width, height), (120, 110, 100)).save(buffer, "GIF")
+    return buffer.getvalue()
+
+
+def test_wrong_format_is_skipped(config, conn, row) -> None:
+    """許可していない形式は落とす。判定は中身から行う。"""
     pages = _pages()
-    pages["https://example.com/photos/a.jpg"] = _Response(b"GIF89a", "image/gif")
+    # ヘッダは image/jpeg を名乗るが、中身は GIF。中身が優先される。
+    pages["https://example.com/photos/a.jpg"] = _Response(_gif(1600, 1200), "image/jpeg")
     stats = fetch_images(config, conn, row, client=FakeClient(pages))
+
     assert stats.wrong_type == 1
+    assert stats.downloaded == 1
+
+
+def test_a_real_image_served_as_octet_stream_is_accepted(config, conn, row) -> None:
+    """配信側が Content-Type を付けていなくても、中身が正しければ使う。
+
+    実測（2026-08-07、Coldwell Banker）では3枚中2枚が
+    application/octet-stream で返り、ヘッダを信じると正しいJPEGを
+    「形式外」で捨てていた。
+    """
+    pages = _pages()
+    pages["https://example.com/photos/a.jpg"] = _Response(
+        _png(1600, 1200), "application/octet-stream"
+    )
+    stats = fetch_images(config, conn, row, client=FakeClient(pages))
+
+    assert stats.wrong_type == 0
+    assert stats.downloaded == 2
+
+
+def test_data_that_is_not_an_image_is_still_refused(config, conn, row) -> None:
+    """形式の判定を中身に移しても、非画像は通さない。"""
+    pages = _pages()
+    pages["https://example.com/photos/a.jpg"] = _Response(b"not an image", "image/jpeg")
+    stats = fetch_images(config, conn, row, client=FakeClient(pages))
+
+    assert stats.failed == 1
     assert stats.downloaded == 1
 
 
@@ -326,8 +362,10 @@ def test_clear_images_allows_refetching(config, conn, row) -> None:
         "SELECT COUNT(*) AS n FROM images WHERE property_id = ?", (row["id"],)
     ).fetchone()["n"] == 2
 
+    # 返す件数は「消した画像＋消した除外記録」。除外記録しか無い物件で
+    # 0 を返すと、呼び出し側が「対象なし」と誤って報告する。
     removed = clear_images(conn, int(row["id"]))
-    assert removed == 2
+    assert removed == 2 + 1
     # 弾いたURLの記録も消える（消さないと同じ判定が繰り返される）
     assert conn.execute(
         "SELECT COUNT(*) AS n FROM image_skips WHERE property_id = ?", (row["id"],)
@@ -495,3 +533,25 @@ def test_undecodable_data_is_not_flat() -> None:
 def test_threshold_comes_from_argument() -> None:
     noisy = _jpeg(Image.effect_noise((512, 512), 60).convert("RGB"))
     assert is_flat_image(noisy, stddev_max=1000.0)
+
+
+def test_reset_counts_the_skips_too(config, conn, row) -> None:
+    """除外の記録しか無い物件でも「対象なし」と報告しないこと。
+
+    images が0枚でも image_skips が残っていれば、次の納品はそのURLを
+    取りに行かない。消しているのに0を返すと、呼び出し側が「失敗した」と
+    報告して混乱する（property_id=128 で実際に踏んだ）。
+    """
+    from freming.db.repository import clear_images
+
+    conn.execute(
+        "INSERT INTO image_skips (property_id, source_url, reason, created_at) "
+        "VALUES (?, 'https://example.com/photos/a.jpg', 'too_small', '2026-08-07')",
+        (row["id"],),
+    )
+    conn.commit()
+
+    assert clear_images(conn, row["id"]) == 1
+    assert conn.execute(
+        "SELECT COUNT(*) AS n FROM image_skips WHERE property_id = ?", (row["id"],)
+    ).fetchone()["n"] == 0
