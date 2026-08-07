@@ -346,19 +346,18 @@
     header nav { order: 2; flex-basis: 100%; }
     .auto { order: 3; margin-left: 0; }
 
-    /* 操作列を1行に収める。左半分が承認、右半分が非承認の一式。
-         左 49% … 承認
-         右 49% … 理由のプルダウン ＋ 自由記入 ＋ 非承認
-       間の 2% が両者の間隔になる（49+2+49=100）。
+    /* 操作列を1行に収める。左が承認、右が非承認の一式。
+         左 30% … 承認
+         右 68% … 理由のプルダウン ＋ 自由記入 ＋ 非承認
+       間の 2% が両者の間隔になる（30+2+68=100）。
 
-       **狭い。** 右半分に3つ入るので、iPhone の幅では自由記入が数文字分
-       しか見えない。承認と非承認を隣り合わせにして押し間違いを減らす
-       ことを優先した配置（ユーザー指定）。 */
+       承認は1つしか入らないので狭くてよい。右は3つ入るので、比率を
+       動かすならこちらに寄せる。 */
     .actions { gap: 8px 2%; }
-    .actions form.approve { display: flex; flex: 0 0 49%; min-width: 0; }
+    .actions form.approve { display: flex; flex: 0 0 30%; min-width: 0; }
     .actions form.approve button.ok { width: 100%; min-width: 0; }
     .actions form.reject {
-      display: flex; flex: 0 0 49%; gap: 4px; align-items: center;
+      display: flex; flex: 0 0 68%; gap: 4px; align-items: center;
       /* min-width の既定は auto で、中身の最小幅より狭くならない。
          49% を指定しても、これが無いと行からはみ出す。 */
       min-width: 0;
