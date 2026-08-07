@@ -323,7 +323,7 @@ class ReviewUIConfig(BaseModel):
     # 大きいほど写真の判断はしやすいが、1画面に入る件数が減る。
     # 旧名 thumbnail_max_px。テンプレートに渡すだけで使われておらず、
     # 値を変えても何も起きない状態だった。
-    thumbnail_px: int = 170
+    thumbnail_px: int = 250
 
 
 class DeliveryConfig(BaseModel):
