@@ -154,3 +154,44 @@ def test_everything_else_still_needs_credentials() -> None:
     client = TestClient(create_app(load_config("config.yaml"), auth=BasicAuth("u", "p")))
     for path in ("/", "/rules", "/ig", "/ig/callback/../"):
         assert client.get(path, follow_redirects=False).status_code == 401, path
+
+
+# --- [9] 投稿する画像の配り先 --------------------------------------------
+#
+# **Meta がここへ取りに来る。** 相手に資格情報を渡す方法がないので、
+# ここだけは認証を通さない。代わりに token を推測できない文字列にしてある。
+# 「うっかり認証がかかって投稿が全部失敗する」ことも、「間に合わせで
+# 全経路の認証を外す」ことも防ぎたいので、両方向を固定しておく。
+
+
+def test_投稿画像は認証なしで取れる(config) -> None:
+    from freming.db.connection import connect
+    from freming.db.repository import create_post
+    from freming.instagram.media import store_media
+
+    conn = connect(config.app.target())
+    post_id = create_post(conn, "feed", "2026-08-10T01:00:00+00:00")
+    token = store_media(conn, post_id, b"\xff\xd8jpeg")
+    conn.close()
+
+    client = TestClient(create_app(config, auth=BasicAuth("u", "p")))
+    response = client.get(f"/m/{token}")
+    assert response.status_code == 200
+    assert response.content == b"\xff\xd8jpeg"
+
+
+def test_知らない画像は404で認証は要求しない(config) -> None:
+    client = TestClient(create_app(config, auth=BasicAuth("u", "p")))
+    assert client.get("/m/ないよ").status_code == 404
+
+
+def test_予定表は認証が要る(config) -> None:
+    """配るのは画像だけ。予定表まで外に出さない。"""
+    client = TestClient(create_app(config, auth=BasicAuth("u", "p")))
+    assert client.get("/schedule").status_code == 401
+    assert client.get("/schedule", headers=_header("u", "p")).status_code == 200
+
+
+def test_投稿の操作は認証が要る(config) -> None:
+    client = TestClient(create_app(config, auth=BasicAuth("u", "p")))
+    assert client.post("/posts/1/skip").status_code == 401

@@ -624,3 +624,178 @@ def count_by_status(conn: DbConnection) -> dict[str, int]:
         "SELECT status, COUNT(*) AS n FROM properties GROUP BY status"
     ).fetchall()
     return {row["status"]: row["n"] for row in rows}
+
+
+# ----------------------------------------------------------------------
+# [9] Instagram への投稿
+# ----------------------------------------------------------------------
+POST_PLANNED = "planned"
+POST_PUBLISHING = "publishing"
+POST_PUBLISHED = "published"
+POST_FAILED = "failed"
+POST_SKIPPED = "skipped"
+
+
+def postable_properties(
+    conn: DbConnection, limit: int, sources: list[str] | None = None
+) -> list[Row]:
+    """まだ投稿していない納品済み物件を、スコアの高い順に返す。
+
+    納品済みに限るのは、そこまで通ったものだけが画像を持っているため。
+    承認しただけで画像が用意できなかったものを投稿に回さない。
+    """
+    params: list = []
+    where = ["p.status = 'delivered'", "po.id IS NULL"]
+    if sources:
+        marks = ",".join("?" for _ in sources)
+        where.append(f"p.source IN ({marks})")
+        params.extend(sources)
+    params.append(limit)
+    return conn.execute(
+        f"""
+        SELECT p.* FROM properties p
+        LEFT JOIN posts po ON po.property_id = p.id AND po.kind = 'feed'
+        WHERE {" AND ".join(where)}
+        ORDER BY p.score IS NULL, p.score DESC, p.id DESC
+        LIMIT ?
+        """,
+        tuple(params),
+    ).fetchall()
+
+
+def create_post(
+    conn: DbConnection,
+    kind: str,
+    scheduled_at: str,
+    property_id: int | None = None,
+    caption: str | None = None,
+    credit: str | None = None,
+    parent_post_id: int | None = None,
+) -> int | None:
+    """予定を1件作る。同じ物件・同じ種別が既にあれば None。"""
+    cursor = conn.execute(
+        """
+        INSERT INTO posts (
+            property_id, kind, state, scheduled_at, caption, credit,
+            parent_post_id, created_at
+        ) VALUES (?, ?, 'planned', ?, ?, ?, ?, ?)
+        ON CONFLICT (property_id, kind) DO NOTHING
+        RETURNING id
+        """,
+        (property_id, kind, scheduled_at, caption, credit, parent_post_id, _now()),
+    )
+    row = cursor.fetchone()
+    conn.commit()
+    return row["id"] if row else None
+
+
+def scheduled_posts(conn: DbConnection, until: str, states: tuple[str, ...] = ()) -> list[Row]:
+    """予定表に出す行。until までの予定を時刻順に。"""
+    params: list = [until]
+    where = ["p.scheduled_at <= ?"]
+    if states:
+        marks = ",".join("?" for _ in states)
+        where.append(f"p.state IN ({marks})")
+        params.extend(states)
+    return conn.execute(
+        f"""
+        SELECT p.*, pr.title, pr.location_city, pr.location_country,
+               pr.source, pr.score, pr.thumbnail_url
+        FROM posts p
+        LEFT JOIN properties pr ON pr.id = p.property_id
+        WHERE {" AND ".join(where)}
+        ORDER BY p.scheduled_at, p.id
+        """,
+        tuple(params),
+    ).fetchall()
+
+
+def claim_due_post(conn: DbConnection, now: str, max_attempts: int) -> Row | None:
+    """時間が来た予定を1件だけ取り、publishing にして返す。
+
+    **取得と状態変更を1文にしてある。** 別々にすると、2つのワーカーが
+    同じ行を読んで二重投稿になる。UPDATE ... WHERE state='planned' は
+    先に更新できた側だけが行を返すので、あとから来た側は何も取れない。
+    """
+    cursor = conn.execute(
+        """
+        UPDATE posts SET state = 'publishing', attempts = attempts + 1
+        WHERE id = (
+            SELECT id FROM posts
+            WHERE state = 'planned' AND scheduled_at <= ? AND attempts < ?
+            ORDER BY scheduled_at, id
+            LIMIT 1
+        )
+        RETURNING *
+        """,
+        (now, max_attempts),
+    )
+    row = cursor.fetchone()
+    conn.commit()
+    return row
+
+
+def finish_post(conn: DbConnection, post_id: int, media_id: str, container_id: str) -> None:
+    conn.execute(
+        "UPDATE posts SET state = 'published', ig_media_id = ?, ig_container_id = ?, "
+        "error = NULL, published_at = ? WHERE id = ?",
+        (media_id, container_id, _now(), post_id),
+    )
+    conn.commit()
+
+
+def fail_post(conn: DbConnection, post_id: int, error: str, max_attempts: int) -> str:
+    """失敗を記録する。上限に達していなければ planned に戻して次回に回す。"""
+    row = conn.execute("SELECT attempts FROM posts WHERE id = ?", (post_id,)).fetchone()
+    attempts = row["attempts"] if row else max_attempts
+    state = POST_FAILED if attempts >= max_attempts else POST_PLANNED
+    conn.execute(
+        "UPDATE posts SET state = ?, error = ? WHERE id = ?", (state, error[:500], post_id)
+    )
+    conn.commit()
+    return state
+
+
+def skip_post(conn: DbConnection, post_id: int) -> bool:
+    """予定表から外す。投稿済みには効かない。"""
+    cursor = conn.execute(
+        "UPDATE posts SET state = 'skipped' WHERE id = ? AND state IN ('planned', 'failed')",
+        (post_id,),
+    )
+    conn.commit()
+    return bool(cursor.rowcount)
+
+
+def retry_post(conn: DbConnection, post_id: int) -> bool:
+    """失敗・見送りを予定に戻す。試行回数も戻す。"""
+    cursor = conn.execute(
+        "UPDATE posts SET state = 'planned', attempts = 0, error = NULL "
+        "WHERE id = ? AND state IN ('failed', 'skipped')",
+        (post_id,),
+    )
+    conn.commit()
+    return bool(cursor.rowcount)
+
+
+def published_posts_between(conn: DbConnection, since: str, until: str) -> list[Row]:
+    """期間内に公開された通常投稿。週次リールの選抜に使う。"""
+    return conn.execute(
+        "SELECT * FROM posts WHERE kind = 'feed' AND state = 'published' "
+        "AND published_at >= ? AND published_at < ? ORDER BY published_at",
+        (since, until),
+    ).fetchall()
+
+
+def record_reach(conn: DbConnection, post_id: int, reach: int | None) -> None:
+    conn.execute(
+        "UPDATE posts SET reach = ?, reach_checked_at = ? WHERE id = ?",
+        (reach, _now(), post_id),
+    )
+    conn.commit()
+
+
+def count_posts_by_state(conn: DbConnection) -> dict[str, int]:
+    rows = conn.execute(
+        "SELECT state, COUNT(*) AS n FROM posts GROUP BY state"
+    ).fetchall()
+    return {row["state"]: row["n"] for row in rows}

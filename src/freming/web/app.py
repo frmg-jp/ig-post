@@ -41,6 +41,7 @@ from freming.db.repository import (
 )
 from freming.delivery.worker import DeliveryWorker
 from freming.fx import effective_rates
+from freming.instagram.worker import PostingWorker
 from freming.logging_setup import get_logger, setup_logging
 from freming.web.auth import BasicAuth, BasicAuthMiddleware, credentials_from_env
 from freming.web.flags import flag
@@ -103,16 +104,23 @@ def create_app(
     # 別ターミナルで deliver を叩く必要がない。
     auto = config.delivery.auto and config.drive.enabled
     worker = worker or (DeliveryWorker(config) if auto else None)
+    # [9] 投稿ワーカー。**画像を配るのが審査UI自身**なので、投稿する側も
+    # ここに置く。auto_post を立てるのは1箇所だけにすること。
+    poster = PostingWorker(config) if config.instagram.auto_post else None
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         if worker is not None:
             worker.start()
+        if poster is not None:
+            poster.start()
         try:
             yield
         finally:
             if worker is not None:
                 worker.stop()
+            if poster is not None:
+                poster.stop()
 
     app = FastAPI(title="FREMING CURATED 審査", lifespan=lifespan)
     if auth is not None:
@@ -371,6 +379,91 @@ def create_app(
         except AlreadyCollected:
             log.info("既に登録済みのURLです: %s", url)
         return RedirectResponse("/?status=pending", status_code=303)
+
+    # ------------------------------------------------------------------
+    # [9] Instagram への投稿
+    # ------------------------------------------------------------------
+    @app.get("/m/{token}")
+    def post_media(token: str):
+        """投稿する画像を配る。**Meta がここへ取りに来る。**
+
+        認証は通さない（web/auth.py の EXEMPT_PREFIXES）。相手に資格情報を
+        渡す方法がないため。代わりに token を推測できない文字列にしてある。
+        投稿が済んだ行は消すので、URLはすぐ死ぬ。
+        """
+        from fastapi.responses import Response
+
+        from freming.instagram.media import load_media
+
+        conn = _conn()
+        try:
+            found = load_media(conn, token)
+        finally:
+            conn.close()
+        if found is None:
+            return Response("見つかりません", status_code=404)
+        content, mime = found
+        # Meta は取得のたびに取りに来る。キャッシュは短くてよい。
+        return Response(content, media_type=mime, headers={"Cache-Control": "public, max-age=600"})
+
+    @app.get("/schedule", response_class=HTMLResponse)
+    def schedule(request: Request):
+        """投稿予定。承認がそのまま公開にならないよう、人が見て止める場所。"""
+        from datetime import UTC, datetime, timedelta
+        from zoneinfo import ZoneInfo
+
+        from freming.db.repository import scheduled_posts
+
+        zone = ZoneInfo(config.instagram.timezone)
+        now = datetime.now(UTC)
+        until = now + timedelta(days=config.instagram.plan_days)
+        conn = _conn()
+        try:
+            rows = list(scheduled_posts(conn, until.isoformat()))
+            counts = count_by_status(conn)
+        finally:
+            conn.close()
+
+        days: dict[str, list] = {}
+        for row in rows:
+            moment = datetime.fromisoformat(row["scheduled_at"]).astimezone(zone)
+            days.setdefault(moment.strftime("%m/%d (%a)"), []).append(
+                {"row": row, "at": moment.strftime("%H:%M")}
+            )
+        return templates.TemplateResponse(
+            request,
+            "schedule.html",
+            {
+                "days": days,
+                "days_ahead": config.instagram.plan_days,
+                "auto_post": config.instagram.auto_post,
+                "ready": bool(config.instagram.public_base_url),
+                "counts": counts,
+                "status": "schedule",
+            },
+        )
+
+    @app.post("/posts/{post_id}/skip")
+    def skip_post_route(post_id: int):
+        from freming.db.repository import skip_post
+
+        conn = _conn()
+        try:
+            skip_post(conn, post_id)
+        finally:
+            conn.close()
+        return RedirectResponse("/schedule", status_code=303)
+
+    @app.post("/posts/{post_id}/retry")
+    def retry_post_route(post_id: int):
+        from freming.db.repository import retry_post
+
+        conn = _conn()
+        try:
+            retry_post(conn, post_id)
+        finally:
+            conn.close()
+        return RedirectResponse("/schedule", status_code=303)
 
     return app
 

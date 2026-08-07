@@ -465,13 +465,55 @@ class DriveConfig(BaseModel):
 
 
 class InstagramConfig(BaseModel):
-    """Instagram 自動投稿（[8]）。トークンは DB（api_tokens）に持つ。
+    """Instagram 自動投稿（[8][9]）。トークンは DB（api_tokens）に持つ。
 
     app_id は公開値なのでここに置く。app_secret は OAuth コールバック方式を
     使うときだけ必要で、環境変数 INSTAGRAM_APP_SECRET からのみ読む。
     """
 
     app_id: str | None = None
+
+    # --- 投稿 ---------------------------------------------------------
+    # auto_post は**1箇所でだけ true にする**。複数の環境で同時に立てると
+    # 同じ予定を取り合う。posts の状態遷移で二重投稿は防いでいるが、
+    # そもそも1箇所に寄せるのが前提（納品ワーカーと同じ方針）。
+    auto_post: bool = False
+    # Meta が画像を取りに来る先。審査UIの公開URL。末尾のスラッシュは不要。
+    # **これが空だと投稿できない。** Meta はローカルのパスを読めない。
+    public_base_url: str | None = None
+    poll_interval_sec: float = 60.0
+    max_attempts: int = 3
+    # 投稿時刻（JST の HH:MM）。並びがそのまま1日の投稿順になる。
+    post_times: list[str] = Field(default_factory=lambda: ["09:00", "13:00", "20:00"])
+    timezone: str = "Asia/Tokyo"
+    # 予定を何日先まで作るか。審査UIの予定表もこの日数を出す。
+    plan_days: int = 3
+    # 投稿のあと何分でストーリーズを出すか。0 で同時。
+    story_delay_min: int = 5
+    post_story: bool = True
+    # 週次リール。weekday は 0=月曜。8日目に出すので、収集の週と1日ずらす。
+    post_reel: bool = True
+    reel_weekday: int = 0
+    reel_time: str = "19:00"
+    # リールに使う画像を選ぶのに必要なリーチが取れないとき、
+    # 直近の投稿で代用してよいか。既定は **代用しない**（黙って別物を出さない）。
+    reel_fallback_recent: bool = False
+    # キャプションの末尾に付けるタグ。空にすれば付かない。
+    hashtags: list[str] = Field(default_factory=list)
+    # 自動投稿してよいソース。空なら「manual_only でない全ソース」。
+    # 仲介サイト由来の写真は MLS のロゴが載ることがあるので、
+    # 自動で出す先はここで絞れるようにしてある。
+    allowed_sources: list[str] = Field(default_factory=list)
+
+    def public_media_url(self, token: str) -> str:
+        base = (self.public_base_url or "").rstrip("/")
+        if not base:
+            raise ValueError(
+                "instagram.public_base_url が未設定です。"
+                "Meta はこちらのサーバーへ画像を取りに来るので、"
+                "審査UIの公開URLを config.yaml に設定してください。"
+            )
+        return f"{base}/m/{token}"
 
 
 class Config(BaseModel):

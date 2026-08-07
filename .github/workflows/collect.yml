@@ -81,5 +81,13 @@ jobs:
       - name: 学習
         run: python -m freming.cli learn
 
+      # 投稿の予定を3日先まで並べる。**投稿はしない。** 投稿するのは
+      # 審査UI側（Meta が画像を取りに来る先が審査UIだから）。ここで
+      # 予定だけ作っておくと、人が朝いちで「投稿予定」を見て止められる。
+      # 在庫が足りない日は枠を空ける（埋めるために基準を下げない）。
+      - name: 投稿予定の作成
+        continue-on-error: true
+        run: python -m freming.cli post plan
+
       - name: 件数
         run: python -m freming.cli status

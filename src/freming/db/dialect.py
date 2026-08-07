@@ -84,11 +84,17 @@ def to_paramstyle(sql: str, dialect: str) -> str:
 # 差が増えたら NNNN_name.postgres.sql を置けば、そちらが優先される。
 _IMPLICIT_PK = re.compile(r"^(\s*)id INTEGER PRIMARY KEY\b", re.MULTILINE)
 
+# バイト列の型名。SQLite は BLOB、PostgreSQL は BYTEA。値の受け渡しは
+# どちらのドライバも bytes をそのまま扱えるので、DDL だけ寄せれば足りる。
+# 0010_posts.sql（投稿用の画像を持つ）で必要になった。
+_BLOB = re.compile(r"\bBLOB\b")
+
 
 def to_postgres_ddl(sql: str) -> str:
-    return _IMPLICIT_PK.sub(
+    sql = _IMPLICIT_PK.sub(
         r"\1id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY", sql
     )
+    return _BLOB.sub("BYTEA", sql)
 
 
 def translate_ddl(sql: str, dialect: str) -> str:

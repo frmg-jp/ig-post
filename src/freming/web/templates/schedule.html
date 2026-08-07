@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block body %}
+
+<style>
+  /* 予定表は「眺めて止める」ための画面。承認・非承認のような重い操作は
+     無いので、ボタンは塗らず罫だけにする。10件並んでも騒がしくならない。 */
+  .row { display: flex; align-items: center; gap: 14px; margin-top: 10px; }
+  .row form { margin: 0; }
+  button.plain {
+    height: var(--control-h); padding: 0 12px; border: 1px solid var(--fg);
+    border-radius: 0; background: transparent; color: var(--fg);
+    font: inherit; font-size: 12px; cursor: pointer;
+  }
+  button.plain:hover { background: var(--fg); color: var(--on-fill); }
+  /* 実際に投稿される本文。見出しと重なる部分があるが省略しない
+     （これを見て止めるかどうかを決めるため） */
+  .cap { margin-top: 8px; font-size: 13px; white-space: pre-wrap; }
+  .cap-label {
+    display: inline-block; margin-right: 8px; font-size: 10px;
+    padding: 1px 6px; border: 1px solid var(--fg); vertical-align: 2px;
+  }
+  h3.day { margin: 28px 0 4px; font-size: 13px; font-weight: 400; }
+</style>
+
+<h2>投稿予定</h2>
+<p class="note">
+  これから {{ days_ahead }} 日ぶんの予定です。
+  <strong>承認がそのまま公開になるわけではありません。</strong>
+  出したくないものは「見送る」で外してください。外した枠は埋め直しません。
+</p>
+
+{% if not auto_post %}
+  <p class="note">
+    <strong>自動投稿は止まっています。</strong>
+    予定は作られますが、時間が来ても投稿されません。
+    動かすには <code>config.yaml</code> の <code>instagram.auto_post</code> を
+    true にしてください。<strong>true にするのは1箇所だけ</strong>にすること。
+  </p>
+{% endif %}
+{% if not ready %}
+  <p class="note">
+    <strong>instagram.public_base_url が未設定です。</strong>
+    Meta は投稿のたびにこちらのサーバーへ画像を取りに来るため、
+    設定するまで投稿は行われません。
+  </p>
+{% endif %}
+
+{% if not days %}
+  <p class="empty">
+    予定はまだありません。<br>
+    <code>python -m freming.cli post plan</code> で作られます。
+  </p>
+{% endif %}
+
+{% for day, items in days.items() %}
+  <h3 class="day">{{ day }}</h3>
+  {% for item in items %}
+    {% set row = item.row %}
+    <div class="card no-thumb">
+      <div>
+        <div>
+          <span class="tag on">{{ item.at }}</span>
+          <span class="tag">{{ {"feed":"通常","story":"ストーリーズ","reel":"リール"}.get(row["kind"], row["kind"]) }}</span>
+          <span class="tag">{{ {"planned":"予定","publishing":"投稿中","published":"公開済","failed":"失敗","skipped":"見送り"}.get(row["state"], row["state"]) }}</span>
+          {% if row["source"] %}<span class="tag">{{ row["source"] }}</span>{% endif %}
+          {% if row["score"] %}<span class="tag">{{ row["score"] | round | int }}</span>{% endif %}
+        </div>
+        <div class="reason">
+          {% if row["kind"] == "reel" %}
+            先週の各日でいちばんリーチした投稿を集めた縦動画。
+            中身は投稿の直前に決まります。
+          {% else %}
+            <strong>{{ row["title"] or "（無題）" }}</strong>
+            {% if row["location_city"] or row["location_country"] %}
+              — {{ [row["location_city"], row["location_country"]] | select | join(", ") }}
+            {% endif %}
+          {% endif %}
+        </div>
+        {# 実際に投稿される本文。ここで止めるかどうかの判断材料なので、
+           見出しと重なっても省略しない。 #}
+        {% if row["caption"] %}
+          <div class="cap"><span class="cap-label">本文</span>{{ row["caption"] }}</div>
+        {% endif %}
+        {% if row["error"] %}
+          <div class="reason err">失敗: {{ row["error"] }}（試行 {{ row["attempts"] }} 回）</div>
+        {% endif %}
+        {% if row["ig_media_id"] %}
+          <div class="reason">media_id: {{ row["ig_media_id"] }}{% if row["reach"] is not none %} / リーチ {{ row["reach"] }}{% endif %}</div>
+        {% endif %}
+
+        <div class="row">
+          {% if row["state"] in ("planned", "failed") %}
+            <form method="post" action="/posts/{{ row['id'] }}/skip">
+              <button class="plain" type="submit">見送る</button>
+            </form>
+          {% endif %}
+          {% if row["state"] in ("failed", "skipped") %}
+            <form method="post" action="/posts/{{ row['id'] }}/retry">
+              <button class="plain" type="submit">予定に戻す</button>
+            </form>
+          {% endif %}
+          {% if row["property_id"] %}<a href="/p/{{ row['property_id'] }}">物件を見る</a>{% endif %}
+        </div>
+      </div>
+    </div>
+  {% endfor %}
+{% endfor %}
+
+{% endblock %}

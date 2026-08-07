@@ -782,6 +782,57 @@ def _cmd_instagram(args: argparse.Namespace) -> int:
     return 1 if outcome == "expired" else 0
 
 
+def _cmd_post(args: argparse.Namespace) -> int:
+    """[9] Instagram への投稿。予定を作る / 見る / 時間が来たものを出す。
+
+    自動投稿は審査UIの中で回るが、手で叩ける経路も残す。予定を作るのは
+    定期実行から、投稿は審査UIから、という分け方になる。
+    """
+    from datetime import UTC, datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    from freming.db.connection import session
+    from freming.db.repository import count_posts_by_state, scheduled_posts
+    from freming.instagram.plan import plan
+    from freming.instagram.worker import run_once
+
+    cfg = load_config(args.config)
+    setup_logging(cfg.app.log_dir, cfg.app.log_level)
+
+    with session(cfg.app.target()) as conn:
+        if args.post_action == "plan":
+            stats = plan(cfg, conn)
+            print(stats.summary())
+            return 0
+
+        if args.post_action == "show":
+            zone = ZoneInfo(cfg.instagram.timezone)
+            until = datetime.now(UTC) + timedelta(days=cfg.instagram.plan_days)
+            rows = scheduled_posts(conn, until.isoformat())
+            if not rows:
+                print("予定はありません。post plan で作ってください。")
+                return 0
+            for row in rows:
+                at = datetime.fromisoformat(row["scheduled_at"]).astimezone(zone)
+                title = row["title"] or ("週次リール" if row["kind"] == "reel" else "—")
+                print(f'  {at:%m/%d %H:%M}  {row["kind"]:<5} {row["state"]:<10} {title[:44]}')
+            counts = count_posts_by_state(conn)
+            print("  " + " / ".join(f"{k} {v}" for k, v in sorted(counts.items())))
+            return 0
+
+        if not cfg.instagram.public_base_url:
+            print(
+                "instagram.public_base_url が未設定です。\n"
+                "Meta は投稿のたびにこちらのサーバーへ画像を取りに来るので、"
+                "審査UIの公開URLを config.yaml に設定してください。",
+                file=sys.stderr,
+            )
+            return 1
+        done = run_once(cfg, conn)
+        print(f"{done} 件投稿しました。" if done else "時間が来ている予定はありません。")
+        return 0
+
+
 def _cmd_reel(args: argparse.Namespace) -> int:
     """[9] 正方形の画像を並べて縦動画を1本作る。
 
@@ -1075,6 +1126,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_reel.set_defaults(func=_cmd_reel)
 
+    p_post = sub.add_parser("post", help="Instagram への投稿（[9]）")
+    p_post.add_argument(
+        "post_action", choices=["plan", "show", "run"],
+        help="plan: 予定を作る / show: 予定を見る / run: 時間が来たものを投稿する",
+    )
+    p_post.set_defaults(func=_cmd_post)
+
     p_status = sub.add_parser("status", help="候補の件数をステータス別に表示")
     p_status.set_defaults(func=_cmd_status)
 
@@ -1086,7 +1144,7 @@ def build_parser() -> argparse.ArgumentParser:
 _NEEDS_MIGRATED_DB = frozenset({
     "collect", "score", "serve", "deliver", "learn", "rules",
     "ingest-url", "add-manual", "remove", "reset-images", "status",
-    "instagram",
+    "instagram", "post",
 })
 
 

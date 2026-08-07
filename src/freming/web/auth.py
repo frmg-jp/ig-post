@@ -110,9 +110,18 @@ def _parse_header(value: str) -> tuple[str, str] | None:
 #                置かない）。
 EXEMPT_PATHS = frozenset({"/healthz", "/ig/callback"})
 
+# /m/<token> … 投稿する画像の配り先。**Meta がここへ取りに来る**ので
+#              認証をかけられない（相手に資格情報を渡す方法がない）。
+#              代わりに token を推測できない文字列にしてある
+#              （instagram/media.py の new_token）。並べて総当たりされない
+#              かぎり、他人の目に触れることはない。そもそも投稿する写真
+#              なので、公開前提のものしか置かない。
+#              投稿が済んだ行は消すので、URLはすぐ死ぬ。
+EXEMPT_PREFIXES = ("/m/",)
+
 
 class BasicAuthMiddleware(BaseHTTPMiddleware):
-    """EXEMPT_PATHS 以外の全経路に Basic 認証をかける。
+    """EXEMPT_PATHS / EXEMPT_PREFIXES 以外の全経路に Basic 認証をかける。
 
     一覧も詳細も承認も、認証を通ってから触る。
     """
@@ -122,7 +131,8 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
         self._auth = auth
 
     async def dispatch(self, request: Request, call_next):
-        if request.url.path in EXEMPT_PATHS:
+        path = request.url.path
+        if path in EXEMPT_PATHS or path.startswith(EXEMPT_PREFIXES):
             return await call_next(request)
         header = request.headers.get("authorization", "")
         parsed = _parse_header(header) if header else None

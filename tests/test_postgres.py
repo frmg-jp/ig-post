@@ -212,3 +212,43 @@ def test_migrate_survives_a_reset_and_runs_again() -> None:
         _reset(DSN)
         migrate(DSN)
         assert all(applied for _, applied in status(DSN))
+
+
+# --- [9] 投稿 ---------------------------------------------------------
+def test_投稿する画像がPostgreSQLでも往復する(conn):
+    """BLOB は PostgreSQL に無い。dialect が BYTEA に寄せていること。
+
+    SQLite だけで確かめると、bytes の受け渡しが本番で壊れていても
+    気づけない（psycopg は bytea を memoryview で返す）。
+    """
+    from freming.db.repository import create_post
+    from freming.instagram.media import load_media, purge_media, store_media
+
+    post_id = create_post(conn, "feed", "2026-08-10T01:00:00+00:00")
+    payload = bytes(range(256)) * 8
+    token = store_media(conn, post_id, payload)
+
+    found = load_media(conn, token)
+    assert found is not None
+    content, mime = found
+    assert isinstance(content, bytes)
+    assert content == payload
+    assert mime == "image/jpeg"
+    assert purge_media(conn, post_id) == 1
+
+
+def test_同じ予定をPostgreSQLでも二度は取れない(conn):
+    """claim_due_post の UPDATE ... RETURNING が両方言で効くこと。"""
+    from freming.db.repository import claim_due_post, create_post
+
+    create_post(conn, "feed", "2026-08-10T01:00:00+00:00")
+    assert claim_due_post(conn, "2026-08-10T02:00:00+00:00", 3) is not None
+    assert claim_due_post(conn, "2026-08-10T02:00:00+00:00", 3) is None
+
+
+def test_リールはproperty_idがNULLでも複数置ける(conn):
+    """UNIQUE(property_id, kind) に NULL 同士が引っかからないこと。"""
+    from freming.db.repository import create_post
+
+    assert create_post(conn, "reel", "2026-08-10T10:00:00+00:00") is not None
+    assert create_post(conn, "reel", "2026-08-17T10:00:00+00:00") is not None
