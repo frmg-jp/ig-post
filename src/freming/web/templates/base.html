@@ -312,7 +312,16 @@
   }
   .pager a:hover { color: var(--fg); border-bottom-color: var(--fg); }
   .pager .next { margin-left: auto; }
-  .subnav { padding: 0 0 16px; font-size: 11px; letter-spacing: var(--track-label); }
+  /* 折り返したときの行間。狭い画面では2行になり、選択中の項目の下線が
+     次の行の文字に近づく。実測（393px幅・Chromium）で行間 22px のとき
+     下線と次行の間は 3px しかなかったので、8px 空くように 27px にする。
+     項目の中で改行させないのは、「価格が安い/順」のように語の途中で
+     割れるのを防ぐため。 */
+  .subnav {
+    padding: 0 0 16px; font-size: 11px; letter-spacing: var(--track-label);
+    line-height: 27px;
+  }
+  .subnav a { white-space: nowrap; }
   /* padding は選択中でない項目にも掛ける。選んだ瞬間に下線の分だけ
      項目が動くのを防ぐため。 */
   .subnav a {
