@@ -461,3 +461,88 @@ def test_permalinkが取れなくても投稿は止まらない():
         assert publish_mod.media_permalink("t", "m") is None
     finally:
         publish_mod._request = original
+
+
+# --- 追加した3項目（写真クレジット / 英文 / 代替テキスト）-----------------
+def _rich(conn, **extra):
+    """仕様欄まで埋まった物件を1件作る。"""
+    columns = {
+        "usage_type": "Private Residence", "structure": "Post-and-Beam",
+        "building_area": "2,008 sq ft", "site_area": "0.34 Acres",
+        "style_name": "Mid-Century Modern", "architect": "Richard Lareau",
+        "year_built": "1961", "summary_en": "A 1961 post-and-beam house above the canyon.",
+        "photo_credit": "Darren Bradley", **extra,
+    }
+    property_id = _property(conn)
+    sets = ", ".join(f"{k} = ?" for k in columns)
+    conn.execute(f"UPDATE properties SET {sets} WHERE id = ?",
+                 (*columns.values(), property_id))
+    conn.commit()
+    return conn.execute("SELECT * FROM properties WHERE id = ?", (property_id,)).fetchone()
+
+
+def test_写真のクレジットが入る(db):
+    """編集メディアの写真を使わせてもらう以上、出所は書く。"""
+    row = _rich(db)
+    assert "Photo: Darren Bradley" in build_caption(row, CONFIG.caption, "Dezeen")
+
+
+def test_撮影者が不明なら媒体名で代える(db):
+    row = _rich(db, photo_credit=None)
+    assert "Photo: Dezeen" in build_caption(row, CONFIG.caption, "Dezeen")
+
+
+def test_代替が要らない設定なら出さない(db):
+    config = CONFIG.caption.model_copy(update={"photo_credit_fallback_source": False})
+    row = _rich(db, photo_credit=None)
+    assert "Photo:" not in build_caption(row, config, "Dezeen")
+
+
+def test_英語の説明文が日本語の次に来る(db):
+    row = _rich(db)
+    caption = build_caption(row, CONFIG.caption, "Dezeen")
+    assert row["summary"] in caption
+    assert "A 1961 post-and-beam house" in caption
+    assert caption.index(row["summary"]) < caption.index("A 1961 post-and-beam house")
+
+
+def test_英語が無ければその段落は出ない(db):
+    row = _rich(db, summary_en=None)
+    caption = build_caption(row, CONFIG.caption, "Dezeen")
+    assert "post-and-beam house above" not in caption
+
+
+def test_代替テキストは被写体だけを書く(db):
+    """写っているものは分からないので、見えていない細部を作文しない。"""
+    from freming.instagram.caption import build_alt_text
+
+    alt = build_alt_text(_rich(db))
+    assert "Old Mill House" in alt
+    assert "Porto, Portugal" in alt
+    assert "Mid-Century Modern" in alt
+    assert len(alt) <= 1000
+
+
+def test_代替テキストは通常投稿にだけ付く():
+    """ストーリーズは alt_text もキャプションも受け付けない。"""
+    import freming.instagram.publish as publish_mod
+
+    sent = {}
+
+    def _capture(method, url, token, **kwargs):
+        sent.update(kwargs.get("params", {}))
+        return {"id": "container-1"}
+
+    original = publish_mod._request
+    publish_mod._request = _capture
+    try:
+        publish_mod.create_image_container("t", "1", "https://x/1.jpg", "本文", alt_text="alt")
+        assert sent.get("alt_text") == "alt"
+        sent.clear()
+        publish_mod.create_image_container(
+            "t", "1", "https://x/1.jpg", "本文", story=True, alt_text="alt"
+        )
+        assert "alt_text" not in sent
+        assert "caption" not in sent
+    finally:
+        publish_mod._request = original

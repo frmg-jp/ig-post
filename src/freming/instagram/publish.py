@@ -89,17 +89,24 @@ def account_id(token: str) -> str:
 # コンテナ
 # ----------------------------------------------------------------------
 def create_image_container(
-    token: str, ig_id: str, image_url: str, caption: str | None = None, *, story: bool = False
+    token: str, ig_id: str, image_url: str, caption: str | None = None,
+    *, story: bool = False, alt_text: str | None = None,
 ) -> str:
     """画像のコンテナを作る。story=True でストーリーズ。
 
-    ストーリーズにキャプションは付かないので送らない。
+    ストーリーズはキャプションも alt_text も受け付けないので送らない
+    （送っても無視される）。
     """
     params: dict[str, str] = {"image_url": image_url}
     if story:
         params["media_type"] = "STORIES"
-    elif caption:
-        params["caption"] = caption
+    else:
+        if caption:
+            params["caption"] = caption
+        # 代替テキスト。読み上げと検索に効く。2025-03 に通常投稿へ追加された
+        # （リールとストーリーズは対象外）。
+        if alt_text:
+            params["alt_text"] = alt_text
     body = _request("POST", f"{GRAPH}/{API_VERSION}/{ig_id}/media", token, params=params)
     container = body.get("id")
     if not container:
@@ -217,9 +224,11 @@ def publishing_limit(token: str, ig_id: str) -> tuple[int, int]:
 # ----------------------------------------------------------------------
 def publish_image(
     token: str, ig_id: str, image_url: str, caption: str | None = None,
-    *, story: bool = False, sleep=time.sleep,
+    *, story: bool = False, alt_text: str | None = None, sleep=time.sleep,
 ) -> PublishResult:
-    container = create_image_container(token, ig_id, image_url, caption, story=story)
+    container = create_image_container(
+        token, ig_id, image_url, caption, story=story, alt_text=alt_text
+    )
     wait_until_ready(token, container, sleep=sleep)
     media_id = publish_container(token, ig_id, container)
     log.info("投稿しました（%s）: media_id=%s", "ストーリーズ" if story else "通常", media_id)

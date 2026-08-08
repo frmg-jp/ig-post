@@ -20,6 +20,8 @@
     その行ごと落とす。投稿は事実の記載なので、埋めるために推測しない
   - **価格は載せない。** 実物の投稿にも入っていない。通貨が混ざるうえ
     為替で見え方が変わり、成約後も直せない
+  - **写真の出所は書く。** 編集メディアの写真を使わせてもらう以上、
+    撮影者（取れなければ媒体名）を1行入れる
   - リンクも載せない。キャプション内のURLはリンクにならない
   - **音源のクレジットは、上限で切るときも必ず残す。** CC BY は表記が
     要件で、落とすとライセンス違反になる
@@ -78,13 +80,42 @@ def hashtags_for(row: Row, config: CaptionConfig) -> list[str]:
     return tags
 
 
+def photo_credit(row: Row, config: CaptionConfig, source_name: str | None = None) -> str:
+    """写真のクレジット1行。出せないときは空文字。
+
+    撮影者が記事から取れていればその名前。取れなければ媒体名で代える
+    （どちらも無ければ出さない）。
+    """
+    if not config.photo_credit_label:
+        return ""
+    who = _get(row, "photo_credit")
+    if not who and config.photo_credit_fallback_source:
+        who = (source_name or "").strip()
+    return f"{config.photo_credit_label}: {who}" if who else ""
+
+
+def build_alt_text(row: Row) -> str:
+    """代替テキスト。読み上げと検索に効く。
+
+    **写っているものは分からない**ので、被写体が何であるかだけを書く。
+    見えていない細部を作文すると、読み上げに嘘が混ざる。
+    """
+    parts = [p for p in (_get(row, "title"), _place(row)) if p]
+    head = ". ".join(parts)
+    tail = " ".join(p for p in (_get(row, "style_name"), _get(row, "usage_type")) if p)
+    text = f"{head}. {tail}".strip() if tail else head
+    return text[:1000]
+
+
 def _clip(text: str, limit: int = MAX_LENGTH) -> str:
     """上限で切る。切るときは末尾を落とす。"""
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
-def build_caption(row: Row, config: CaptionConfig) -> str:
-    """物件1件ぶんの本文。"""
+def build_caption(
+    row: Row, config: CaptionConfig, source_name: str | None = None
+) -> str:
+    """物件1件ぶんの本文。source_name は写真のクレジットの代替に使う。"""
     blocks: list[str] = []
 
     if config.lead:
@@ -99,9 +130,17 @@ def build_caption(row: Row, config: CaptionConfig) -> str:
         blocks.append("\n".join(specs))
 
     # 選定理由。採点のときに書かせた一言をそのまま本文にする。
+    # 日本語と英語を並べる（リード文が日英併記なので本文も揃える）。
     summary = _get(row, "summary")
     if summary:
         blocks.append(summary)
+    summary_en = _get(row, "summary_en")
+    if summary_en:
+        blocks.append(summary_en)
+
+    credit = photo_credit(row, config, source_name)
+    if credit:
+        blocks.append(credit)
 
     if config.details:
         blocks.append("\n".join(config.details))
@@ -156,8 +195,10 @@ def with_credit(caption: str, credit: str | None) -> str:
 
 __all__ = [
     "MAX_LENGTH",
+    "build_alt_text",
     "build_caption",
     "build_reel_caption",
     "hashtags_for",
+    "photo_credit",
     "with_credit",
 ]

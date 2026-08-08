@@ -39,7 +39,7 @@ from freming.db.repository import (
     set_permalink,
 )
 from freming.instagram import media
-from freming.instagram.caption import build_reel_caption
+from freming.instagram.caption import build_alt_text, build_reel_caption
 from freming.instagram.insights import MissingInsightsScope, media_reach
 from freming.instagram.publish import (
     KIND_FEED,
@@ -72,7 +72,11 @@ def _publish_feed(config: Config, conn: DbConnection, post: Row, token: str, ig_
     square = media.square_bytes(config, conn, post["property_id"], position=1)
     media_token = media.store_media(conn, post["id"], square)
     url = config.instagram.public_media_url(media_token)
-    return publish_image(token, ig_id, url, post["caption"])
+    row = conn.execute(
+        "SELECT * FROM properties WHERE id = ?", (post["property_id"],)
+    ).fetchone()
+    alt = build_alt_text(row) if row is not None else None
+    return publish_image(token, ig_id, url, post["caption"], alt_text=alt)
 
 
 def _publish_story(config: Config, conn: DbConnection, post: Row, token: str, ig_id: str):

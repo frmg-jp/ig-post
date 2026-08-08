@@ -43,6 +43,8 @@ OUTPUT_SCHEMA: dict = {
         "building_area",
         "site_area",
         "style_name",
+        "summary_en",
+        "photo_credit",
     ],
     "properties": {
         "is_for_sale": {
@@ -130,6 +132,22 @@ OUTPUT_SCHEMA: dict = {
                 " Two-Story Industrial Loft など）。特定できなければ空文字。"
             ),
         },
+        "summary_en": {
+            "type": "string",
+            "description": (
+                "summary と同じ内容の英語版。1〜2文。日本語の直訳でなくてよいが、"
+                "**書かれていない事実を足さない**。summary が空なら空文字。"
+            ),
+        },
+        "photo_credit": {
+            "type": "string",
+            "description": (
+                "写真の撮影者。記事の 'Photography by ◯◯' / 'Photo: ◯◯' /"
+                " 'Images courtesy of ◯◯' などから取る。**名前だけを返す**"
+                "（'Photography by' は含めない）。書かれていなければ空文字。"
+                "推測しないこと。"
+            ),
+        },
     },
 }
 
@@ -174,6 +192,8 @@ class Assessment:
     building_area: str = ""
     site_area: str = ""
     style_name: str = ""
+    summary_en: str = ""
+    photo_credit: str = ""
 
     @classmethod
     def from_json(cls, data: dict) -> Assessment:

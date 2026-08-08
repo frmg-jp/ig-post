@@ -422,6 +422,8 @@ class CaptionConfig(BaseModel):
     spec: list[tuple[str, str]] = Field(default_factory=list)
     details: list[str] = Field(default_factory=list)
     disclaimer: str = ""
+    photo_credit_label: str = "Photo"
+    photo_credit_fallback_source: bool = True
     signature: list[str] = Field(default_factory=list)
     business: str = ""
     hashtags: list[str] = Field(default_factory=list)

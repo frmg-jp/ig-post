@@ -116,7 +116,9 @@ def plan(config: Config, conn: DbConnection, now: datetime | None = None) -> Pla
         stats.short_of_stock = len(empty) - len(candidates)
 
     for moment, row in zip(empty, candidates, strict=False):
-        caption = build_caption(row, config.caption)
+        # 撮影者が記事から取れなかったときは媒体名で代える。
+        src = config.editorial_source(row["source"]) or config.listing_source(row["source"])
+        caption = build_caption(row, config.caption, src.name if src else None)
         post_id = create_post(
             conn, KIND_FEED, moment.isoformat(), property_id=row["id"], caption=caption
         )

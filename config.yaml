@@ -753,6 +753,14 @@ caption:
 
   disclaimer: "※成約済みの際は不動産、建築、内装の参考としてご活用下さい。"
 
+  # 写真のクレジット。**編集メディアの写真を使わせてもらう以上、出所は書く。**
+  # 撮影者が記事から取れればその名前、取れなければ媒体名を入れる。
+  # 空にすると行ごと出ない。
+  photo_credit_label: "Photo"
+  # 撮影者が分からないとき、媒体名で代えるか。
+  # false にすると、撮影者が取れた回だけクレジットが出る。
+  photo_credit_fallback_source: true
+
   signature:
     - "Design × Build × Regenerate"
     - "From Japan to the World."
