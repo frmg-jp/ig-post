@@ -189,8 +189,43 @@ def publish_one(config: Config, conn: DbConnection, post: Row, token: str, ig_id
     return result.media_id
 
 
-def run_once(config: Config, conn: DbConnection, now: datetime | None = None) -> int:
-    """時間が来た予定を順に投稿する。戻り値は投稿できた件数。"""
+def preview(config: Config, conn: DbConnection, post: Row) -> str:
+    """出さずに、何が出るかだけを組み立てて返す。
+
+    最初の1本を出す前に中身を確かめるための経路。画像はここで実際に
+    用意する（**取れないことが分かるのは、用意してみたときだけ**）。
+    Meta へは一切送らない。
+    """
+    lines = [f"post_id={post['id']}  {post['kind']}  予定 {post['scheduled_at']}"]
+    if post["property_id"]:
+        row = conn.execute(
+            "SELECT * FROM properties WHERE id = ?", (post["property_id"],)
+        ).fetchone()
+        if row is not None:
+            lines.append(f"物件: {row['title']}（{row['source']}）")
+            lines.append(f"代替テキスト: {build_alt_text(row)}")
+        square = media.square_bytes(config, conn, post["property_id"], position=1)
+        size = media.probe_size(square)
+        lines.append(f"画像: {size[0]}x{size[1]}  {len(square) // 1024}KB" if size
+                     else "画像: 形式を判定できません")
+    if post["caption"]:
+        lines.append("--- 本文 ---")
+        lines.append(post["caption"])
+    return "\n".join(lines)
+
+
+def run_once(
+    config: Config,
+    conn: DbConnection,
+    now: datetime | None = None,
+    limit: int | None = None,
+    dry_run: bool = False,
+) -> int:
+    """時間が来た予定を順に投稿する。戻り値は投稿できた件数。
+
+    limit で件数を絞れる。**最初の1本は 1 にして様子を見ること。**
+    dry_run なら中身を出して、予定は planned に戻す（消費しない）。
+    """
     now = now or datetime.now(UTC)
     record = load_token(conn)
     if record is None:
@@ -203,9 +238,9 @@ def run_once(config: Config, conn: DbConnection, now: datetime | None = None) ->
         )
         return 0
 
-    ig_id = account_id(record.value)
+    ig_id = "（dry-run）" if dry_run else account_id(record.value)
     done = 0
-    while True:
+    while limit is None or done < limit:
         post = claim_due_post(conn, now.isoformat(), config.instagram.max_attempts)
         if post is None:
             return done
@@ -216,6 +251,16 @@ def run_once(config: Config, conn: DbConnection, now: datetime | None = None) ->
             log.info("自動ストーリーズは無効なので見送りました（post_id=%s）", post["id"])
             continue
         try:
+            if dry_run:
+                log.info("出しません（dry-run）:\n%s", preview(config, conn, post))
+                # 予定は消費しない。戻さないと次回に出なくなる。
+                conn.execute(
+                    "UPDATE posts SET state = 'planned', attempts = attempts - 1 "
+                    "WHERE id = ?", (post["id"],)
+                )
+                conn.commit()
+                done += 1
+                continue
             publish_one(config, conn, post, record.value, ig_id)
             done += 1
         except (InstagramError, PostingError, media.MediaError, OSError) as exc:
@@ -226,6 +271,8 @@ def run_once(config: Config, conn: DbConnection, now: datetime | None = None) ->
                 "投稿に失敗しました（post_id=%s / %s）: %s",
                 post["id"], "打ち切り" if state == "failed" else "次回に再試行", exc,
             )
+    # limit に達してループを抜けた場合。ここが無いと None を返す。
+    return done
 
 
 class PostingWorker:
@@ -278,6 +325,7 @@ __all__ = [
     "PostingWorker",
     "daily_winners",
     "describe_error",
+    "preview",
     "publish_one",
     "run_once",
 ]

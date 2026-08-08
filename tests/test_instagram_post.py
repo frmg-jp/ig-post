@@ -546,3 +546,65 @@ def test_代替テキストは通常投稿にだけ付く():
         assert "caption" not in sent
     finally:
         publish_mod._request = original
+
+
+# --- 最初の1本を安全に出す ---------------------------------------------
+def _token(conn):
+    from freming.instagram.tokens import save_token
+
+    save_token(conn, "dummy-token")
+
+
+def test_件数を絞れる(db, monkeypatch):
+    """**最初の1本は 1 にして様子を見る。** まとめて出さない。"""
+    from freming.instagram import worker as worker_mod
+
+    _token(db)
+    for i in range(3):
+        create_post(db, "feed", NOW.isoformat(), property_id=_property(db, f"p{i}"))
+
+    published = []
+    monkeypatch.setattr(worker_mod, "account_id", lambda token: "1")
+    monkeypatch.setattr(
+        worker_mod, "publish_one",
+        lambda cfg, conn, post, token, ig_id: published.append(post["id"]),
+    )
+    cfg = CONFIG.model_copy(deep=True)
+    cfg.instagram.public_base_url = "https://example.com"
+    assert worker_mod.run_once(cfg, db, NOW, limit=1) == 1
+    assert len(published) == 1
+
+
+def test_dry_runは投稿せず予定も消費しない(db, monkeypatch):
+    from freming.instagram import worker as worker_mod
+
+    _token(db)
+    property_id = _property(db)
+    post_id = create_post(db, "feed", NOW.isoformat(), property_id=property_id,
+                          caption="本文です")
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("dry-run で投稿してはいけない")
+
+    monkeypatch.setattr(worker_mod, "publish_one", _boom)
+    monkeypatch.setattr(worker_mod.media, "square_bytes", lambda *a, **k: b"\xff\xd8x")
+    cfg = CONFIG.model_copy(deep=True)
+    cfg.instagram.public_base_url = "https://example.com"
+
+    assert worker_mod.run_once(cfg, db, NOW, limit=1, dry_run=True) == 1
+    row = db.execute("SELECT state, attempts FROM posts WHERE id = ?", (post_id,)).fetchone()
+    assert row["state"] == "planned"
+    assert row["attempts"] == 0      # 次回そのまま出せる
+
+
+def test_中身には本文と代替テキストが出る(db, monkeypatch):
+    from freming.instagram import worker as worker_mod
+
+    property_id = _property(db)
+    post_id = create_post(db, "feed", NOW.isoformat(), property_id=property_id,
+                          caption="ここが本文")
+    monkeypatch.setattr(worker_mod.media, "square_bytes", lambda *a, **k: b"\xff\xd8x")
+    post = db.execute("SELECT * FROM posts WHERE id = ?", (post_id,)).fetchone()
+    text = worker_mod.preview(CONFIG, db, post)
+    assert "ここが本文" in text
+    assert "Old Mill House" in text

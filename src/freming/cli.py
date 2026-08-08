@@ -991,8 +991,13 @@ def _cmd_post(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 1
-        done = run_once(cfg, conn)
-        print(f"{done} 件投稿しました。" if done else "時間が来ている予定はありません。")
+        done = run_once(cfg, conn, limit=args.limit, dry_run=args.dry_run)
+        if not done:
+            print("時間が来ている予定はありません。")
+        elif args.dry_run:
+            print(f"{done} 件の中身を出しました（投稿していません）。上のログを確認してください。")
+        else:
+            print(f"{done} 件投稿しました。")
         return 0
 
 
@@ -1293,6 +1298,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_post.add_argument(
         "post_action", choices=["plan", "show", "run"],
         help="plan: 予定を作る / show: 予定を見る / run: 時間が来たものを投稿する",
+    )
+    p_post.add_argument(
+        "--limit", type=int,
+        help="1回に投稿する件数の上限。**最初の1本は 1 にして様子を見ること**",
+    )
+    p_post.add_argument(
+        "--dry-run", action="store_true",
+        help="投稿せず、何が出るかだけ表示する（予定は消費しない）",
     )
     p_post.set_defaults(func=_cmd_post)
 
