@@ -35,16 +35,41 @@ gcloud auth list --filter=status:ACTIVE --format='value(account)' 2>/dev/null | 
 
 を実行してから、もう一度このスクリプトを実行してください。"
 
+ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' 2>/dev/null | head -n1)"
+
+list_projects_or_note() {
+  if ! gcloud projects list --format='table(projectId, name)' 2>/dev/null | grep -q .; then
+    printf '（%s から見えるプロジェクトは1つもありません）\n' "$ACCOUNT"
+  fi
+}
+
 PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null)}"
 if [ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" = "(unset)" ]; then
-  say "プロジェクトが選ばれていません。使えるものは次のとおりです。"
-  gcloud projects list --format='table(projectId, name)'
+  say "プロジェクトが選ばれていません。${ACCOUNT} から使えるものは次のとおりです。"
+  list_projects_or_note
   die "使うものを決めて、次を実行してから、もう一度このスクリプトを実行してください。
 
     gcloud config set project ここにプロジェクトID"
 fi
 
-PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+# 「設定されているが、いまのアカウントからは見えない」場合がある。gcloud の
+# 既定プロジェクトは別案件のまま残りやすいので、生のエラーで落とさず案内する。
+if ! PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)' 2>/dev/null)" \
+   || [ -z "$PROJECT_NUMBER" ]; then
+  say "いま選ばれているプロジェクト「${PROJECT_ID}」に ${ACCOUNT} からアクセスできません。"
+  printf '別案件のプロジェクトが gcloud の既定として残っているか、アカウントが違います。\n'
+  say "${ACCOUNT} から使えるプロジェクトは次のとおりです。"
+  list_projects_or_note
+  die "この中に FREMING CURATED 用のもの（Drive の OAuth クライアントを作ったもの）が
+あれば、次を実行してから、もう一度このスクリプトを実行してください。
+
+    gcloud config set project ここにプロジェクトID
+
+一覧が空、または見当たらない場合は、そのプロジェクトを持っている別のアカウントで
+ログインし直してから、もう一度実行してください。
+
+    gcloud auth login"
+fi
 SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 
 say "プロジェクト: ${PROJECT_ID}（番号 ${PROJECT_NUMBER}）"
