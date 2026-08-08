@@ -142,3 +142,34 @@ def test_robb_report_skips_its_composite_lead_image() -> None:
     assert cfg.editorial_source("robbreport_shelter").skip_lead_image is True
     # 他のソースは既定のまま（先頭を使う）
     assert cfg.editorial_source("thespaces").skip_lead_image is False
+
+
+# --- Drive の認証方式の上書き ------------------------------------------
+#
+# 納品を GitHub Actions（Workload Identity 連携）へ移す途中、手元の
+# oauth と両立させる必要がある。config.yaml を書き換えると、
+# どちらか片方が必ず壊れる。
+
+
+def test_環境変数で認証方式を上書きできる(monkeypatch) -> None:
+    from freming.config import load_config
+
+    monkeypatch.setenv("FREMING_DRIVE_AUTH_MODE", "adc")
+    assert load_config("config.yaml").drive.auth_mode == "adc"
+
+
+def test_未設定なら_configのまま(monkeypatch) -> None:
+    from freming.config import load_config
+
+    monkeypatch.delenv("FREMING_DRIVE_AUTH_MODE", raising=False)
+    assert load_config("config.yaml").drive.auth_mode == "oauth"
+
+
+def test_知らない方式は起動時に落ちる(monkeypatch) -> None:
+    import pytest as _pytest
+
+    from freming.config import load_config
+
+    monkeypatch.setenv("FREMING_DRIVE_AUTH_MODE", "てきとう")
+    with _pytest.raises(ValueError, match="FREMING_DRIVE_AUTH_MODE"):
+        load_config("config.yaml")

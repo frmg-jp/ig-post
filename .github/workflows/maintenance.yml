@@ -1,0 +1,81 @@
+name: 手動メンテナンス
+
+# 手元のターミナルが要る作業を、GitHub の画面から押せるようにする。
+# **チームの誰でも実行できる**ようにするための経路で、ここに置いたものは
+# 特定の PC を必要としない。
+#
+# 費用のかかるもの（採点のやり直し・本文の後追い）は、既定を dry-run に
+# してある。押しただけでは金額が出るだけで、何も起きない。
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "何をするか"
+        type: choice
+        required: true
+        options:
+          - migrate            # DBの更新だけ
+          - backfill-captions  # 投稿本文の項目を既存分に埋める（API費用）
+          - rescore            # 採点をやり直す（API費用・納品済みは除く）
+          - source-report      # ソース別の歩留まり（費用なし）
+          - post-show          # 投稿予定の一覧（費用なし）
+      apply:
+        description: "本当に実行する（外すと見積もりだけ）"
+        type: boolean
+        default: false
+      limit:
+        description: "対象の上限（backfill / rescore 用）"
+        default: ""
+
+concurrency:
+  group: freming-maintenance
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 依存をインストール
+        run: pip install -e ".[postgres]"
+
+      - name: マイグレーション適用
+        run: python -m freming.cli db migrate
+
+      - name: 実行
+        if: ${{ github.event.inputs.action != 'migrate' }}
+        run: |
+          set -eu
+          LIMIT=""
+          if [ -n "${{ github.event.inputs.limit }}" ]; then
+            LIMIT="--limit ${{ github.event.inputs.limit }}"
+          fi
+          YES=""
+          if [ "${{ github.event.inputs.apply }}" = "true" ]; then
+            YES="--yes"
+          fi
+          case "${{ github.event.inputs.action }}" in
+            backfill-captions)
+              python -m freming.cli backfill-captions $LIMIT $YES
+              # 埋めたあとは、まだ出していない予定の本文を作り直す。
+              # 予定を作った時点の本文が入っているので、そのままだと
+              # 足した項目が反映されない。
+              if [ -n "$YES" ]; then
+                python -m freming.cli post replan
+              fi
+              ;;
+            rescore)          python -m freming.cli rescore $LIMIT $YES ;;
+            source-report)    python -m freming.cli source-report ;;
+            post-show)        python -m freming.cli post show ;;
+          esac

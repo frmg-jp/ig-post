@@ -702,6 +702,32 @@ def create_post(
     return row["id"] if row else None
 
 
+def planned_posts_with_property(conn: DbConnection) -> list[Row]:
+    """まだ出していない予定と、その物件。本文を作り直すのに使う。
+
+    本文は**予定を作った時点**で組んで持っている。あとから項目を足しても、
+    既にある予定には反映されない。出す前に作り直せるようにしておく。
+    """
+    return conn.execute(
+        """
+        SELECT p.id AS post_id, pr.*
+        FROM posts p JOIN properties pr ON pr.id = p.property_id
+        WHERE p.kind = 'feed' AND p.state IN ('planned', 'failed')
+        ORDER BY p.scheduled_at
+        """
+    ).fetchall()
+
+
+def set_caption(conn: DbConnection, post_id: int, caption: str) -> bool:
+    """まだ出していない予定の本文を差し替える。投稿済みには効かない。"""
+    cursor = conn.execute(
+        "UPDATE posts SET caption = ? WHERE id = ? AND state IN ('planned', 'failed')",
+        (caption, post_id),
+    )
+    conn.commit()
+    return bool(cursor.rowcount)
+
+
 def scheduled_posts(conn: DbConnection, until: str, states: tuple[str, ...] = ()) -> list[Row]:
     """予定表に出す行。until までの予定を時刻順に。"""
     params: list = [until]

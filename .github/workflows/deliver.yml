@@ -1,0 +1,74 @@
+name: 納品
+
+# 承認済みを Drive に納品する。**手元の Mac に依存させないための経路。**
+#
+# 認証は Workload Identity 連携。**長期の鍵をどこにも置かない。**
+# GitHub が発行する OIDC トークンを Google 側が検証して、その場限りの
+# 資格情報に交換する。Secrets に鍵のJSONを貼る必要がない。
+#
+# 準備（Google Cloud 側で1回だけ）は docs/delivery-on-actions.md。
+#
+# 1時間おきなので、承認から最大1時間の遅れが出る。投稿の予定は3日先まで
+# 作るので実害はない（instagram.plan_days）。
+
+on:
+  schedule:
+    # 日中（JST 8:00〜23:00）だけ1時間おき。深夜に承認は起きない。
+    - cron: "0 23,0-14 * * *"
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "納品する最大件数"
+        default: "10"
+
+concurrency:
+  # **納品は重ねない。** 途中で止まると取り返しがつかず、フォルダ名も
+  # 「既存の最大値＋1」で決めるので、2本走ると同じ番号を取り合う。
+  group: freming-deliver
+  cancel-in-progress: false
+
+permissions:
+  # Workload Identity 連携に要る。これが無いと OIDC トークンを取れない。
+  id-token: write
+  contents: read
+
+jobs:
+  deliver:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      # config.yaml は oauth のまま（手元の運用を壊さない）。
+      # ここだけ adc に振る。
+      FREMING_DRIVE_AUTH_MODE: adc
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 依存をインストール
+        run: pip install -e ".[postgres]"
+
+      # ここで GOOGLE_APPLICATION_CREDENTIALS が用意され、ADC が通るようになる。
+      # 鍵のJSONは作られず、その場限りの資格情報だけが置かれる。
+      - name: Google に認証（Workload Identity 連携）
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          # Drive API は cloud-platform だけでは足りない。明示する。
+          scopes: "https://www.googleapis.com/auth/drive"
+
+      - name: マイグレーション適用
+        run: python -m freming.cli db migrate
+
+      # 書き込み権限を先に確かめる。ここで落ちれば、納品を1件も
+      # 中途半端にせずに済む。
+      - name: Drive の疎通確認
+        run: python -m freming.cli check-drive --no-browser
+
+      - name: 納品
+        run: python -m freming.cli deliver --limit ${{ github.event.inputs.limit || 10 }}

@@ -649,3 +649,47 @@ def test_担当が空なら何もしない(db, monkeypatch):
     cfg.instagram.worker_kinds = []
     monkeypatch.setattr(worker_mod, "account_id", lambda token: "1")
     assert worker_mod.run_once(cfg, db, NOW) == 0
+
+
+# --- 予定の本文を作り直す ----------------------------------------------
+#
+# 本文は**予定を作った時点**で組んで持っている。あとから項目を足しても
+# 既存の予定には反映されないので、出す前に作り直せるようにしてある。
+
+
+def test_出していない予定の本文は作り直せる(db):
+    from freming.db.repository import planned_posts_with_property, set_caption
+
+    property_id = _property(db)
+    post_id = create_post(db, "feed", NOW.isoformat(), property_id=property_id,
+                          caption="古い本文")
+    rows = planned_posts_with_property(db)
+    assert [r["post_id"] for r in rows] == [post_id]
+    assert set_caption(db, post_id, "新しい本文") is True
+    row = db.execute("SELECT caption FROM posts WHERE id = ?", (post_id,)).fetchone()
+    assert row["caption"] == "新しい本文"
+
+
+def test_投稿済みの本文は作り直さない(db):
+    """出したあとの本文を書き換えても実物は変わらない。履歴として残す。"""
+    from freming.db.repository import planned_posts_with_property, set_caption
+
+    property_id = _property(db)
+    post_id = create_post(db, "feed", NOW.isoformat(), property_id=property_id,
+                          caption="出した本文")
+    finish_post(db, post_id, "media-1", "c")
+    assert planned_posts_with_property(db) == []
+    assert set_caption(db, post_id, "書き換え") is False
+    row = db.execute("SELECT caption FROM posts WHERE id = ?", (post_id,)).fetchone()
+    assert row["caption"] == "出した本文"
+
+
+def test_失敗した予定は作り直しの対象になる(db):
+    """本文が原因で弾かれた場合、直して再挑戦できる。"""
+    from freming.db.repository import planned_posts_with_property
+
+    property_id = _property(db)
+    post_id = create_post(db, "feed", NOW.isoformat(), property_id=property_id)
+    claim_due_post(db, NOW.isoformat(), 1)
+    fail_post(db, post_id, "だめ", 1)
+    assert [r["post_id"] for r in planned_posts_with_property(db)] == [post_id]

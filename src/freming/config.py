@@ -470,6 +470,10 @@ class DriveConfig(BaseModel):
     # service_account … サービスアカウントのJSON鍵（credentials_path）。
     # adc             … Application Default Credentials。gcloud のログイン、
     #                   Workload Identity 連携、サービスアカウントの権限借用に対応。
+    #
+    # **環境変数 FREMING_DRIVE_AUTH_MODE で上書きできる。** 移行期に
+    # 「手元は oauth のまま / GitHub Actions だけ adc」を両立させるため。
+    # config.yaml を書き換えると片方が必ず壊れる。
     auth_mode: Literal["oauth", "service_account", "adc"] = "oauth"
     enabled: bool = True
     credentials_path: Path = Path("credentials/service-account.json")
@@ -551,6 +555,21 @@ class InstagramConfig(BaseModel):
         return f"{base}/m/{token}"
 
 
+def _drive_auth_override(config: DriveConfig) -> DriveConfig:
+    """FREMING_DRIVE_AUTH_MODE があればそれを使う。
+
+    納品を GitHub Actions（Workload Identity 連携）へ移す途中、手元の
+    oauth と両立させるための逃げ道。config.yaml を書き換えると
+    どちらか片方が必ず壊れる。
+    """
+    mode = os.environ.get("FREMING_DRIVE_AUTH_MODE", "").strip()
+    if mode and mode != config.auth_mode:
+        if mode not in ("oauth", "service_account", "adc"):
+            raise ValueError(f"FREMING_DRIVE_AUTH_MODE が不正です: {mode}")
+        return config.model_copy(update={"auth_mode": mode})
+    return config
+
+
 class Config(BaseModel):
     app: AppConfig = Field(default_factory=AppConfig)
     http: HttpConfig
@@ -624,7 +643,9 @@ def load_config(path: str | Path | None = None) -> Config:
         raise FileNotFoundError(f"設定ファイルが見つかりません: {cfg_path.resolve()}")
     with cfg_path.open("r", encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
-    return Config.model_validate(raw)
+    config = Config.model_validate(raw)
+    config.drive = _drive_auth_override(config.drive)
+    return config
 
 
 @lru_cache(maxsize=1)

@@ -968,6 +968,21 @@ def _cmd_post(args: argparse.Namespace) -> int:
             print(stats.summary())
             return 0
 
+        if args.post_action == "replan":
+            # 本文は予定を作った時点で組んで持っている。あとから項目を
+            # 足しても既存の予定には反映されないので、出す前に作り直す。
+            from freming.db.repository import planned_posts_with_property, set_caption
+            from freming.instagram.caption import build_caption
+
+            changed = 0
+            for row in planned_posts_with_property(conn):
+                src = cfg.editorial_source(row["source"]) or cfg.listing_source(row["source"])
+                caption = build_caption(row, cfg.caption, src.name if src else None)
+                if set_caption(conn, row["post_id"], caption):
+                    changed += 1
+            print(f"{changed} 件の本文を作り直しました（投稿済みは触っていません）。")
+            return 0
+
         if args.post_action == "show":
             zone = ZoneInfo(cfg.instagram.timezone)
             until = datetime.now(UTC) + timedelta(days=cfg.instagram.plan_days)
@@ -1299,8 +1314,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_post = sub.add_parser("post", help="Instagram への投稿（[9]）")
     p_post.add_argument(
-        "post_action", choices=["plan", "show", "run"],
-        help="plan: 予定を作る / show: 予定を見る / run: 時間が来たものを投稿する",
+        "post_action", choices=["plan", "show", "run", "replan"],
+        help=(
+            "plan: 予定を作る / show: 予定を見る / run: 時間が来たものを投稿する"
+            " / replan: まだ出していない予定の本文を作り直す"
+        ),
     )
     p_post.add_argument(
         "--limit", type=int,
