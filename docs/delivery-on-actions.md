@@ -21,62 +21,54 @@ Secrets に貼る鍵も、流出しうる鍵も存在しない。
 | サービスアカウント鍵 | Secrets にJSON | 鍵が存在する。組織ポリシーで作れない場合もある |
 | **Workload Identity 連携** | **どこにも無い** | **採用** |
 
-## 準備（Google Cloud 側で1回だけ）
+## 準備（1回だけ）
 
-`PROJECT_ID` と `PROJECT_NUMBER` は自分のものに置き換えること。
-リポジトリは `frmg-jp/ig-post`。
-
-```
-gcloud config set project PROJECT_ID
-
-gcloud services enable iamcredentials.googleapis.com drive.googleapis.com
-
-gcloud iam service-accounts create freming-deliver \
-  --display-name="FREMING CURATED 納品"
-
-gcloud iam workload-identity-pools create github \
-  --location=global --display-name="GitHub Actions"
-
-gcloud iam workload-identity-pools providers create-oidc github \
-  --location=global --workload-identity-pool=github \
-  --issuer-uri="https://token.actions.githubusercontent.com" \
-  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository" \
-  --attribute-condition="assertion.repository=='frmg-jp/ig-post'"
-```
-
-`--attribute-condition` を**必ず付けること**。これが無いと、GitHub の
-どのリポジトリからでもこのサービスアカウントを借りられてしまう。
-
-続いて、このリポジトリからだけ借りられるようにする。
+**スクリプトにしてある。** 手で打つ箇所を減らすため。
 
 ```
-gcloud iam service-accounts add-iam-policy-binding \
-  freming-deliver@PROJECT_ID.iam.gserviceaccount.com \
-  --role=roles/iam.workloadIdentityUser \
-  --member="principalSet://iam.googleapis.com/projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/github/attribute.repository/frmg-jp/ig-post"
+bash scripts/setup-workload-identity.sh
 ```
+
+前提は2つだけ。
+
+```
+brew install --cask google-cloud-sdk
+gcloud auth login
+```
+
+どちらも足りなければスクリプトが止めて、何をすればよいか出す。
+プロジェクトが選ばれていなければ一覧を出す。
+
+何度実行しても壊れない（既にあるものは作り直さない）。やっているのは:
+
+1. API を有効化（iamcredentials / sts / drive）
+2. サービスアカウント `freming-deliver` を作る
+3. Workload Identity プールを作る
+4. GitHub からの受け口を作る。
+   **`attribute-condition` でリポジトリを固定する** — これが無いと
+   GitHub のどのリポジトリからでもこのサービスアカウントを借りられる
+5. このリポジトリからだけ借りられるよう紐づける
+
+**プロジェクトのIAMロールは1つも付けない。** Drive への権限は
+共有ドライブのメンバーシップから来るので、それで足りる。
+
+終わると、残り2つの手作業（共有ドライブへの追加と GitHub Secrets）を
+実際の値つきで出力する。そこはコピーして貼るだけ。
 
 ## 共有ドライブ側の設定
 
 **サービスアカウントを共有ドライブのメンバーに追加する。** これを忘れると
-認証は通るのに書けない（ここが一番よく詰まる）。
-
-Google Drive で対象の共有ドライブを開き、メンバー管理から
-`freming-deliver@PROJECT_ID.iam.gserviceaccount.com` を
-**「投稿者」以上**で追加する。
+認証は通るのに書けない（ここが一番よく詰まる）。スクリプトの出力に
+追加するアドレスが出る。**「投稿者」以上**で追加すること。
 
 共有ドライブを使っているので、サービスアカウント自身の容量は消費しない
 （マイドライブに置く場合と違い、容量制限の問題が起きない）。
 
 ## GitHub 側の設定
 
-リポジトリの Settings → Secrets and variables → Actions に2つ足す。
-**どちらも秘密の値ではない**（鍵ではなく、識別子）。
-
-| 名前 | 値 |
-| --- | --- |
-| `GCP_WORKLOAD_IDENTITY_PROVIDER` | `projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/github/providers/github` |
-| `GCP_SERVICE_ACCOUNT` | `freming-deliver@PROJECT_ID.iam.gserviceaccount.com` |
+`GCP_WORKLOAD_IDENTITY_PROVIDER` と `GCP_SERVICE_ACCOUNT` の2つ。
+値はスクリプトの出力にそのまま出る。**どちらも鍵ではなく識別子**なので、
+漏れても悪用できない（借りられるのはこのリポジトリからだけ）。
 
 ## 確認
 
