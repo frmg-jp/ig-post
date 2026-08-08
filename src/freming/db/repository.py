@@ -766,6 +766,16 @@ def skip_post(conn: DbConnection, post_id: int) -> bool:
     return bool(cursor.rowcount)
 
 
+def abandon_post(conn: DbConnection, post_id: int) -> None:
+    """取り出したあとで「出さない」と決まったものを見送りにする。
+
+    skip_post は人が予定表から外す用で planned / failed にしか効かない。
+    claim_due_post を通った行は既に publishing なので、こちらで落とす。
+    """
+    conn.execute("UPDATE posts SET state = 'skipped' WHERE id = ?", (post_id,))
+    conn.commit()
+
+
 def retry_post(conn: DbConnection, post_id: int) -> bool:
     """失敗・見送りを予定に戻す。試行回数も戻す。"""
     cursor = conn.execute(
@@ -799,3 +809,37 @@ def count_posts_by_state(conn: DbConnection) -> dict[str, int]:
         "SELECT state, COUNT(*) AS n FROM posts GROUP BY state"
     ).fetchall()
     return {row["state"]: row["n"] for row in rows}
+
+
+def set_permalink(conn: DbConnection, post_id: int, permalink: str | None) -> None:
+    conn.execute("UPDATE posts SET permalink = ? WHERE id = ?", (permalink, post_id))
+    conn.commit()
+
+
+def posts_awaiting_story(conn: DbConnection, since: str, until: str) -> list[Row]:
+    """期間内に公開された通常投稿。ストーリーズへ手で追加する対象。
+
+    **ストーリーズは自動化しない**（API がリンク付きの再共有を開けていない）。
+    毎日1回まとめて手で上げるので、その日の分をここで引く。
+    """
+    return conn.execute(
+        """
+        SELECT p.*, pr.title, pr.location_city, pr.location_country, pr.thumbnail_url
+        FROM posts p
+        LEFT JOIN properties pr ON pr.id = p.property_id
+        WHERE p.kind = 'feed' AND p.state = 'published'
+          AND p.published_at >= ? AND p.published_at < ?
+        ORDER BY p.published_at
+        """,
+        (since, until),
+    ).fetchall()
+
+
+def mark_story_shared(conn: DbConnection, post_id: int, shared: bool) -> bool:
+    """ストーリーズに追加した／取り消した、の印を付ける。"""
+    cursor = conn.execute(
+        "UPDATE posts SET story_shared_at = ? WHERE id = ? AND state = 'published'",
+        (_now() if shared else None, post_id),
+    )
+    conn.commit()
+    return bool(cursor.rowcount)

@@ -385,6 +385,7 @@
      出しておくと、狭い画面でタイトルの右端に寄せられる。 #}
   <a href="/rules" class="rules {{ 'on' if status == 'rules' else '' }}">ルール候補</a>
   <a href="/schedule" class="rules {{ 'on' if status == 'schedule' else '' }}">投稿予定</a>
+  <a href="/stories" class="rules {{ 'on' if status == 'stories' else '' }}">ストーリーズ</a>
   {% if auto_deliver %}
     <span class="auto {{ 'busy' if delivering_id else '' }}">
       自動納品 ON{% if queued %}・待ち {{ queued }}{% endif %}

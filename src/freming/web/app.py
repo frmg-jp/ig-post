@@ -443,6 +443,69 @@ def create_app(
             },
         )
 
+    @app.get("/stories", response_class=HTMLResponse)
+    def stories(request: Request, day: int = 0):
+        """ストーリーズに手で追加するための一覧。
+
+        **API は「投稿をストーリーズに追加」を開けていない。** リンク・
+        メンション・アンケートといったスタンプは一切投稿できず、
+        ストーリーズはキャプションすら受け付けない。タップで投稿へ飛ぶ
+        カードにするには、アプリで人がやるしかない。
+
+        この画面は、その手作業から考える要素を無くすためのもの。
+        スマホで開いて「投稿を開く → 紙飛行機 → ストーリーズに追加」。
+        """
+        from datetime import UTC, datetime, time, timedelta
+        from zoneinfo import ZoneInfo
+
+        from freming.db.repository import posts_awaiting_story
+
+        zone = ZoneInfo(config.instagram.timezone)
+        target = (datetime.now(UTC).astimezone(zone) + timedelta(days=day)).date()
+        start = datetime.combine(target, time.min, tzinfo=zone).astimezone(UTC)
+        conn = _conn()
+        try:
+            rows = list(
+                posts_awaiting_story(
+                    conn, start.isoformat(), (start + timedelta(days=1)).isoformat()
+                )
+            )
+            counts = count_by_status(conn)
+        finally:
+            conn.close()
+
+        items = [
+            {
+                "row": row,
+                "at": datetime.fromisoformat(row["published_at"]).astimezone(zone).strftime("%H:%M"),
+                "done": bool(row["story_shared_at"]),
+            }
+            for row in rows
+        ]
+        return templates.TemplateResponse(
+            request,
+            "stories.html",
+            {
+                "items": items,
+                "date_label": target.strftime("%m/%d (%a)"),
+                "day": day,
+                "done": sum(1 for i in items if i["done"]),
+                "counts": counts,
+                "status": "stories",
+            },
+        )
+
+    @app.post("/posts/{post_id}/story-shared")
+    def story_shared(post_id: int, shared: str = Form("1"), day: int = Form(0)):
+        from freming.db.repository import mark_story_shared
+
+        conn = _conn()
+        try:
+            mark_story_shared(conn, post_id, shared == "1")
+        finally:
+            conn.close()
+        return RedirectResponse(f"/stories?day={day}", status_code=303)
+
     @app.post("/posts/{post_id}/skip")
     def skip_post_route(post_id: int):
         from freming.db.repository import skip_post

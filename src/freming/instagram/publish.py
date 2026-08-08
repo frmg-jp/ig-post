@@ -182,6 +182,23 @@ def publish_container(token: str, ig_id: str, container_id: str) -> str:
     return str(media_id)
 
 
+def media_permalink(token: str, media_id: str) -> str | None:
+    """投稿のURL。ストーリーズへ手で追加するときに開く先。
+
+    `instagram_business_basic` で取れる（インサイトの権限は要らない）。
+    取れなくても投稿自体は成立しているので、失敗は None にして流す。
+    """
+    try:
+        body = _request(
+            "GET", f"{GRAPH}/{API_VERSION}/{media_id}", token,
+            params={"fields": "permalink"},
+        )
+    except InstagramError as exc:
+        log.warning("permalink を取れませんでした（media_id=%s）: %s", media_id, exc)
+        return None
+    return body.get("permalink")
+
+
 def publishing_limit(token: str, ig_id: str) -> tuple[int, int]:
     """直近24時間の投稿数と上限。暴走に気づくために見る。"""
     body = _request(
@@ -229,6 +246,7 @@ __all__ = [
     "container_status",
     "create_image_container",
     "create_reel_container",
+    "media_permalink",
     "publish_container",
     "publish_image",
     "publish_reel",

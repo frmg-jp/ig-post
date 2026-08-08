@@ -354,3 +354,110 @@ def test_各日の1位が選ばれる(db):
         ).fetchone()
         titles.append(found["title"])
     assert sorted(titles) == ["d1-high", "d2-high"]
+
+
+# --- ストーリーズは手で上げる ------------------------------------------
+#
+# **API は「投稿をストーリーズに追加」を開けていない。** リンク・メンション・
+# アンケートといったスタンプは一切投稿できず、キャプションも受け付けない。
+# 毎日1回まとめて手で上げる形にしたので、その支度と進捗をここで固定する。
+
+
+def test_自動ストーリーズは既定で作られない(db):
+    _property(db, "one")
+    stats = plan(CONFIG, db, NOW)
+    assert stats.feed == 1
+    assert stats.story == 0
+
+
+def test_設定を戻せばストーリーズの予定も作られる(db):
+    """完全に消してはいない。画像だけのストーリーズが要るなら戻せる。"""
+    cfg = CONFIG.model_copy(deep=True)
+    cfg.instagram.post_story = True
+    _property(db, "one")
+    stats = plan(cfg, db, NOW)
+    assert stats.story == 1
+
+
+def test_止めたあとに残った予定は出さずに見送る(db):
+    """設定を切り替える前に作られた行が、あとから出てしまうのを防ぐ。"""
+    from freming.db.repository import abandon_post
+
+    property_id = _property(db)
+    post_id = create_post(db, "story", NOW.isoformat(), property_id=property_id)
+    claim_due_post(db, NOW.isoformat(), 3)
+    abandon_post(db, post_id)
+    row = db.execute("SELECT state FROM posts WHERE id = ?", (post_id,)).fetchone()
+    assert row["state"] == "skipped"
+
+
+def test_手で上げる一覧はその日の公開分だけ(db):
+    from freming.db.repository import posts_awaiting_story
+
+    for title, published in [("今日", NOW), ("昨日", NOW - timedelta(days=1))]:
+        property_id = _property(db, title)
+        post_id = create_post(db, "feed", NOW.isoformat(), property_id=property_id)
+        finish_post(db, post_id, f"media-{title}", "c")
+        db.execute(
+            "UPDATE posts SET published_at = ? WHERE id = ?", (published.isoformat(), post_id)
+        )
+    db.commit()
+    rows = posts_awaiting_story(
+        db, NOW.replace(hour=0).isoformat(), (NOW + timedelta(days=1)).isoformat()
+    )
+    assert [r["title"] for r in rows] == ["今日"]
+
+
+def test_追加済みの印は付け外しできる(db):
+    from freming.db.repository import mark_story_shared, posts_awaiting_story
+
+    property_id = _property(db)
+    post_id = create_post(db, "feed", NOW.isoformat(), property_id=property_id)
+    finish_post(db, post_id, "media-1", "c")
+    db.execute("UPDATE posts SET published_at = ? WHERE id = ?", (NOW.isoformat(), post_id))
+    db.commit()
+
+    def shared() -> bool:
+        rows = posts_awaiting_story(
+            db, NOW.replace(hour=0).isoformat(), (NOW + timedelta(days=1)).isoformat()
+        )
+        return bool(rows[0]["story_shared_at"])
+
+    assert shared() is False
+    assert mark_story_shared(db, post_id, True) is True
+    assert shared() is True
+    assert mark_story_shared(db, post_id, False) is True
+    assert shared() is False
+
+
+def test_未公開には追加済みの印を付けられない(db):
+    from freming.db.repository import mark_story_shared
+
+    property_id = _property(db)
+    post_id = create_post(db, "feed", NOW.isoformat(), property_id=property_id)
+    assert mark_story_shared(db, post_id, True) is False
+
+
+def test_permalinkを保存できる(db):
+    from freming.db.repository import set_permalink
+
+    property_id = _property(db)
+    post_id = create_post(db, "feed", NOW.isoformat(), property_id=property_id)
+    set_permalink(db, post_id, "https://www.instagram.com/p/ABC123/")
+    row = db.execute("SELECT permalink FROM posts WHERE id = ?", (post_id,)).fetchone()
+    assert row["permalink"] == "https://www.instagram.com/p/ABC123/"
+
+
+def test_permalinkが取れなくても投稿は止まらない():
+    """URLは手作業の支度でしかない。取れなくても投稿自体は成立している。"""
+    import freming.instagram.publish as publish_mod
+
+    def _deny(*args, **kwargs):
+        raise InstagramError("Graph API が 400 を返しました: なんらかの理由")
+
+    original = publish_mod._request
+    publish_mod._request = _deny
+    try:
+        assert publish_mod.media_permalink("t", "m") is None
+    finally:
+        publish_mod._request = original

@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block body %}
+
+<style>
+  /* スマホで開いて片手で進める画面。押す対象を大きく、間隔を広く取る。 */
+  .story { display: flex; gap: 14px; padding: 18px 0; border-top: 1px solid var(--fg); align-items: flex-start; }
+  .story:last-of-type { border-bottom: 1px solid var(--fg); }
+  .story.done { opacity: .45; }
+  .story img { width: 96px; height: 96px; object-fit: cover; flex: 0 0 auto; background: var(--fill); }
+  .story .meta { display: flex; flex-direction: column; gap: 8px; min-width: 0; flex: 1; }
+  .story h3 { margin: 0; font-size: 15px; font-weight: 400; line-height: 1.5; }
+  .story .where { font-size: 12px; }
+  .story .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .story a.open, .story button.plain {
+    display: inline-flex; align-items: center; height: 36px; padding: 0 14px;
+    border: 1px solid var(--fg); border-radius: 0; background: transparent;
+    color: var(--fg); font: inherit; font-size: 12px; cursor: pointer; text-decoration: none;
+  }
+  .story a.open { background: var(--fg); color: var(--on-fill); }
+  .story button.plain:hover { background: var(--fg); color: var(--on-fill); }
+  .story .no-link { font-size: 12px; }
+  .steps { margin: 0 0 8px; font-size: 13px; line-height: 1.9; }
+  .progress { font-size: 12px; margin: 0 0 18px; }
+  .daynav { display: flex; gap: 14px; font-size: 12px; margin: 0 0 18px; }
+</style>
+
+<h2>ストーリーズに追加</h2>
+
+<p class="note">
+  <strong>ここだけは自動化できません。</strong>
+  「投稿をストーリーズに追加」してタップで飛べるカードにする形は、
+  Instagram の API が開けていません（リンク・メンション等のスタンプは
+  一切投稿できず、ストーリーズはキャプションも受け付けません）。
+  他社ツールが対応していないのも同じ理由です。
+</p>
+
+<p class="steps">
+  スマホでこの画面を開いて、1件ずつ:<br>
+  <strong>1.</strong> 「投稿を開く」→ Instagram が開く<br>
+  <strong>2.</strong> 紙飛行機マーク →「ストーリーズに追加」<br>
+  <strong>3.</strong> 戻ってきて「追加した」を押す
+</p>
+
+<div class="daynav">
+  <a href="/stories?day={{ day - 1 }}">← 前の日</a>
+  <span>{{ date_label }}</span>
+  {% if day < 0 %}<a href="/stories?day={{ day + 1 }}">次の日 →</a>{% endif %}
+</div>
+
+{% if items %}
+  <p class="progress">{{ items | length }} 件中 <strong>{{ done }}</strong> 件が追加済み</p>
+{% else %}
+  <p class="empty">
+    この日に公開された投稿はありません。<br>
+    投稿されるとここに並びます。
+  </p>
+{% endif %}
+
+{% for item in items %}
+  {% set row = item.row %}
+  <div class="story {{ 'done' if item.done else '' }}">
+    {% if row["thumbnail_url"] %}<img src="{{ row['thumbnail_url'] }}" alt="">{% endif %}
+    <div class="meta">
+      <h3>{{ item.at }}　{{ row["title"] or "（無題）" }}</h3>
+      {% if row["location_city"] or row["location_country"] %}
+        <div class="where">{{ [row["location_city"], row["location_country"]] | select | join(", ") }}</div>
+      {% endif %}
+      <div class="row">
+        {% if row["permalink"] %}
+          <a class="open" href="{{ row['permalink'] }}" target="_blank" rel="noopener">投稿を開く</a>
+          <button class="plain js-copy" type="button" data-url="{{ row['permalink'] }}">URLをコピー</button>
+        {% else %}
+          {# permalink は投稿の直後に取りに行く。取れなかった場合はここに出る。 #}
+          <span class="no-link">URLを取得できていません（media_id: {{ row["ig_media_id"] }}）</span>
+        {% endif %}
+        <form method="post" action="/posts/{{ row['id'] }}/story-shared">
+          <input type="hidden" name="day" value="{{ day }}">
+          <input type="hidden" name="shared" value="{{ '0' if item.done else '1' }}">
+          <button class="plain" type="submit">{{ "取り消す" if item.done else "追加した" }}</button>
+        </form>
+      </div>
+    </div>
+  </div>
+{% endfor %}
+
+<script>
+// URLのコピー。リンクスタンプに貼るとき用。
+document.querySelectorAll('.js-copy').forEach(function (button) {
+  button.addEventListener('click', function () {
+    navigator.clipboard.writeText(button.dataset.url).then(function () {
+      var before = button.textContent;
+      button.textContent = 'コピーしました';
+      setTimeout(function () { button.textContent = before; }, 1500);
+    });
+  });
+});
+</script>
+
+{% endblock %}

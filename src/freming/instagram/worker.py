@@ -30,11 +30,13 @@ from zoneinfo import ZoneInfo
 from freming.config import Config
 from freming.db.connection import DbConnection, Row, connect
 from freming.db.repository import (
+    abandon_post,
     claim_due_post,
     fail_post,
     finish_post,
     published_posts_between,
     record_reach,
+    set_permalink,
 )
 from freming.instagram import media
 from freming.instagram.caption import build_reel_caption
@@ -44,6 +46,7 @@ from freming.instagram.publish import (
     KIND_REEL,
     KIND_STORY,
     account_id,
+    media_permalink,
     publish_image,
     publish_reel,
 )
@@ -171,6 +174,11 @@ def publish_one(config: Config, conn: DbConnection, post: Row, token: str, ig_id
 
     result = handler(config, conn, post, token, ig_id)
     finish_post(conn, post["id"], result.media_id, result.container_id)
+    if post["kind"] == KIND_FEED:
+        # ストーリーズは手で追加する（API がリンク付きの再共有を開けていない）。
+        # 人が「投稿を開く」ためのURLをここで取っておく。取れなくても
+        # 投稿自体は成立しているので、失敗しても止めない。
+        set_permalink(conn, post["id"], media_permalink(token, result.media_id))
     removed = media.purge_media(conn, post["id"])
     if removed:
         log.info("配り終えた画像を %d 件消しました（post_id=%s）", removed, post["id"])
@@ -197,6 +205,12 @@ def run_once(config: Config, conn: DbConnection, now: datetime | None = None) ->
         post = claim_due_post(conn, now.isoformat(), config.instagram.max_attempts)
         if post is None:
             return done
+        # 設定を切り替える前に作られたストーリーズの予定が残っていることが
+        # ある。**止めたつもりのものが出る**のが一番まずいので、ここで落とす。
+        if post["kind"] == KIND_STORY and not config.instagram.post_story:
+            abandon_post(conn, post["id"])
+            log.info("自動ストーリーズは無効なので見送りました（post_id=%s）", post["id"])
+            continue
         try:
             publish_one(config, conn, post, record.value, ig_id)
             done += 1
