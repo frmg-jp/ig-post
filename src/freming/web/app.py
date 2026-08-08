@@ -24,6 +24,7 @@ from fastapi.templating import Jinja2Templates
 
 from freming.config import Config, load_config
 from freming.db.connection import DbConnection, Row, connect
+from freming.db.migrate import is_missing_table
 from freming.db.repository import (
     DEFAULT_SORT,
     SORTS,
@@ -380,6 +381,20 @@ def create_app(
             log.info("既に登録済みのURLです: %s", url)
         return RedirectResponse("/?status=pending", status_code=303)
 
+    def _needs_migration(request: Request, name: str, status_key: str) -> HTMLResponse:
+        """新しい画面に必要な表がまだ無いときの案内。
+
+        マイグレーションを流すのは定期実行（毎朝 09:00 JST）だが、コードは
+        push のたびに配られる。**新しいコードが先に動き出す時間帯がある。**
+        そこで 500 を返すと原因が分からないので、やることを出す。
+        """
+        log.warning("%s: マイグレーションが未適用のため表示できません", name)
+        return templates.TemplateResponse(
+            request,
+            "needs_migration.html",
+            {"name": name, "status": status_key, "counts": {}},
+        )
+
     # ------------------------------------------------------------------
     # [9] Instagram への投稿
     # ------------------------------------------------------------------
@@ -421,6 +436,10 @@ def create_app(
         try:
             rows = list(scheduled_posts(conn, until.isoformat()))
             counts = count_by_status(conn)
+        except Exception as exc:
+            if not is_missing_table(exc):
+                raise
+            return _needs_migration(request, "投稿予定", "schedule")
         finally:
             conn.close()
 
@@ -471,6 +490,10 @@ def create_app(
                 )
             )
             counts = count_by_status(conn)
+        except Exception as exc:
+            if not is_missing_table(exc):
+                raise
+            return _needs_migration(request, "ストーリーズ", "stories")
         finally:
             conn.close()
 

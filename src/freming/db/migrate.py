@@ -187,3 +187,25 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def is_missing_table(exc: BaseException) -> bool:
+    """「そのテーブル（列）はまだ無い」という失敗か。
+
+    マイグレーションを流す場所（定期実行）と、コードが配られる場所
+    （Render の自動デプロイ）が別なので、**新しいコードが先に動き出す
+    時間帯がある。** そのとき画面が500で落ちると、原因が分からない。
+    ここで見分けて「db migrate を実行してください」と出す。
+
+    方言ごとにメッセージが違うので、両方の言い回しを見る。
+      SQLite   : no such table: posts / no such column: p.permalink
+      PostgreSQL: relation "posts" does not exist / column ... does not exist
+    """
+    text = str(exc).lower()
+    return (
+        "no such table" in text
+        or "no such column" in text
+        or "does not exist" in text
+        or "undefinedtable" in text
+        or "undefinedcolumn" in text
+    )

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block body %}
+
+<h2>{{ name }}</h2>
+
+<p class="note">
+  <strong>この画面に必要なテーブルがまだありません。</strong>
+  新しい機能のコードは配られていますが、DBの更新がまだです。
+</p>
+
+<p class="note">
+  DBの更新は定期実行（毎朝 09:00 JST）で流れます。それを待つか、
+  手元で次を実行してください（<code>.env</code> に <code>DATABASE_URL</code> がある状態で）。
+</p>
+
+<pre><code>python -m freming.cli db migrate</code></pre>
+
+<p class="note">
+  他の画面は今までどおり使えます。審査・承認・納品には影響ありません。
+</p>
+
+{% endblock %}

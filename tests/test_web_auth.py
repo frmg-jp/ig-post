@@ -195,3 +195,43 @@ def test_予定表は認証が要る(config) -> None:
 def test_投稿の操作は認証が要る(config) -> None:
     client = TestClient(create_app(config, auth=BasicAuth("u", "p")))
     assert client.post("/posts/1/skip").status_code == 401
+
+
+# --- マイグレーション未適用のとき ------------------------------------
+#
+# マイグレーションを流すのは定期実行（毎朝）だが、コードは push のたびに
+# Render へ配られる。**新しいコードが先に動き出す時間帯がある。**
+# そこで 500 を返すと原因が分からないので、やることを出す。
+
+
+def test_表が無くても500にならない(config) -> None:
+    from freming.db.connection import connect
+
+    conn = connect(config.app.target())
+    for version in ("0010_posts", "0011_story_share"):
+        conn.execute("DELETE FROM schema_migrations WHERE version = ?", (version,))
+    conn.execute("DROP TABLE IF EXISTS post_media")
+    conn.execute("DROP TABLE IF EXISTS posts")
+    conn.commit()
+    conn.close()
+
+    client = TestClient(create_app(config, auth=BasicAuth("u", "p")))
+    for path in ("/schedule", "/stories"):
+        response = client.get(path, headers=_header("u", "p"))
+        assert response.status_code == 200
+        assert "db migrate" in response.text
+
+
+def test_表が無くても審査は今までどおり使える(config) -> None:
+    """審査・承認・納品に影響を出さない。"""
+    from freming.db.connection import connect
+
+    conn = connect(config.app.target())
+    conn.execute("DROP TABLE IF EXISTS post_media")
+    conn.execute("DROP TABLE IF EXISTS posts")
+    conn.commit()
+    conn.close()
+
+    client = TestClient(create_app(config, auth=BasicAuth("u", "p")))
+    assert client.get("/", headers=_header("u", "p")).status_code == 200
+    assert client.get("/rules", headers=_header("u", "p")).status_code == 200
