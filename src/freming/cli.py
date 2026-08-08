@@ -871,6 +871,46 @@ def _cmd_rescore(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_backfill_captions(args: argparse.Namespace) -> int:
+    """[2] 投稿本文で使う項目を既存の物件に埋める。
+
+    **rescore とは別物。** rescore は採点をやり直すもので、納品済みには
+    触らない。こちらは納品済みも対象にし、score / status / summary には
+    一切触らず、0012・0013 で足した列だけを埋める。
+    """
+    from freming.db.connection import session
+    from freming.scoring.backfill import backfill, estimate, pending_rows
+
+    cfg = load_config(args.config)
+    setup_logging(cfg.app.log_dir, cfg.app.log_level)
+
+    with session(cfg.app.target()) as conn:
+        rows = pending_rows(conn, args.limit)
+        if not rows:
+            print("埋める対象はありません。")
+            return 0
+        tokens_in, tokens_out, cost = estimate(rows)
+        delivered = sum(1 for r in rows if r["status"] == "delivered")
+        no_text = sum(1 for r in rows if not (r["content_text"] or "").strip())
+        print(f"対象 {len(rows)} 件（うち納品済み {delivered} 件）")
+        if no_text:
+            print(f"  うち {no_text} 件は本文が無いので埋まりません（APIも呼びません）")
+        print(f"  入力 約 {tokens_in / 1000:.0f}k / 出力 約 {tokens_out / 1000:.0f}k トークン")
+        print(f"  概算費用 **約 ${cost:.2f}**（{cfg.scoring.model} の単価。目安です）")
+        if not args.yes:
+            print(
+                "\nスコア・審査結果・summary には触りません。足した列だけを埋めます。\n"
+                "実行するには --yes を付けてもう一度。"
+            )
+            return 0
+        stats = backfill(cfg, conn, args.limit)
+
+    print(stats.summary())
+    if stats.lines:
+        print("\n".join(stats.lines[:40]))
+    return 0
+
+
 def _cmd_sources_report(args: argparse.Namespace) -> int:
     """ソース別の実績（[1]）。自動収集を続けるかの判断に使う。
 
@@ -1273,6 +1313,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_rescore.add_argument("--yes", action="store_true", help="確認せず実行する")
     p_rescore.set_defaults(func=_cmd_rescore)
 
+    p_backfill = sub.add_parser(
+        "backfill-captions",
+        help="投稿本文で使う項目（用途・構造・面積・様式・英文・写真クレジット）を既存分に埋める",
+    )
+    p_backfill.add_argument("--limit", type=int, help="対象の上限")
+    p_backfill.add_argument("--yes", action="store_true", help="確認せず実行する")
+    p_backfill.set_defaults(func=_cmd_backfill_captions)
+
     p_sources_report = sub.add_parser(
         "source-report", help="ソース別の実績（収集→承認の歩留まり）"
     )
@@ -1290,6 +1338,7 @@ _NEEDS_MIGRATED_DB = frozenset({
     "collect", "score", "serve", "deliver", "learn", "rules",
     "ingest-url", "add-manual", "remove", "reset-images", "status",
     "instagram", "post", "redeliver", "rescore", "source-report",
+    "backfill-captions",
 })
 
 
