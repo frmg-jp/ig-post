@@ -141,6 +141,11 @@ def score_pending(
             country=assessment.country,
             price=assessment.price,
             provenance_visible=assessment.provenance_visible,
+            usage_type=assessment.usage_type,
+            structure=assessment.structure,
+            building_area=assessment.building_area,
+            site_area=assessment.site_area,
+            style_name=assessment.style_name,
         )
 
     log.info(stats.summary())

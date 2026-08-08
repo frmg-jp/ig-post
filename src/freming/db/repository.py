@@ -135,6 +135,11 @@ def save_score(
     country: str | None,
     price: str | None,
     provenance_visible: bool,
+    usage_type: str | None = None,
+    structure: str | None = None,
+    building_area: str | None = None,
+    site_area: str | None = None,
+    style_name: str | None = None,
 ) -> None:
     """スコアと、判定の過程で分かった属性を書き戻す。
 
@@ -150,14 +155,19 @@ def save_score(
             location_city    = COALESCE(location_city, ?),
             location_country = COALESCE(location_country, ?),
             price            = COALESCE(price, ?),
-            provenance_visible = ?, scored_at = ?
+            provenance_visible = ?, scored_at = ?,
+            usage_type = ?, structure = ?, building_area = ?,
+            site_area = ?, style_name = ?
         WHERE id = ?
         """,
         (
             score, score_reason, score_detail, score_model,
             summary or None, genre or None, architect or None, year_built or None,
             city or None, country or None, price or None,
-            1 if provenance_visible else 0, _now(), property_id,
+            1 if provenance_visible else 0, _now(),
+            usage_type or None, structure or None, building_area or None,
+            site_area or None, style_name or None,
+            property_id,
         ),
     )
     # 採点で year_built が入り、price が上書きされることがある。原文が
@@ -843,3 +853,96 @@ def mark_story_shared(conn: DbConnection, post_id: int, shared: bool) -> bool:
     )
     conn.commit()
     return bool(cursor.rowcount)
+
+
+def undo_delivery(conn: DbConnection, property_id: int) -> str | None:
+    """納品の記録を取り消して、もう一度キューに載せる。
+
+    **Drive のフォルダは消さない。** 消せる権限をここに持ち込まない
+    （納品先を壊す事故のほうが、フォルダが2つ残ることより重い）。
+    人が Drive 側を片付けてからこれを呼ぶ前提で、戻り値に元のフォルダ名を
+    返す。
+
+    フォルダ名は「既存の最大値＋1」で決まるので、**再納品では番号が
+    変わる**。frmg_ig006 を消して再納品しても 006 には戻らず、次の番号が
+    振られる。同じ番号にしたい場合は、この関数ではなく Drive 側で
+    フォルダを残したまま中身を入れ替えること。
+    """
+    row = conn.execute(
+        "SELECT folder_name FROM deliveries WHERE property_id = ?", (property_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    conn.execute("DELETE FROM deliveries WHERE property_id = ?", (property_id,))
+    conn.execute(
+        "UPDATE properties SET status = 'approved', delivery_attempts = 0, "
+        "delivery_error = NULL WHERE id = ?",
+        (property_id,),
+    )
+    conn.commit()
+    return row["folder_name"]
+
+
+def properties_needing_rescore(
+    conn: DbConnection, before: str | None = None, limit: int | None = None
+) -> list[Row]:
+    """採点し直す対象。
+
+    足切り（築年・story）は**採点した時点のルール**で効く。あとから基準を
+    変えても、既に採点済みの行は動かない。ルールを変えたら、対象を
+    選んで採点し直す必要がある。
+
+    納品済みは触らない。既に人が承認して外に出したものを、あとから
+    ルールで落としても意味がない（むしろ履歴が壊れる）。
+    """
+    where = ["status != 'delivered'", "scored_at IS NOT NULL"]
+    params: list = []
+    if before:
+        where.append("scored_at < ?")
+        params.append(before)
+    sql = (
+        f"SELECT * FROM properties WHERE {' AND '.join(where)} "
+        "ORDER BY scored_at ASC, id ASC"
+    )
+    if limit:
+        sql += " LIMIT ?"
+        params.append(limit)
+    return conn.execute(sql, tuple(params)).fetchall()
+
+
+def clear_scores(conn: DbConnection, ids: list[int]) -> int:
+    """採点結果を消して未採点に戻す。score_pending が拾えるようにする。"""
+    if not ids:
+        return 0
+    marks = ",".join("?" for _ in ids)
+    cursor = conn.execute(
+        f"UPDATE properties SET score = NULL, scored_at = NULL "
+        f"WHERE id IN ({marks}) AND status != 'delivered'",
+        tuple(ids),
+    )
+    conn.commit()
+    return cursor.rowcount or 0
+
+
+def source_outcomes(conn: DbConnection) -> list[Row]:
+    """ソース別の実績。自動収集を続けるかの判断に使う。
+
+    「何件入ったか」ではなく「**何件が承認まで行ったか**」を見る。
+    たくさん入っても全部非承認なら、そのソースは費用（採点のAPI）と
+    審査の手間を食っているだけになる。
+    """
+    return conn.execute(
+        """
+        SELECT source,
+               COUNT(*) AS collected,
+               SUM(CASE WHEN score IS NOT NULL THEN 1 ELSE 0 END) AS scored,
+               SUM(CASE WHEN status = 'approved'  THEN 1 ELSE 0 END) AS approved,
+               SUM(CASE WHEN status = 'rejected'  THEN 1 ELSE 0 END) AS rejected,
+               SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END) AS delivered,
+               SUM(CASE WHEN status = 'pending'   THEN 1 ELSE 0 END) AS pending,
+               MAX(score) AS best_score
+        FROM properties
+        GROUP BY source
+        ORDER BY collected DESC
+        """
+    ).fetchall()

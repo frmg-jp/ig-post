@@ -380,11 +380,23 @@ listing_sources:
   # 「許可されていない」と扱う（fail-closed）ので、収集できない。
   # 2026-08-03 に登録を試みて上記の理由で外した。再挑戦するなら、
   # www 側に置かれた sitemap を探すこと。
+    # **2026-08-07: manual_only に降格。** 画像が1枚も取れないため。
+    #
+    # 物件ページは今でも取れる（sitemap-properties-dpages--0.xml に
+    # 5,049 件、URL規則にも一致する）。取れないのは**写真**で、
+    # 配信元が dlajgvw9htjpb.cloudfront.net、その **robots.txt が 403** を返す。
+    # 取得できない robots.txt は「許可されていない」と扱う方針（fail-closed）
+    # なので、画像は全数スキップされる。実際に物件ページ1件で確認した
+    # （60超 枚すべてスキップ）。
+    #
+    # 画像が無ければ納品も投稿もできない。収集と採点（Claude API）の
+    # 費用と審査の手間だけがかかり、成果物は絶対に出ない。
+    # CDN の robots.txt が読めるようになれば crawl に戻せる。
   - key: corcoranicon
     name: "Corcoran Icon Properties"
     rank: B
-    mode: crawl
-    enabled: true
+    mode: manual_only
+    enabled: false
     base_url: "https://corcoranicon.com"
     note: "San Francisco。Vanguard と同じ作りで、物件は5,528件"
     crawl:
@@ -394,11 +406,23 @@ listing_sources:
       detail_url_include:
         - "/properties/[^/]*-\\d{6,}$"
       max_details: 40
+    # **2026-08-07: manual_only に降格。** 画像が1枚も取れないため。
+    #
+    # 物件ページは今でも取れる（sitemap-properties-dpages--0.xml に
+    # 9,037 件、URL規則にも一致する）。取れないのは**写真**で、
+    # 配信元が dlajgvw9htjpb.cloudfront.net、その **robots.txt が 403** を返す。
+    # 取得できない robots.txt は「許可されていない」と扱う方針（fail-closed）
+    # なので、画像は全数スキップされる。実際に物件ページ1件で確認した
+    # （1 枚すべてスキップ）。
+    #
+    # 画像が無ければ納品も投稿もできない。収集と採点（Claude API）の
+    # 費用と審査の手間だけがかかり、成果物は絶対に出ない。
+    # CDN の robots.txt が読めるようになれば crawl に戻せる。
   - key: vanguard
     name: "Vanguard Properties"
     rank: B
-    mode: crawl
-    enabled: true
+    mode: manual_only
+    enabled: false
     base_url: "https://vanguardproperties.com"
     note: "San Francisco。物件sitemapが1万件超あるので max_details で抑える"
     crawl:
@@ -685,13 +709,100 @@ instagram:
   # 出たことに誰も気づけない。リーチには再認可が要る（insights.py）。
   reel_fallback_recent: false
 
-  # キャプションの末尾に付けるタグ。空なら付かない。
-  hashtags: []
+  # ハッシュタグと本文の型は caption セクションが持つ（この下）。
 
   # 自動投稿してよいソース。空なら納品済みの全ソースが対象。
   # 仲介サイト由来の写真は MLS のロゴが載ることがあるので、
   # 自動で出す先を絞りたくなったらここに key を並べる。
   allowed_sources: []
+
+# ---------------------------------------------------------------------
+# 投稿の本文（キャプション）
+#
+#   実際に運用している @frmg.jpn の投稿3件から型を起こしたもの
+#   （2026-08-07）。文言はここだけで直せるようにしてある。
+#
+#   組み立ての順は instagram/caption.py。**値が無い行は出さない。**
+#   「Architect: 不明」のような行を出すくらいなら、その行ごと落とす。
+#
+#   価格は載せない。実物の投稿にも入っていない。通貨が混ざるうえ
+#   為替で見え方が変わり、成約後も直せないため。
+# ---------------------------------------------------------------------
+caption:
+  # 冒頭の2行。日英を並べる。
+  lead:
+    - '世界で今、手に入る"気になる建築"をセレクトしています。'
+    - "Curated architecture from around the world."
+
+  # 仕様欄。左が出力する順で、右がラベル。DBに値があるものだけ出る。
+  # key は properties の列名（location だけは city + country から作る）。
+  spec:
+    - [location, "Location"]
+    - [usage_type, "Usage"]
+    - [architect, "Architect"]
+    - [structure, "Structure"]
+    - [building_area, "Building Area"]
+    - [site_area, "Site Area"]
+    - [year_built, "Built in"]
+    - [style_name, "Style"]
+
+  # 説明文のあと、締めの前に入る案内。
+  details:
+    - "物件詳細はストーリーズ・ハイライトへ"
+    - "Property details → Stories & Highlights"
+
+  disclaimer: "※成約済みの際は不動産、建築、内装の参考としてご活用下さい。"
+
+  signature:
+    - "Design × Build × Regenerate"
+    - "From Japan to the World."
+    - "CURATED BY FREMING"
+
+  business: |-
+    ＜ 海外リノベーション事業 ＞
+    海外不動産の購入相談から、購入後のリノベーションにおける設計・施工管理までサポートしています。
+    工事期間中の定期打ち合わせ代行、品質管理、スケジュール管理など、海外プロジェクトを安心して進められる体制をご提供します。
+    海外での不動産購入や資産形成をご検討のかたは、お気軽にご相談ください。
+
+  # 毎回付けるタグ。
+  hashtags:
+    - "#FREMING"
+    - "#FremingCurated"
+    - "#Architecture"
+    - "#ArchitectureLovers"
+    - "#ModernArchitecture"
+    - "#Architect"
+    - "#DesignInspiration"
+    - "#LuxuryRealEstate"
+    - "#建築"
+    - "#海外建築"
+    - "#建築デザイン"
+    - "#住宅デザイン"
+    - "#建築好き"
+    - "#海外不動産"
+    - "#海外不動産投資"
+    - "#不動産投資"
+
+  # 物件の内容に応じて足すタグ。match は様式名・ジャンル・構造・用途を
+  # つないだ文字列に対する部分一致（小文字で比較）。
+  # Instagram の上限は30個。既定16個＋ここから最大数個を想定している。
+  hashtag_rules:
+    - match: "mid-century"
+      tags: ["#MidCenturyModern", "#ミッドセンチュリー"]
+    - match: "loft"
+      tags: ["#LoftLiving", "#ロフト"]
+    - match: "art deco"
+      tags: ["#ArtDeco", "#アールデコ"]
+    - match: "victorian"
+      tags: ["#VictorianHouse"]
+    - match: "brutalis"
+      tags: ["#Brutalism", "#ブルータリズム"]
+    - match: "adaptive_reuse"
+      tags: ["#AdaptiveReuse", "#コンバージョン"]
+    - match: "penthouse"
+      tags: ["#Penthouse", "#ペントハウス"]
+    - match: "warehouse"
+      tags: ["#WarehouseConversion"]
 
 # ---------------------------------------------------------------------
 # 連載企画のラベル

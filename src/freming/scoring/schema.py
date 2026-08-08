@@ -38,6 +38,11 @@ OUTPUT_SCHEMA: dict = {
         "city",
         "country",
         "price",
+        "usage_type",
+        "structure",
+        "building_area",
+        "site_area",
+        "style_name",
     ],
     "properties": {
         "is_for_sale": {
@@ -85,6 +90,46 @@ OUTPUT_SCHEMA: dict = {
         "city": {"type": "string", "description": "都市名（英語表記）。不明なら空文字。"},
         "country": {"type": "string", "description": "国名（英語表記）。不明なら空文字。"},
         "price": {"type": "string", "description": "売出価格の原文表記。不明なら空文字。"},
+        # --- 投稿キャプションの仕様欄に出す項目 ---
+        # **推測させない。** 記事に書かれていなければ空文字にする。
+        # 投稿の本文に事実として載るので、それらしい値を埋められると
+        # 誤りがそのまま公開される。
+        "usage_type": {
+            "type": "string",
+            "description": (
+                "用途。英語で簡潔に（Private Residence / Historic Loft Residence /"
+                " Apartment など）。記事から読み取れなければ空文字。"
+            ),
+        },
+        "structure": {
+            "type": "string",
+            "description": (
+                "構造・工法。英語で（Post-and-Beam / Wood Frame / Heavy Timber /"
+                " Historic Brick Building など）。複数なら ' / ' で繋ぐ。"
+                "記事に書かれていなければ空文字。"
+            ),
+        },
+        "building_area": {
+            "type": "string",
+            "description": (
+                "延床面積。**原文の単位と表記のまま**（'2,008 sq ft' / '187㎡'）。"
+                "換算はしない。書かれていなければ空文字。"
+            ),
+        },
+        "site_area": {
+            "type": "string",
+            "description": (
+                "敷地面積。**原文の単位と表記のまま**（'0.82 Acres' / '15,000 sq ft'）。"
+                "換算はしない。書かれていなければ空文字。"
+            ),
+        },
+        "style_name": {
+            "type": "string",
+            "description": (
+                "様式の名前。英語で（Mid-Century Modern / Spanish Colonial /"
+                " Two-Story Industrial Loft など）。特定できなければ空文字。"
+            ),
+        },
     },
 }
 
@@ -124,6 +169,11 @@ class Assessment:
     city: str = ""
     country: str = ""
     price: str = ""
+    usage_type: str = ""
+    structure: str = ""
+    building_area: str = ""
+    site_area: str = ""
+    style_name: str = ""
 
     @classmethod
     def from_json(cls, data: dict) -> Assessment:

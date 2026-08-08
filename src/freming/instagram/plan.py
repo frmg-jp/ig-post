@@ -116,7 +116,7 @@ def plan(config: Config, conn: DbConnection, now: datetime | None = None) -> Pla
         stats.short_of_stock = len(empty) - len(candidates)
 
     for moment, row in zip(empty, candidates, strict=False):
-        caption = build_caption(row, ig.hashtags)
+        caption = build_caption(row, config.caption)
         post_id = create_post(
             conn, KIND_FEED, moment.isoformat(), property_id=row["id"], caption=caption
         )

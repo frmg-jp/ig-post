@@ -402,6 +402,32 @@ class ProcessConfig(BaseModel):
     resample: str = "lanczos"
 
 
+class HashtagRule(BaseModel):
+    """物件の内容に応じて足すタグ。match は部分一致（小文字で比較）。"""
+
+    match: str
+    tags: list[str] = Field(default_factory=list)
+
+
+class CaptionConfig(BaseModel):
+    """[9] 投稿の本文。実際の @frmg.jpn の投稿から起こした型（2026-08-07）。
+
+    **文言はここだけで直す。** 組み立ての順は instagram/caption.py が持つ。
+    価格は入れない（実物にも入っていない。通貨が混ざるうえ為替で見え方が
+    変わり、成約後も直せない）。
+    """
+
+    lead: list[str] = Field(default_factory=list)
+    # 出力する順とラベル。key は properties の列名（location だけ特別扱い）。
+    spec: list[tuple[str, str]] = Field(default_factory=list)
+    details: list[str] = Field(default_factory=list)
+    disclaimer: str = ""
+    signature: list[str] = Field(default_factory=list)
+    business: str = ""
+    hashtags: list[str] = Field(default_factory=list)
+    hashtag_rules: list[HashtagRule] = Field(default_factory=list)
+
+
 class ReelConfig(BaseModel):
     """[9] 週次リール。既定値は実物を見て決めたもので、勝手な仮置きではない。
 
@@ -498,8 +524,6 @@ class InstagramConfig(BaseModel):
     # リールに使う画像を選ぶのに必要なリーチが取れないとき、
     # 直近の投稿で代用してよいか。既定は **代用しない**（黙って別物を出さない）。
     reel_fallback_recent: bool = False
-    # キャプションの末尾に付けるタグ。空にすれば付かない。
-    hashtags: list[str] = Field(default_factory=list)
     # 自動投稿してよいソース。空なら「manual_only でない全ソース」。
     # 仲介サイト由来の写真は MLS のロゴが載ることがあるので、
     # 自動で出す先はここで絞れるようにしてある。
@@ -532,6 +556,7 @@ class Config(BaseModel):
     images: ImagesConfig = Field(default_factory=ImagesConfig)
     fx: FxConfig = Field(default_factory=FxConfig)
     process: ProcessConfig = Field(default_factory=ProcessConfig)
+    caption: CaptionConfig = Field(default_factory=CaptionConfig)
     reel: ReelConfig = Field(default_factory=ReelConfig)
     drive: DriveConfig
     instagram: InstagramConfig = Field(default_factory=InstagramConfig)

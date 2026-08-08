@@ -224,11 +224,11 @@ def test_公開URLはtokenを付けて返る():
 def test_キャプションに場所と選定理由が入る(db):
     property_id = _property(db)
     row = db.execute("SELECT * FROM properties WHERE id = ?", (property_id,)).fetchone()
-    caption = build_caption(row, ["frmg"])
+    caption = build_caption(row, CONFIG.caption)
     assert "Old Mill House" in caption
     assert "Porto, Portugal" in caption
     assert "製粉所の躯体を残した改修" in caption
-    assert "#frmg" in caption
+    assert "#FremingCurated" in caption
 
 
 def test_キャプションに価格は入らない(db):
@@ -237,7 +237,7 @@ def test_キャプションに価格は入らない(db):
     db.execute("UPDATE properties SET price = '€1,250,000' WHERE id = ?", (property_id,))
     db.commit()
     row = db.execute("SELECT * FROM properties WHERE id = ?", (property_id,)).fetchone()
-    assert "1,250,000" not in build_caption(row)
+    assert "1,250,000" not in build_caption(row, CONFIG.caption)
 
 
 def test_音源のクレジットは上限を超えても残る():
@@ -249,13 +249,13 @@ def test_音源のクレジットは上限を超えても残る():
 
 
 def test_リールのキャプションに件数とクレジットが入る():
-    caption = build_reel_caption(7, ["frmg"], "familiar by AvapXia — CC BY 4.0")
+    caption = build_reel_caption(7, CONFIG.caption, "familiar by AvapXia — CC BY 4.0")
     assert "今週の7件" in caption
     assert caption.endswith("familiar by AvapXia — CC BY 4.0")
 
 
 def test_クレジット不要なら何も足さない():
-    assert "Music:" not in build_reel_caption(7, [], "")
+    assert "Music:" not in build_reel_caption(7, CONFIG.caption, "")
 
 
 # --- コンテナの待ち ---------------------------------------------------

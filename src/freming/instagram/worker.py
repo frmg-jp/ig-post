@@ -131,7 +131,7 @@ def _publish_reel(config: Config, conn: DbConnection, post: Row, token: str, ig_
         )
 
     track = audio_for_week(int(now.strftime("%V")))
-    caption = build_reel_caption(len(winners), config.instagram.hashtags, track.caption_line())
+    caption = build_reel_caption(len(winners), config.caption, track.caption_line())
 
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)

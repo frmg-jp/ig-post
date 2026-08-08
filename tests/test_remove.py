@@ -132,3 +132,98 @@ def test_flat_thumbnail_is_what_the_audit_looks_for() -> None:
     buffer = BytesIO()
     Image.new("RGB", (1280, 800), (208, 208, 208)).save(buffer, "JPEG", quality=90)
     assert is_flat_image(buffer.getvalue())
+
+
+# --- 再納品 / 再採点 / ソース別実績 ------------------------------------
+def test_納品を取り消すと承認済みに戻る(db):
+    """Drive のフォルダは消さない。人が片付けてから呼ぶ前提。"""
+    from freming.db.repository import undo_delivery
+
+    property_id = _add(db, "dezeen", "https://example.com/x", status="delivered")
+    db.execute(
+        "INSERT INTO deliveries (property_id, folder_name, image_count, "
+        "drive_folder_id, delivered_at) VALUES (?, 'frmg_ig006', 8, 'drv1', ?)",
+        (property_id, "2026-08-01T00:00:00+00:00"),
+    )
+    db.execute("UPDATE properties SET delivery_attempts = 3 WHERE id = ?", (property_id,))
+    db.commit()
+
+    assert undo_delivery(db, property_id) == "frmg_ig006"
+    row = db.execute(
+        "SELECT status, delivery_attempts FROM properties WHERE id = ?", (property_id,)
+    ).fetchone()
+    assert row["status"] == "approved"
+    assert row["delivery_attempts"] == 0
+    assert db.execute("SELECT COUNT(*) AS n FROM deliveries").fetchone()["n"] == 0
+
+
+def test_納品していないものは取り消せない(db):
+    from freming.db.repository import undo_delivery
+
+    property_id = _add(db, "dezeen", "https://example.com/y")
+    assert undo_delivery(db, property_id) is None
+
+
+def test_採点し直す対象に納品済みは入らない(db):
+    """既に人が承認して外に出したものを、あとからルールで落とさない。"""
+    from freming.db.repository import properties_needing_rescore
+
+    kept = _add(db, "dezeen", "https://example.com/a", status="pending")
+    done = _add(db, "dezeen", "https://example.com/b", status="delivered")
+    for pid in (kept, done):
+        db.execute(
+            "UPDATE properties SET score = 60, scored_at = ? WHERE id = ?",
+            ("2026-08-01T00:00:00+00:00", pid),
+        )
+    db.commit()
+    ids = [r["id"] for r in properties_needing_rescore(db)]
+    assert kept in ids
+    assert done not in ids
+
+
+def test_未採点のものは対象にならない(db):
+    from freming.db.repository import properties_needing_rescore
+
+    _add(db, "dezeen", "https://example.com/c")
+    assert properties_needing_rescore(db) == []
+
+
+def test_採点日時で絞れる(db):
+    from freming.db.repository import properties_needing_rescore
+
+    old = _add(db, "dezeen", "https://example.com/old")
+    new = _add(db, "dezeen", "https://example.com/new")
+    db.execute("UPDATE properties SET score = 60, scored_at = ? WHERE id = ?",
+               ("2026-08-01T00:00:00+00:00", old))
+    db.execute("UPDATE properties SET score = 60, scored_at = ? WHERE id = ?",
+               ("2026-08-06T00:00:00+00:00", new))
+    db.commit()
+    ids = [r["id"] for r in properties_needing_rescore(db, before="2026-08-05")]
+    assert ids == [old]
+
+
+def test_採点を消すと未採点に戻る(db):
+    from freming.db.repository import clear_scores
+
+    property_id = _add(db, "dezeen", "https://example.com/d")
+    db.execute("UPDATE properties SET score = 60, scored_at = ? WHERE id = ?",
+               ("2026-08-01T00:00:00+00:00", property_id))
+    db.commit()
+    assert clear_scores(db, [property_id]) == 1
+    row = db.execute("SELECT score, scored_at FROM properties WHERE id = ?",
+                     (property_id,)).fetchone()
+    assert row["score"] is None
+    assert row["scored_at"] is None
+
+
+def test_ソース別の実績が出る(db):
+    from freming.db.repository import source_outcomes
+
+    _add(db, "dezeen", "https://a.example.com/1", status="delivered")
+    _add(db, "dezeen", "https://a.example.com/2", status="rejected")
+    _add(db, "vanguard", "https://b.example.com/1", status="rejected")
+    rows = {r["source"]: r for r in source_outcomes(db)}
+    assert rows["dezeen"]["collected"] == 2
+    assert rows["dezeen"]["delivered"] == 1
+    assert rows["vanguard"]["rejected"] == 1
+    assert rows["vanguard"]["delivered"] == 0

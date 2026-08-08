@@ -782,6 +782,129 @@ def _cmd_instagram(args: argparse.Namespace) -> int:
     return 1 if outcome == "expired" else 0
 
 
+def _cmd_redeliver(args: argparse.Namespace) -> int:
+    """納品の記録を取り消して、もう一度納品させる（[6]）。
+
+    **Drive のフォルダはこちらでは消さない。** 消せる権限をこの経路に
+    持ち込まない（納品先を壊す事故のほうが、フォルダが2つ残ることより重い）。
+    人が Drive 側を片付けてから呼ぶ前提。
+
+    フォルダ名は「既存の最大値＋1」で決まるので、**番号は元に戻らない**。
+    frmg_ig006 を消して再納品しても 006 ではなく次の番号が振られる。
+    """
+    from freming.db.connection import session
+    from freming.db.repository import undo_delivery
+
+    cfg = load_config(args.config)
+    setup_logging(cfg.app.log_dir, cfg.app.log_level)
+
+    with session(cfg.app.target()) as conn:
+        row = conn.execute(
+            "SELECT p.title, d.folder_name, d.drive_folder_id "
+            "FROM properties p JOIN deliveries d ON d.property_id = p.id "
+            "WHERE p.id = ?",
+            (args.property_id,),
+        ).fetchone()
+        if row is None:
+            print(
+                f"property_id={args.property_id} の納品記録がありません。"
+                "（未納品か、IDが違います）",
+                file=sys.stderr,
+            )
+            return 1
+
+        print(f"  物件: {row['title']}")
+        print(f"  Drive: {row['folder_name']}（folder_id={row['drive_folder_id']}）")
+        if not args.yes:
+            print(
+                "\nこの納品記録を取り消して、承認済みに戻します。\n"
+                "**Drive のフォルダは消えません。** 先に手で片付けてください。\n"
+                "再納品では番号が変わります（同じ frmg_ig 番号には戻りません）。\n"
+                "実行するには --yes を付けてもう一度。"
+            )
+            return 0
+
+        folder = undo_delivery(conn, args.property_id)
+    print(f"取り消しました（元: {folder}）。自動納品が次の巡回で拾います。")
+    return 0
+
+
+def _cmd_rescore(args: argparse.Namespace) -> int:
+    """採点し直す（[2]）。基準を変えたあと、既存分にも当てるための経路。
+
+    足切り（築年・story）は**採点した時点のルール**で効くので、config を
+    変えても採点済みの行は動かない。ここで採点結果を消し、`score` が
+    もう一度拾えるようにする。
+
+    **APIの費用がかかる。** 何件をいくらで叩くのかを先に出し、--yes が
+    無ければ何もしない。
+    """
+    from freming.db.connection import session
+    from freming.db.repository import clear_scores, properties_needing_rescore
+
+    cfg = load_config(args.config)
+    setup_logging(cfg.app.log_dir, cfg.app.log_level)
+
+    with session(cfg.app.target()) as conn:
+        rows = properties_needing_rescore(conn, before=args.before, limit=args.limit)
+        if not rows:
+            print("採点し直す対象がありません。")
+            return 0
+
+        # 概算。本文の長さから入力トークンを見積もる（日本語・英語まじりで
+        # おおよそ2.5文字＝1トークン）。出力は構造化された固定長に近い。
+        chars = sum(len(r["content_text"] or "") for r in rows)
+        in_tokens = chars / 2.5 + len(rows) * 1200      # 本文＋システムプロンプト
+        out_tokens = len(rows) * 400
+        cost = in_tokens / 1e6 * 1.0 + out_tokens / 1e6 * 5.0   # Haiku 4.5 の単価
+        print(f"対象 {len(rows)} 件（納品済みは含みません）")
+        print(f"  本文 合計 {chars:,} 字 → 入力 約 {in_tokens/1000:.0f}k / 出力 約 {out_tokens/1000:.0f}k トークン")
+        print(f"  概算費用 **約 ${cost:.2f}**（{cfg.scoring.model} の単価。目安です）")
+
+        if not args.yes:
+            print("\n採点結果を消して未採点に戻します。実行するには --yes を付けてもう一度。")
+            print("そのあと `python -m freming.cli score` で採点し直してください。")
+            return 0
+
+        cleared = clear_scores(conn, [int(r["id"]) for r in rows])
+    print(f"{cleared} 件を未採点に戻しました。`score --limit {cleared}` で採点し直せます。")
+    return 0
+
+
+def _cmd_sources_report(args: argparse.Namespace) -> int:
+    """ソース別の実績（[1]）。自動収集を続けるかの判断に使う。
+
+    「何件入ったか」ではなく「**何件が承認まで行ったか**」を見る。
+    たくさん入っても全部非承認なら、そのソースは採点の費用と審査の手間を
+    食っているだけになる。
+    """
+    from freming.db.connection import session
+    from freming.db.repository import source_outcomes
+
+    cfg = load_config(args.config)
+    with session(cfg.app.target()) as conn:
+        rows = source_outcomes(conn)
+    if not rows:
+        print("まだ1件も入っていません。")
+        return 0
+
+    print(f"{'ソース':<18}{'収集':>6}{'採点':>6}{'未審査':>7}{'承認':>6}"
+          f"{'非承認':>7}{'納品':>6}{'最高点':>8}  自動収集")
+    for row in rows:
+        key = row["source"]
+        src = cfg.editorial_source(key) or cfg.listing_source(key)
+        mode = "—"
+        if src is not None:
+            crawl = getattr(src, "mode", "crawl") == "crawl"
+            mode = ("有効" if src.enabled else "無効") if crawl else "手動のみ"
+        best = f"{row['best_score']:.0f}" if row["best_score"] is not None else "—"
+        print(f"{key:<18}{row['collected']:>6}{row['scored'] or 0:>6}"
+              f"{row['pending'] or 0:>7}{row['approved'] or 0:>6}"
+              f"{row['rejected'] or 0:>7}{row['delivered'] or 0:>6}{best:>8}  {mode}")
+    print("\n承認＋納品が 0 のまま件数だけ多いソースは、manual_only に落とすか無効化を検討する。")
+    return 0
+
+
 def _cmd_post(args: argparse.Namespace) -> int:
     """[9] Instagram への投稿。予定を作る / 見る / 時間が来たものを出す。
 
@@ -1133,6 +1256,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_post.set_defaults(func=_cmd_post)
 
+    p_redeliver = sub.add_parser(
+        "redeliver", help="納品記録を取り消して再納品させる（Driveのフォルダは消さない）"
+    )
+    p_redeliver.add_argument("property_id", type=int)
+    p_redeliver.add_argument("--yes", action="store_true", help="確認せず実行する")
+    p_redeliver.set_defaults(func=_cmd_redeliver)
+
+    p_rescore = sub.add_parser(
+        "rescore", help="採点し直す（基準を変えたあと既存分に当てる。API費用がかかる）"
+    )
+    p_rescore.add_argument(
+        "--before", help="この日時より前に採点したものだけ（ISO。例 2026-08-07）"
+    )
+    p_rescore.add_argument("--limit", type=int, help="対象の上限")
+    p_rescore.add_argument("--yes", action="store_true", help="確認せず実行する")
+    p_rescore.set_defaults(func=_cmd_rescore)
+
+    p_sources_report = sub.add_parser(
+        "source-report", help="ソース別の実績（収集→承認の歩留まり）"
+    )
+    p_sources_report.set_defaults(func=_cmd_sources_report)
+
     p_status = sub.add_parser("status", help="候補の件数をステータス別に表示")
     p_status.set_defaults(func=_cmd_status)
 
@@ -1144,7 +1289,7 @@ def build_parser() -> argparse.ArgumentParser:
 _NEEDS_MIGRATED_DB = frozenset({
     "collect", "score", "serve", "deliver", "learn", "rules",
     "ingest-url", "add-manual", "remove", "reset-images", "status",
-    "instagram", "post",
+    "instagram", "post", "redeliver", "rescore", "source-report",
 })
 
 
