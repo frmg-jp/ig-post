@@ -666,6 +666,21 @@ instagram:
   # 離れていると、片方だけ落ちたときに状態がずれる。
   auto_post: false
 
+  # このプロセスが担当する種別。**動かす場所を分けるために書く。**
+  #
+  #   審査UI（Render）        [feed, story]  ← ここの値
+  #   GitHub Actions（週1）   [reel]         ← .github/workflows/reel.yml が
+  #                                            --kind reel で上書きする
+  #
+  # リールは 1080x1920 を2倍サイズに広げてから落とすので、数百MBのメモリと
+  # ffmpeg が要る。Render の無料プランでは作れない。GitHub Actions なら
+  # 両方ある。**リールの動画は公開URLを使わない**（rupload へ直接送る）ので、
+  # 画像を配れない場所でも投稿できる。
+  #
+  # 暗黙に分けない。ここに書いていないと、片方が止まったときに誰も
+  # 気づけない（auto_post を1箇所だけにするのと同じ理由）。
+  worker_kinds: [feed, story]
+
   # Meta が画像を取りに来る先。**これが空だと投稿できない。**
   # 審査UIの公開URL。末尾のスラッシュは不要。
   public_base_url: "https://freming-curated-review.onrender.com"

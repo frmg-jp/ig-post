@@ -220,11 +220,15 @@ def run_once(
     now: datetime | None = None,
     limit: int | None = None,
     dry_run: bool = False,
+    kinds: tuple[str, ...] | None = None,
 ) -> int:
     """時間が来た予定を順に投稿する。戻り値は投稿できた件数。
 
     limit で件数を絞れる。**最初の1本は 1 にして様子を見ること。**
     dry_run なら中身を出して、予定は planned に戻す（消費しない）。
+
+    kinds を渡すとその種別だけを扱う。既定は config の worker_kinds。
+    リールは ffmpeg が要るので、審査UI（Render）では担当しない。
     """
     now = now or datetime.now(UTC)
     record = load_token(conn)
@@ -238,10 +242,18 @@ def run_once(
         )
         return 0
 
+    allowed = tuple(kinds if kinds is not None else config.instagram.worker_kinds)
+    if not allowed:
+        log.info("担当する種別がありません（instagram.worker_kinds が空）")
+        return 0
+    log.info("担当: %s", " / ".join(allowed))
+
     ig_id = "（dry-run）" if dry_run else account_id(record.value)
     done = 0
     while limit is None or done < limit:
-        post = claim_due_post(conn, now.isoformat(), config.instagram.max_attempts)
+        post = claim_due_post(
+            conn, now.isoformat(), config.instagram.max_attempts, allowed
+        )
         if post is None:
             return done
         # 設定を切り替える前に作られたストーリーズの予定が残っていることが

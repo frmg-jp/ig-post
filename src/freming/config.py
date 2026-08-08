@@ -506,6 +506,15 @@ class InstagramConfig(BaseModel):
     # 同じ予定を取り合う。posts の状態遷移で二重投稿は防いでいるが、
     # そもそも1箇所に寄せるのが前提（納品ワーカーと同じ方針）。
     auto_post: bool = False
+    # このプロセスが担当する種別。**動かす場所を分けるために使う。**
+    #
+    # リール（reel）は ffmpeg と数百MBのメモリが要るので、審査UI
+    # （Render の無料プラン）では作れない。通常投稿は画像を配る側と
+    # 同じ場所に置きたい。そこで場所ごとに担当を書き分ける。
+    #
+    # 暗黙に分けない。設定に書いていないと、片方が止まったときに
+    # 誰も気づけない（auto_post を1箇所だけにするのと同じ理由）。
+    worker_kinds: list[str] = Field(default_factory=lambda: ["feed", "story"])
     # Meta が画像を取りに来る先。審査UIの公開URL。末尾のスラッシュは不要。
     # **これが空だと投稿できない。** Meta はローカルのパスを読めない。
     public_base_url: str | None = None

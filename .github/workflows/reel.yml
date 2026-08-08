@@ -1,0 +1,68 @@
+name: 週次リール
+
+# リールだけを GitHub Actions で作って投稿する。
+#
+# **審査UI（Render の無料プラン）では作れない。** リールは 1080x1920 を
+# 2倍サイズに広げてから落とすので数百MBのメモリが要り、ffmpeg も入って
+# いない。ここなら ffmpeg を入れられて、メモリも十分ある。
+#
+# **公開URLが要らないのがこの分割の肝。** リールの動画は
+# rupload.facebook.com へ直接送るので、Meta がこちらへ取りに来ない。
+# 画像を配れない場所でも投稿できる。
+#
+# 収集（collect.yml）とは分ける。収集は毎朝で、リールは週1。
+# 同じジョブに入れると、収集が落ちたときにリールも巻き添えになる。
+
+on:
+  schedule:
+    # 毎週月曜 19:00 JST（UTC 10:00）。config.yaml の
+    # instagram.reel_weekday / reel_time と合わせること。ここだけ直しても
+    # 予定は作られない（予定は collect.yml の post plan が作る）。
+    - cron: "0 10 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "投稿せず中身だけ見る"
+        type: boolean
+        default: true
+
+concurrency:
+  group: freming-reel
+  cancel-in-progress: false
+
+jobs:
+  reel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 依存をインストール
+        run: pip install -e ".[postgres]"
+
+      # runner に入っていることが多いが、入っていない版を引くと
+      # リールが黙って作れなくなる。明示的に用意する。
+      - name: ffmpeg を用意
+        run: |
+          ffmpeg -version >/dev/null 2>&1 || {
+            sudo apt-get update -qq
+            sudo apt-get install -y ffmpeg
+          }
+          ffmpeg -version | head -1
+
+      - name: マイグレーション適用
+        run: python -m freming.cli db migrate
+
+      # **リールだけを扱う。** 通常投稿とストーリーズは審査UI側の担当で、
+      # ここで拾うと二重に出る（状態遷移で防いではいるが、担当を分けるのが前提）。
+      - name: リールを投稿
+        run: |
+          python -m freming.cli post run --kind reel \
+            ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}

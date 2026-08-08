@@ -723,25 +723,36 @@ def scheduled_posts(conn: DbConnection, until: str, states: tuple[str, ...] = ()
     ).fetchall()
 
 
-def claim_due_post(conn: DbConnection, now: str, max_attempts: int) -> Row | None:
+def claim_due_post(
+    conn: DbConnection, now: str, max_attempts: int, kinds: tuple[str, ...] = ()
+) -> Row | None:
     """時間が来た予定を1件だけ取り、publishing にして返す。
 
     **取得と状態変更を1文にしてある。** 別々にすると、2つのワーカーが
     同じ行を読んで二重投稿になる。UPDATE ... WHERE state='planned' は
     先に更新できた側だけが行を返すので、あとから来た側は何も取れない。
+
+    kinds を渡すと、その種別だけを取る。**動かす場所を分けるために使う。**
+    リールは ffmpeg が要るので、審査UI（Render）では作れない。
     """
+    where = ["state = 'planned'", "scheduled_at <= ?", "attempts < ?"]
+    params: list = [now, max_attempts]
+    if kinds:
+        marks = ",".join("?" for _ in kinds)
+        where.append(f"kind IN ({marks})")
+        params.extend(kinds)
     cursor = conn.execute(
-        """
+        f"""
         UPDATE posts SET state = 'publishing', attempts = attempts + 1
         WHERE id = (
             SELECT id FROM posts
-            WHERE state = 'planned' AND scheduled_at <= ? AND attempts < ?
+            WHERE {" AND ".join(where)}
             ORDER BY scheduled_at, id
             LIMIT 1
         )
         RETURNING *
         """,
-        (now, max_attempts),
+        tuple(params),
     )
     row = cursor.fetchone()
     conn.commit()

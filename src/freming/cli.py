@@ -991,7 +991,10 @@ def _cmd_post(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 1
-        done = run_once(cfg, conn, limit=args.limit, dry_run=args.dry_run)
+        done = run_once(
+            cfg, conn, limit=args.limit, dry_run=args.dry_run,
+            kinds=tuple(args.kind) if args.kind else None,
+        )
         if not done:
             print("時間が来ている予定はありません。")
         elif args.dry_run:
@@ -1306,6 +1309,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_post.add_argument(
         "--dry-run", action="store_true",
         help="投稿せず、何が出るかだけ表示する（予定は消費しない）",
+    )
+    p_post.add_argument(
+        "--kind", action="append", choices=["feed", "story", "reel"],
+        help="扱う種別。既定は config の worker_kinds。複数指定できる",
     )
     p_post.set_defaults(func=_cmd_post)
 

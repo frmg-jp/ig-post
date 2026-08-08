@@ -608,3 +608,44 @@ def test_中身には本文と代替テキストが出る(db, monkeypatch):
     text = worker_mod.preview(CONFIG, db, post)
     assert "ここが本文" in text
     assert "Old Mill House" in text
+
+
+# --- 動かす場所を分ける -------------------------------------------------
+#
+# リールは ffmpeg と数百MBのメモリが要るので、審査UI（Render の無料プラン）
+# では作れない。GitHub Actions に逃がす。**リールの動画は公開URLを使わない**
+# （rupload へ直接送る）ので、画像を配れない場所でも投稿できる。
+
+
+def test_担当しない種別は取らない(db):
+    property_id = _property(db)
+    create_post(db, "reel", NOW.isoformat())
+    create_post(db, "feed", NOW.isoformat(), property_id=property_id)
+
+    got = claim_due_post(db, NOW.isoformat(), 3, ("feed", "story"))
+    assert got["kind"] == "feed"
+    # リールは残っている（別の場所が取る）
+    assert claim_due_post(db, NOW.isoformat(), 3, ("reel",))["kind"] == "reel"
+
+
+def test_種別を指定しなければ全部取る(db):
+    create_post(db, "reel", NOW.isoformat())
+    assert claim_due_post(db, NOW.isoformat(), 3)["kind"] == "reel"
+
+
+def test_審査UIの既定はリールを含まない():
+    """Render では作れないので、既定で担当させない。"""
+    assert "reel" not in CONFIG.instagram.worker_kinds
+    assert "feed" in CONFIG.instagram.worker_kinds
+
+
+def test_担当が空なら何もしない(db, monkeypatch):
+    from freming.instagram import worker as worker_mod
+
+    _token(db)
+    create_post(db, "feed", NOW.isoformat(), property_id=_property(db))
+    cfg = CONFIG.model_copy(deep=True)
+    cfg.instagram.public_base_url = "https://example.com"
+    cfg.instagram.worker_kinds = []
+    monkeypatch.setattr(worker_mod, "account_id", lambda token: "1")
+    assert worker_mod.run_once(cfg, db, NOW) == 0
