@@ -14,11 +14,16 @@ name: 週次リール
 # 同じジョブに入れると、収集が落ちたときにリールも巻き添えになる。
 
 on:
-  schedule:
-    # 毎週月曜 19:00 JST（UTC 10:00）。config.yaml の
-    # instagram.reel_weekday / reel_time と合わせること。ここだけ直しても
-    # 予定は作られない（予定は collect.yml の post plan が作る）。
-    - cron: "0 10 * * 1"
+  # ------------------------------------------------------------------
+  # **2026-08-10 から定期実行を止めている。** 再開の指示が出るまで。
+  #
+  # 戻すときは下の3行のコメントを外すだけ。毎週月曜 19:00 JST（UTC 10:00）。
+  # config.yaml の instagram.reel_weekday / reel_time と合わせること。
+  # ここだけ直しても予定は作られない（予定は collect.yml の post plan）。
+  #
+  # schedule:
+  #   - cron: "0 10 * * 1"
+  # ------------------------------------------------------------------
   workflow_dispatch:
     inputs:
       dry_run:
