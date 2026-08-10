@@ -769,6 +769,25 @@ def _cmd_instagram(args: argparse.Namespace) -> int:
         print(f"疎通OK: @{profile.get('username')}（トークン残り {days:.0f} 日）")
         if days < 7:
             print("残りが7日を切っています。定期実行の refresh が動いているか確認してください。")
+
+        # 権限まで見る。**疎通が通っただけでは週次リールが動くか分からない。**
+        # 再認可の直後にここで分かれば、担当者にもう一度お願いする判断が早い。
+        from freming.instagram.insights import SCOPE, has_insights_scope
+
+        try:
+            granted = has_insights_scope(record.value)
+        except ig.InstagramError as exc:
+            print(f"リーチの権限: 判定できませんでした（{exc}）")
+        else:
+            if granted:
+                print(f"リーチの権限: あり（{SCOPE}）。週次リールが動きます。")
+            else:
+                print(
+                    f"リーチの権限: **なし**（{SCOPE}）。\n"
+                    "  通常投稿は動きますが、週次リールは7枚を選べません。\n"
+                    "  スコープはリフレッシュでは増やせないので、認可からやり直しが要ります:\n"
+                    "    python -m freming.cli instagram auth-url"
+                )
         return 0
 
     # refresh: 定期実行から毎日呼ばれる。未設定の環境では何もせず正常終了する。

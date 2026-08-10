@@ -61,4 +61,27 @@ def media_reach(token: str, media_id: str) -> int | None:
     return None
 
 
-__all__ = ["SCOPE", "MissingInsightsScope", "media_reach"]
+def has_insights_scope(token: str) -> bool:
+    """このトークンでリーチが読めるか。
+
+    **投稿が1本も無くても確かめられるようにする。** 投稿ごとの
+    insights は media_id が要るので、再認可の直後には試せない。
+    アカウント単位の insights は同じスコープを要求するので、
+    権限の有無だけならこちらで分かる。
+
+    権限以外の理由（一時的な障害など）で落ちた場合は、その例外を
+    そのまま上げる。**「取れなかった」を「権限が無い」に丸めない。**
+    """
+    try:
+        _request(
+            "GET", f"{GRAPH}/{API_VERSION}/me/insights", token,
+            params={"metric": "reach", "period": "day"},
+        )
+    except InstagramError as exc:
+        if _looks_like_scope_error(str(exc)):
+            return False
+        raise
+    return True
+
+
+__all__ = ["SCOPE", "MissingInsightsScope", "media_reach", "has_insights_scope"]
