@@ -249,14 +249,20 @@ def run_preflight(
 
 
 def _safe_delete(client: DriveClient, file_id: str, report: PreflightReport) -> None:
-    """後片付け。失敗しても検査結果自体は落とさないが、必ずログに残す。"""
+    """後片付け。失敗しても検査結果自体は落とさないが、必ずログに残す。
+
+    **完全削除ではなくゴミ箱に入れる。** 共有ドライブの files.delete は
+    「管理者」でないと 404 になる。納品に必要なのは「コンテンツ管理者」
+    までなので、後片付けのためだけに権限を上げない。
+    """
     try:
-        client.delete(file_id)
+        client.trash(file_id)
     except DriveError as exc:
-        log.warning("テスト用ファイル/フォルダの削除に失敗: id=%s (%s)", file_id, exc)
+        log.warning("テスト用ファイル/フォルダの後片付けに失敗: id=%s (%s)", file_id, exc)
         report.add(Check("テスト用ファイルの後片付け", False,
-                         f"id={file_id} の削除に失敗: {exc}",
-                         remedy="Drive上に残ったテスト用ファイルを手動で削除してください",
+                         f"id={file_id} をゴミ箱に入れられませんでした: {exc}",
+                         remedy=("Drive上に残ったテスト用ファイルを手動で削除し、"
+                                 "サービスアカウントの権限が「コンテンツ管理者」か確認してください"),
                          fatal=False))
 
 

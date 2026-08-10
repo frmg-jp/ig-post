@@ -464,11 +464,30 @@ class DriveClient:
         )
 
     def delete(self, file_id: str) -> None:
+        """完全削除。**共有ドライブでは「管理者」でないと通らない。**
+
+        後片付けには trash() を使うこと。コンテンツ管理者で足りる。
+        """
         self._execute(
             self.service.files().delete(fileId=file_id, **self._drive_kwargs()),
             f"削除({file_id})",
         )
         log.info("削除しました: id=%s", file_id)
+
+    def trash(self, file_id: str) -> None:
+        """ゴミ箱に入れる。
+
+        共有ドライブの権限は「コンテンツ管理者」で足りる。完全削除
+        （files.delete）は「管理者」が要るので、後片付けはこちらを使う。
+        """
+        self._execute(
+            self.service.files().update(
+                fileId=file_id, body={"trashed": True}, fields="id",
+                **self._drive_kwargs(),
+            ),
+            f"ゴミ箱へ移動({file_id})",
+        )
+        log.info("ゴミ箱へ移動しました: id=%s", file_id)
 
 
 def _auth_prompt(open_browser: bool, port: int | None) -> str:
