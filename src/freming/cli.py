@@ -704,7 +704,13 @@ def _cmd_instagram(args: argparse.Namespace) -> int:
             print("config.yaml の instagram.app_id が未設定です。", file=sys.stderr)
             return 2
         # code は使い捨てだが、app secret は使い回される。どちらも履歴に残さない。
-        code = getpass.getpass("管理者から受け取った code を貼り付けて Enter: ").strip()
+        #
+        # 環境変数からも受け取る。**ターミナルが無い人が GitHub Actions から
+        # 実行できるようにするため。** 手元で叩くときは今までどおり聞かれる。
+        code = os.environ.get("INSTAGRAM_AUTH_CODE") or getpass.getpass(
+            "管理者から受け取った code を貼り付けて Enter: "
+        )
+        code = code.strip()
         secret = os.environ.get("INSTAGRAM_APP_SECRET") or getpass.getpass(
             "Instagram app secret を貼り付けて Enter（画面には表示されません）: "
         ).strip()

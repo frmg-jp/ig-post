@@ -20,6 +20,8 @@ on:
           - rescore            # 採点をやり直す（API費用・納品済みは除く）
           - source-report      # ソース別の歩留まり（費用なし）
           - post-show          # 投稿予定の一覧（費用なし）
+          - exchange-ig-code   # 受け取った code をトークンに換える（費用なし）
+          - check-ig-token     # トークンの疎通とスコープ（費用なし）
       apply:
         description: "本当に実行する（外すと見積もりだけ）"
         type: boolean
@@ -39,6 +41,11 @@ jobs:
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      # 再認可のときだけ使う。どちらも Secrets 経由で、ログには出ない
+      # （GitHub が値を伏せる）。**code は使い切りなので、済んだら
+      # IG_AUTH_CODE を消すこと。** 残しても次は失効して使えない。
+      INSTAGRAM_APP_SECRET: ${{ secrets.INSTAGRAM_APP_SECRET }}
+      INSTAGRAM_AUTH_CODE: ${{ secrets.IG_AUTH_CODE }}
     steps:
       - uses: actions/checkout@v4
 
@@ -78,4 +85,13 @@ jobs:
             rescore)          python -m freming.cli rescore $LIMIT $YES ;;
             source-report)    python -m freming.cli source-report ;;
             post-show)        python -m freming.cli post show ;;
+            exchange-ig-code)
+              if [ -z "${INSTAGRAM_AUTH_CODE:-}" ] || [ -z "${INSTAGRAM_APP_SECRET:-}" ]; then
+                echo "Secrets の IG_AUTH_CODE と INSTAGRAM_APP_SECRET を先に登録してください。" >&2
+                exit 2
+              fi
+              python -m freming.cli instagram exchange-code
+              python -m freming.cli instagram check
+              ;;
+            check-ig-token)   python -m freming.cli instagram check ;;
           esac
