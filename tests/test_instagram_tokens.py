@@ -130,6 +130,9 @@ def test_authorization_url_has_everything_meta_requires() -> None:
     assert "https%3A%2F%2Fexample.com%2Fig%2Fcallback" in url
     assert "instagram_business_basic" in url
     assert "instagram_business_content_publish" in url
+    # リーチが読めないと週次リールの7枚を選べない。**これが欠けたURLで
+    # 認可してもらうと、権限が付かないまま作業だけが終わる。**
+    assert "instagram_business_manage_insights" in url
 
 
 def test_authorization_url_carries_no_secret() -> None:

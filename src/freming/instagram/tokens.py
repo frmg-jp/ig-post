@@ -169,9 +169,17 @@ __all__ = [
 
 OAUTH_AUTHORIZE = "https://www.instagram.com/oauth/authorize"
 OAUTH_ACCESS_TOKEN = "https://api.instagram.com/oauth/access_token"
-# 投稿に要る最小のスコープ。basic はアカウント情報の読み取りで、
-# content_publish が投稿。メッセージやコメントの権限は求めない。
-SCOPES = ("instagram_business_basic", "instagram_business_content_publish")
+# 要るスコープ。basic はアカウント情報の読み取り、content_publish が投稿、
+# manage_insights がリーチの読み取り（週次リールの7枚を選ぶのに使う）。
+# メッセージやコメントの権限は求めない。
+#
+# **スコープは refresh では増やせない。** ここを足したら、認可からやり直して
+# もらう必要がある（既存のトークンには反映されない）。
+SCOPES = (
+    "instagram_business_basic",
+    "instagram_business_content_publish",
+    "instagram_business_manage_insights",
+)
 
 
 def authorization_url(app_id: str, redirect_uri: str) -> str:
