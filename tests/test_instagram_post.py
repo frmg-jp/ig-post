@@ -8,6 +8,7 @@ Meta 側の受け付け方は、最初の1本を実際に出して確かめる�
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from PIL import Image
@@ -30,7 +31,7 @@ from freming.db.repository import (
 from freming.instagram import media
 from freming.instagram.caption import build_caption, build_reel_caption, with_credit
 from freming.instagram.insights import MissingInsightsScope, media_reach
-from freming.instagram.plan import next_reel_time, plan, slot_times
+from freming.instagram.plan import _parse_hhmm, next_reel_time, plan, slot_times
 from freming.instagram.publish import wait_until_ready
 from freming.instagram.tokens import InstagramError
 
@@ -60,9 +61,15 @@ def _property(conn, title="Old Mill House", city="Porto", score=80.0, status="de
 
 # --- 予定を作る -------------------------------------------------------
 def test_枠は設定した時刻ぶんだけ並ぶ():
+    """本数は config の post_times に従う。**件数を直書きしない** —
+    1日1投稿と3投稿を行き来するので、そのたびに落ちる形にしない。"""
+    times = CONFIG.instagram.post_times
+    ig = CONFIG.instagram
+    local_now = NOW.astimezone(ZoneInfo(ig.timezone))
+    today = sum(1 for t in times if _parse_hhmm(t) > local_now.time())
+
     slots = slot_times(CONFIG, NOW)
-    # 当日の 13:00 と 20:00（09:00 は過ぎている）＋ 翌日以降 2日ぶん
-    assert len(slots) == 2 + 3 * (CONFIG.instagram.plan_days - 1)
+    assert len(slots) == today + len(times) * (ig.plan_days - 1)
 
 
 def test_過ぎた時刻の枠は作らない():

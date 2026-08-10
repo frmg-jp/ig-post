@@ -1024,21 +1024,38 @@ def _cmd_post(args: argparse.Namespace) -> int:
 
             now = datetime.now(UTC)
             zone = ZoneInfo(cfg.instagram.timezone)
-            stale = stale_planned_posts(conn, now.isoformat())
-            if not stale:
-                print("時刻を過ぎたままの予定はありません。")
+            slots = slot_times(cfg, now)
+            slot_keys = {s.isoformat() for s in slots}
+            until = (slots[-1] if slots else now) + timedelta(minutes=1)
+            upcoming = scheduled_posts(conn, until.isoformat())
+
+            # 動かす対象は2種類。**どちらも「そのままだと並びが崩れる」もの。**
+            #   1. 時刻を過ぎたまま出ていない予定（ワーカーを止めていた間の分）
+            #   2. いまの post_times に無い枠に載っている予定
+            #      （1日3投稿から1投稿に減らしたときなど）
+            targets = list(stale_planned_posts(conn, now.isoformat()))
+            seen = {row["id"] for row in targets}
+            for row in upcoming:
+                if row["id"] in seen or row["state"] != "planned":
+                    continue
+                if row["kind"] != KIND_FEED or row["scheduled_at"] in slot_keys:
+                    continue
+                targets.append(row)
+            targets.sort(key=lambda r: (r["scheduled_at"], r["id"]))
+            if not targets:
+                print("動かす予定はありません。")
                 return 0
 
-            slots = slot_times(cfg, now)
-            until = (slots[-1] if slots else now) + timedelta(minutes=1)
+            moving = {row["id"] for row in targets}
             taken = {
-                row["scheduled_at"] for row in scheduled_posts(conn, until.isoformat())
-                if row["kind"] == KIND_FEED and row["scheduled_at"] >= now.isoformat()
+                row["scheduled_at"] for row in upcoming
+                if row["kind"] == KIND_FEED and row["id"] not in moving
+                and row["scheduled_at"] >= now.isoformat()
             }
             free = [s for s in slots if s.isoformat() not in taken]
 
             moved = 0
-            for row in stale:
+            for row in targets:
                 if row["kind"] == KIND_REEL:
                     # リールは曜日が決まっている。次の回に送る。
                     target = next_reel_time(cfg, now)
@@ -1050,11 +1067,13 @@ def _cmd_post(args: argparse.Namespace) -> int:
                 if set_scheduled_at(conn, row["id"], target.isoformat()):
                     moved += 1
                     at = target.astimezone(zone)
-                    print(f'  post {row["id"]}  {row["kind"]:<5} → {at:%m/%d %H:%M}')
-            print(f"{moved} 件を先送りしました。")
-            if len(stale) > moved:
+                    was = datetime.fromisoformat(row["scheduled_at"]).astimezone(zone)
+                    print(f'  post {row["id"]}  {row["kind"]:<5} '
+                          f'{was:%m/%d %H:%M} → {at:%m/%d %H:%M}')
+            print(f"{moved} 件を動かしました。")
+            if len(targets) > moved:
                 print(
-                    f"{len(stale) - moved} 件は空き枠が無くて動かせていません。"
+                    f"{len(targets) - moved} 件は空き枠が無くて動かせていません。"
                     "plan_days を延ばすか、明日もう一度実行してください。"
                 )
             return 0
