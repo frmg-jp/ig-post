@@ -749,6 +749,32 @@ def scheduled_posts(conn: DbConnection, until: str, states: tuple[str, ...] = ()
     ).fetchall()
 
 
+def stale_planned_posts(conn: DbConnection, now: str) -> list[Row]:
+    """時刻を過ぎたまま出ていない予定。古い順。
+
+    ワーカーが止まっていた間に溜まる。**そのまま動かすと数分のうちに
+    まとめて出る。** 先送りするために引く。
+    """
+    return conn.execute(
+        """
+        SELECT * FROM posts
+        WHERE state = 'planned' AND scheduled_at < ?
+        ORDER BY scheduled_at, id
+        """,
+        (now,),
+    ).fetchall()
+
+
+def set_scheduled_at(conn: DbConnection, post_id: int, when: str) -> bool:
+    """まだ出していない予定の時刻を動かす。投稿済みには効かない。"""
+    cursor = conn.execute(
+        "UPDATE posts SET scheduled_at = ? WHERE id = ? AND state = 'planned'",
+        (when, post_id),
+    )
+    conn.commit()
+    return bool(cursor.rowcount)
+
+
 def claim_due_post(
     conn: DbConnection, now: str, max_attempts: int, kinds: tuple[str, ...] = ()
 ) -> Row | None:

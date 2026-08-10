@@ -132,17 +132,28 @@ instagram:
 手で叩く場合:
 
 ```
-python -m freming.cli post plan     # 予定を作る
-python -m freming.cli post show     # 予定を見る
-python -m freming.cli post run      # 時間が来たものを投稿する
+python -m freming.cli post plan        # 予定を作る
+python -m freming.cli post show        # 予定を見る
+python -m freming.cli post run         # 時間が来たものを投稿する
+python -m freming.cli post reschedule  # 過ぎたままの予定を先送りする
 ```
+
+## 溜まった予定を動かす前に
+
+ワーカーが止まっている間も、予定は毎朝作られ続ける。**止めていた期間の
+ぶんがそのまま残るので、動かした瞬間に数分でまとめて出る。**
+
+`auto_post` を true にする前に `post show` で確認し、時刻を過ぎた行が
+あれば `post reschedule` で先送りすること。
+
+**捨てるのではなく動かす。** `postable_properties` は「その物件に feed の
+行があるか」で候補を絞っているので、予定を消すとその物件は二度と投稿
+候補に戻らない。
 
 ## 残っている作業
 
-1. **再認可（`instagram_business_manage_insights`）。** リーチを読むのに
-   要る。いまのトークンには入っておらず、リフレッシュでは増やせない。
-   これが済むまで週次リールは「各日の1位」を選べない
-   （`reel_fallback_recent` を true にしない限り、リールは作られない）
+1. ~~再認可（`instagram_business_manage_insights`）~~ … 2026-08-10 に完了。
+   `instagram check` が権限の有無まで出す
 2. **最初の1本を実際に出して確かめる。** 本番APIは未通過
 3. ~~ストーリーズのアカウント種別確認~~ … 自動投稿をやめたので不要になった
 4. ソースによる投稿可否。`allowed_sources` で絞れるようにはしてあるが、

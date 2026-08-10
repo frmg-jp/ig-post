@@ -693,3 +693,43 @@ def test_失敗した予定は作り直しの対象になる(db):
     claim_due_post(db, NOW.isoformat(), 1)
     fail_post(db, post_id, "だめ", 1)
     assert [r["post_id"] for r in planned_posts_with_property(db)] == [post_id]
+
+
+# --- 溜まった予定を先送りする -----------------------------------------
+def test_過ぎた予定は引ける(db):
+    """ワーカーが止まっていた間に溜まった行を、まとめて動かすために引く。"""
+    from freming.db.repository import stale_planned_posts
+
+    property_id = _property(db)
+    old = create_post(db, "feed", (NOW - timedelta(days=2)).isoformat(),
+                      property_id=property_id)
+    other = _property(db, "Future House")
+    create_post(db, "feed", (NOW + timedelta(hours=3)).isoformat(), property_id=other)
+
+    rows = stale_planned_posts(db, NOW.isoformat())
+    assert [row["id"] for row in rows] == [old]
+
+
+def test_出したあとの予定は先送りの対象にならない(db):
+    """**投稿済みを動かすと、同じものがもう一度出る。**"""
+    from freming.db.repository import set_scheduled_at, stale_planned_posts
+
+    property_id = _property(db)
+    post_id = create_post(db, "feed", (NOW - timedelta(days=1)).isoformat(),
+                          property_id=property_id)
+    claim_due_post(db, NOW.isoformat(), 3)
+    finish_post(db, post_id, "media-1", "c")
+
+    assert stale_planned_posts(db, NOW.isoformat()) == []
+    assert set_scheduled_at(db, post_id, NOW.isoformat()) is False
+
+
+def test_先送りしても物件は候補から外れたまま(db):
+    """捨てずに動かす理由。**消すと二度と投稿候補に戻らない。**"""
+    from freming.db.repository import set_scheduled_at
+
+    property_id = _property(db)
+    post_id = create_post(db, "feed", (NOW - timedelta(days=1)).isoformat(),
+                          property_id=property_id)
+    assert set_scheduled_at(db, post_id, (NOW + timedelta(hours=5)).isoformat()) is True
+    assert [row["id"] for row in postable_properties(db, 10)] == []

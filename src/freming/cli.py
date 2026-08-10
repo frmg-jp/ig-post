@@ -1008,6 +1008,57 @@ def _cmd_post(args: argparse.Namespace) -> int:
             print(f"{changed} 件の本文を作り直しました（投稿済みは触っていません）。")
             return 0
 
+        if args.post_action == "reschedule":
+            # ワーカーが止まっていた間に、時刻を過ぎた予定が溜まる。
+            # **そのまま動かすと数分のうちにまとめて出る。**
+            #
+            # 捨てずに先送りするのは、postable_properties が
+            # 「その物件に feed の行があるか」で判定しているため。
+            # 消すと二度と投稿候補に戻らない。
+            from freming.db.repository import (
+                set_scheduled_at,
+                stale_planned_posts,
+            )
+            from freming.instagram.plan import next_reel_time, slot_times
+            from freming.instagram.publish import KIND_FEED, KIND_REEL
+
+            now = datetime.now(UTC)
+            zone = ZoneInfo(cfg.instagram.timezone)
+            stale = stale_planned_posts(conn, now.isoformat())
+            if not stale:
+                print("時刻を過ぎたままの予定はありません。")
+                return 0
+
+            slots = slot_times(cfg, now)
+            until = (slots[-1] if slots else now) + timedelta(minutes=1)
+            taken = {
+                row["scheduled_at"] for row in scheduled_posts(conn, until.isoformat())
+                if row["kind"] == KIND_FEED and row["scheduled_at"] >= now.isoformat()
+            }
+            free = [s for s in slots if s.isoformat() not in taken]
+
+            moved = 0
+            for row in stale:
+                if row["kind"] == KIND_REEL:
+                    # リールは曜日が決まっている。次の回に送る。
+                    target = next_reel_time(cfg, now)
+                elif free:
+                    target = free.pop(0)
+                else:
+                    print(f'  空き枠が足りません: post {row["id"]}（{row["kind"]}）はそのまま')
+                    continue
+                if set_scheduled_at(conn, row["id"], target.isoformat()):
+                    moved += 1
+                    at = target.astimezone(zone)
+                    print(f'  post {row["id"]}  {row["kind"]:<5} → {at:%m/%d %H:%M}')
+            print(f"{moved} 件を先送りしました。")
+            if len(stale) > moved:
+                print(
+                    f"{len(stale) - moved} 件は空き枠が無くて動かせていません。"
+                    "plan_days を延ばすか、明日もう一度実行してください。"
+                )
+            return 0
+
         if args.post_action == "show":
             zone = ZoneInfo(cfg.instagram.timezone)
             until = datetime.now(UTC) + timedelta(days=cfg.instagram.plan_days)
@@ -1339,10 +1390,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_post = sub.add_parser("post", help="Instagram への投稿（[9]）")
     p_post.add_argument(
-        "post_action", choices=["plan", "show", "run", "replan"],
+        "post_action", choices=["plan", "show", "run", "replan", "reschedule"],
         help=(
             "plan: 予定を作る / show: 予定を見る / run: 時間が来たものを投稿する"
             " / replan: まだ出していない予定の本文を作り直す"
+            " / reschedule: 時刻を過ぎたままの予定を先送りする"
         ),
     )
     p_post.add_argument(
