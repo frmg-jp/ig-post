@@ -751,72 +751,66 @@ instagram:
 caption:
   # 冒頭の2行。日英を並べる。
   lead:
-    - '世界で今、手に入る"気になる建築"をセレクトしています。'
-    - "Curated architecture from around the world."
+    - '世界で今、手に入る"気になる建築・不動産"をセレクトしています。'
+    - "Curated architecture & remarkable properties from around the world."
 
   # 仕様欄。左が出力する順で、右がラベル。DBに値があるものだけ出る。
   # key は properties の列名（location だけは city + country から作る）。
+  # Structure と Style は実運用の投稿に無いので出さない（Style はタグで表す）。
   spec:
     - [location, "Location"]
     - [usage_type, "Usage"]
     - [architect, "Architect"]
-    - [structure, "Structure"]
     - [building_area, "Building Area"]
     - [site_area, "Site Area"]
     - [year_built, "Built in"]
-    - [style_name, "Style"]
 
-  # 説明文のあと、締めの前に入る案内。
+  # 説明文のあと、締めの前に入る案内。3行で1ブロック。
   details:
     - "物件詳細はストーリーズ・ハイライトへ"
     - "Property details → Stories & Highlights"
-
-  disclaimer: "※成約済みの際は不動産、建築、内装の参考としてご活用下さい。"
+    - "※成約済みの際は、不動産・建築・リノベーションの参考事例としてご覧ください。"
 
   # 写真のクレジット。**編集メディアの写真を使わせてもらう以上、出所は書く。**
-  # 撮影者が記事から取れればその名前、取れなければ媒体名を入れる。
-  # 空にすると行ごと出ない。
+  # 実運用の投稿の型には無い行だが、意図して足している（2026-08-08 採用）。
+  # 撮影者が記事から取れればその名前、取れなければ媒体名。空にすると行ごと出ない。
   photo_credit_label: "Photo"
   # 撮影者が分からないとき、媒体名で代えるか。
-  # false にすると、撮影者が取れた回だけクレジットが出る。
   photo_credit_fallback_source: true
 
   signature:
-    - "Design × Build × Regenerate"
-    - "From Japan to the World."
+    - "Sampling × Renovation"
     - "CURATED BY FREMING"
 
   business: |-
-    ＜ 海外リノベーション事業 ＞
-    海外不動産の購入相談から、購入後のリノベーションにおける設計・施工管理までサポートしています。
-    工事期間中の定期打ち合わせ代行、品質管理、スケジュール管理など、海外プロジェクトを安心して進められる体制をご提供します。
-    海外での不動産購入や資産形成をご検討のかたは、お気軽にご相談ください。
+    【 お気軽にご相談ください 】
+    ＜ コンストラクションファーム事業 ＞
+    店舗・オフィス・住宅・公共空間まで、新築・リノベーションに対応しています。
 
-  # 毎回付けるタグ。
+    ＜ 海外リノベーション事業 ＞
+    海外不動産の購入相談から、購入後の設計・施工まで、日本人のお客様の海外での不動産活用をサポートしています。
+
+    ＜ 可動空間事業 ＞
+    VAN・トレーラー・コンテナなどを活用し、サウナ・宿泊施設・店舗・オフィスなど、移動できる空間を設計・施工しています。
+
+    ＜ 空き家・空きビル・空き地再生事業 ＞
+    空き家・空きビル・空き地を、企画・設計・施工を通じて新たな価値ある空間へ再生しています。
+
+  # 事業案内のあと、タグの前に入る英文の注記。
+  disclaimer: "※This post is curated based on publicly available information. Prices, availability, and other details are subject to change. Please refer to the original source for the latest information. All rights to photographs and images belong to their respective owners."
+
+  # タグの並び: 先頭（ここ）→ 自動生成（物件名・設計者・地域）→
+  # hashtag_rules（様式）→ 末尾（hashtags_tail）。1行に空白区切りで出す。
+  # 実運用の投稿に投資系タグは無いので入れない。
   hashtags:
     - "#FREMING"
     - "#FremingCurated"
-    - "#Architecture"
-    - "#ArchitectureLovers"
-    - "#ModernArchitecture"
-    - "#Architect"
-    - "#DesignInspiration"
-    - "#LuxuryRealEstate"
-    - "#建築"
-    - "#海外建築"
-    - "#建築デザイン"
-    - "#住宅デザイン"
-    - "#建築好き"
-    - "#海外不動産"
-    - "#海外不動産投資"
-    - "#不動産投資"
 
   # 物件の内容に応じて足すタグ。match は様式名・ジャンル・構造・用途を
   # つないだ文字列に対する部分一致（小文字で比較）。
-  # Instagram の上限は30個。既定16個＋ここから最大数個を想定している。
   hashtag_rules:
     - match: "mid-century"
-      tags: ["#MidCenturyModern", "#ミッドセンチュリー"]
+      tags: ["#MidCenturyModern", "#MidCenturyArchitecture", "#ミッドセンチュリー"]
     - match: "loft"
       tags: ["#LoftLiving", "#ロフト"]
     - match: "art deco"
@@ -831,6 +825,21 @@ caption:
       tags: ["#Penthouse", "#ペントハウス"]
     - match: "warehouse"
       tags: ["#WarehouseConversion"]
+    - match: "modernis"
+      tags: ["#Modernism"]
+    - match: "sustainab"
+      tags: ["#SustainableArchitecture"]
+
+  # 末尾の汎用タグ。英語→日本語の順（実運用の並びに合わせる）。
+  hashtags_tail:
+    - "#Architecture"
+    - "#ModernArchitecture"
+    - "#ResidentialArchitecture"
+    - "#ArchitectureLovers"
+    - "#建築"
+    - "#建築デザイン"
+    - "#海外建築"
+    - "#建築好き"
 
 # ---------------------------------------------------------------------
 # 連載企画のラベル

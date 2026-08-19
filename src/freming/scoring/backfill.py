@@ -49,6 +49,10 @@ FIELDS = (
     "style_name",
     "summary_en",
     "photo_credit",
+    # 0014 で足した、投稿の型（2026-08-19 の実運用4投稿）に要る3つ。
+    "display_name",
+    "caption_body",
+    "location_region",
 )
 
 
@@ -90,10 +94,14 @@ def pending_rows(conn: DbConnection, limit: int | None = None) -> list[Row]:
 
 
 def estimate(rows: list[Row]) -> tuple[int, int, float]:
-    """(入力トークン, 出力トークン, 概算ドル)。単価は Haiku 4.5。"""
+    """(入力トークン, 出力トークン, 概算ドル)。単価は Haiku 4.5。
+
+    出力は caption_body（250〜450字の日本語）が一番大きい。0014 で
+    足したぶんを 400 → 800 に増やしてある。
+    """
     chars = sum(len(r["content_text"] or "") for r in rows)
     tokens_in = int(chars / 2.5 + len(rows) * 1200)
-    tokens_out = len(rows) * 400
+    tokens_out = len(rows) * 800
     return tokens_in, tokens_out, tokens_in / 1e6 * 1.0 + tokens_out / 1e6 * 5.0
 
 

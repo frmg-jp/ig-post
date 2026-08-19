@@ -505,18 +505,47 @@ def test_代替が要らない設定なら出さない(db):
     assert "Photo:" not in build_caption(row, config, "Dezeen")
 
 
-def test_英語の説明文が日本語の次に来る(db):
+def test_説明文は日本語のみ(db):
+    """実運用の投稿（2026-08-19 の4本）に英語の本文は無い。
+
+    英語はリードとCTAと末尾の注記だけ。summary_en を本文に並べない。
+    """
     row = _rich(db)
     caption = build_caption(row, CONFIG.caption, "Dezeen")
     assert row["summary"] in caption
-    assert "A 1961 post-and-beam house" in caption
-    assert caption.index(row["summary"]) < caption.index("A 1961 post-and-beam house")
+    assert "A 1961 post-and-beam house" not in caption
 
 
-def test_英語が無ければその段落は出ない(db):
-    row = _rich(db, summary_en=None)
+def test_投稿用の説明文があれば選定理由より優先(db):
+    body = "キャニオンを見下ろす1961年のポスト・アンド・ビーム住宅です。"
+    row = _rich(db, caption_body=body)
     caption = build_caption(row, CONFIG.caption, "Dezeen")
-    assert "post-and-beam house above" not in caption
+    assert body in caption
+    assert row["summary"] not in caption
+
+
+def test_見出しは短い物件名を優先(db):
+    row = _rich(db, display_name="Lareau House")
+    caption = build_caption(row, CONFIG.caption, "Dezeen")
+    assert "【 Lareau House 】" in caption
+    assert f'【 {row["title"]} 】' not in caption
+
+
+def test_タグは1行に空白区切りで並ぶ(db):
+    caption = build_caption(_rich(db), CONFIG.caption, "Dezeen")
+    tag_line = caption.rsplit("\n\n", 1)[-1]
+    assert tag_line.startswith("#FREMING #FremingCurated")
+    assert "\n" not in tag_line
+    # 設計者と様式のタグが自動で付く
+    assert "#RichardLareau" in tag_line
+    assert "#MidCenturyModern" in tag_line
+
+
+def test_仕様欄に構造と様式の行は出ない(db):
+    """実運用の投稿に Structure / Style の行は無い（様式はタグで表す）。"""
+    caption = build_caption(_rich(db), CONFIG.caption, "Dezeen")
+    assert "Structure:" not in caption
+    assert "Style:" not in caption
 
 
 def test_代替テキストは被写体だけを書く(db):

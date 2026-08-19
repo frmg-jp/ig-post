@@ -148,6 +148,9 @@ def score_pending(
             style_name=assessment.style_name,
             summary_en=assessment.summary_en,
             photo_credit=assessment.photo_credit,
+            display_name=assessment.display_name,
+            caption_body=assessment.caption_body,
+            location_region=assessment.location_region,
         )
 
     log.info(stats.summary())

@@ -421,13 +421,17 @@ class CaptionConfig(BaseModel):
     # 出力する順とラベル。key は properties の列名（location だけ特別扱い）。
     spec: list[tuple[str, str]] = Field(default_factory=list)
     details: list[str] = Field(default_factory=list)
+    # 末尾（事業案内のあと・タグの前）に入る英文の注記。
     disclaimer: str = ""
     photo_credit_label: str = "Photo"
     photo_credit_fallback_source: bool = True
     signature: list[str] = Field(default_factory=list)
     business: str = ""
+    # タグは「先頭（ブランド）→ 自動生成 → 規則 → 末尾（汎用・日本語）」の順。
+    # 自動生成は caption.py が物件名・設計者・地域から作る。
     hashtags: list[str] = Field(default_factory=list)
     hashtag_rules: list[HashtagRule] = Field(default_factory=list)
+    hashtags_tail: list[str] = Field(default_factory=list)
 
 
 class ReelConfig(BaseModel):

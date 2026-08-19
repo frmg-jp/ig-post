@@ -142,6 +142,9 @@ def save_score(
     style_name: str | None = None,
     summary_en: str | None = None,
     photo_credit: str | None = None,
+    display_name: str | None = None,
+    caption_body: str | None = None,
+    location_region: str | None = None,
 ) -> None:
     """スコアと、判定の過程で分かった属性を書き戻す。
 
@@ -159,7 +162,8 @@ def save_score(
             price            = COALESCE(price, ?),
             provenance_visible = ?, scored_at = ?,
             usage_type = ?, structure = ?, building_area = ?,
-            site_area = ?, style_name = ?, summary_en = ?, photo_credit = ?
+            site_area = ?, style_name = ?, summary_en = ?, photo_credit = ?,
+            display_name = ?, caption_body = ?, location_region = ?
         WHERE id = ?
         """,
         (
@@ -170,6 +174,7 @@ def save_score(
             usage_type or None, structure or None, building_area or None,
             site_area or None, style_name or None,
             summary_en or None, photo_credit or None,
+            display_name or None, caption_body or None, location_region or None,
             property_id,
         ),
     )

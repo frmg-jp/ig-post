@@ -45,6 +45,9 @@ OUTPUT_SCHEMA: dict = {
         "style_name",
         "summary_en",
         "photo_credit",
+        "display_name",
+        "caption_body",
+        "location_region",
     ],
     "properties": {
         "is_for_sale": {
@@ -139,6 +142,32 @@ OUTPUT_SCHEMA: dict = {
                 "**書かれていない事実を足さない**。summary が空なら空文字。"
             ),
         },
+        "display_name": {
+            "type": "string",
+            "description": (
+                "投稿の見出しに使う短い物件名。英語。記事に固有名があればそれ"
+                "（'Wade House' / 'The Benson House'）。無ければ年代・様式・種別"
+                "から中立に組む（'1963 Mid-Century Residence' など）。記事に無い"
+                "愛称を発明しない。組めなければ空文字。"
+            ),
+        },
+        "caption_body": {
+            "type": "string",
+            "description": (
+                "投稿の説明文。日本語、です・ます調、3〜6文（250〜450字目安）。"
+                "設計者の文脈→素材・空間構成→履歴や現況、の順で記事の事実だけを"
+                "書く。誇張しない。価格を書かない。記事に無い事実を足さない。"
+                "文が3つ作れないほど情報が薄ければ空文字。"
+            ),
+        },
+        "location_region": {
+            "type": "string",
+            "description": (
+                "州・地域（'California' / 'Connecticut' / 'Tuscany' など）。"
+                "記事に書かれているときだけ。都市名・国名はここに入れない。"
+                "無ければ空文字。"
+            ),
+        },
         "photo_credit": {
             "type": "string",
             "description": (
@@ -194,6 +223,9 @@ class Assessment:
     style_name: str = ""
     summary_en: str = ""
     photo_credit: str = ""
+    display_name: str = ""
+    caption_body: str = ""
+    location_region: str = ""
 
     @classmethod
     def from_json(cls, data: dict) -> Assessment:
