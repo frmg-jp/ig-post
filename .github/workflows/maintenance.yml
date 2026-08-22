@@ -17,6 +17,7 @@ on:
         options:
           - migrate            # DBの更新だけ
           - backfill-captions  # 投稿本文の項目を既存分に埋める（API費用）
+          - backfill-listings  # 記事の中の販売ページURLを既存分に入れる（費用なし）
           - rescore            # 採点をやり直す（API費用・納品済みは除く）
           - source-report      # ソース別の歩留まり（費用なし）
           - post-show          # 投稿予定の一覧（費用なし）
@@ -85,6 +86,9 @@ jobs:
               if [ -n "$YES" ]; then
                 python -m freming.cli post replan
               fi
+              ;;
+            backfill-listings)
+              python -m freming.cli backfill-listings $LIMIT $YES
               ;;
             rescore)          python -m freming.cli rescore $LIMIT $YES ;;
             source-report)    python -m freming.cli source-report ;;

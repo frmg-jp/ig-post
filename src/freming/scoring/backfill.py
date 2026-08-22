@@ -40,7 +40,7 @@ from freming.scoring.prompt import build_system_prompt, build_user_prompt
 
 log = get_logger(__name__)
 
-# 埋める列。Assessment の属性名と同じ並びにしてある。
+# 埋める項目。**Assessment の属性名**で並べてある。
 FIELDS = (
     "usage_type",
     "structure",
@@ -55,7 +55,20 @@ FIELDS = (
     "location_region",
     # 0017。Zillow の検索を一発で当てるために使う
     "street_address",
+    # 採点が古い行は市・国が空のことがある。本文の Location が
+    # 「Gainesville, Florida, USA」ではなく「Florida, USA」になるのは
+    # ここが空いているため（2026-08-22、Dwell 由来の複数件）。
+    "city",
+    "country",
 )
+
+# 属性名と列名が違うもの。**ここを書き忘れると、その項目は
+# 「埋める対象」にも「書き込み先」にもならず、静かに落ちる。**
+COLUMNS = {"city": "location_city", "country": "location_country"}
+
+
+def column_of(field_name: str) -> str:
+    return COLUMNS.get(field_name, field_name)
 
 
 @dataclass
@@ -92,7 +105,7 @@ def pending_rows(conn: DbConnection, limit: int | None = None) -> list[Row]:
     1つでも空いていれば対象にする。**長すぎる物件名も対象**（付け直す）。
     全部埋まっていて名前も短い行は呼ばない。
     """
-    missing = " OR ".join(f"{f} IS NULL" for f in FIELDS)
+    missing = " OR ".join(f"{column_of(f)} IS NULL" for f in FIELDS)
     sql = (
         f"SELECT * FROM properties WHERE "
         f"(({missing}) OR LENGTH(display_name) > {MAX_NAME_LEN}) "
@@ -123,7 +136,7 @@ def save_fields(conn: DbConnection, property_id: int, values: dict[str, str]) ->
 
     人が直した値を、あとからLLMの出力で潰さないため。
     """
-    filled = {k: v for k, v in values.items() if v}
+    filled = {column_of(k): v for k, v in values.items() if v}
     if not filled:
         return 0
     sets = ", ".join(f"{k} = COALESCE({k}, ?)" for k in filled)

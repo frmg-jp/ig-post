@@ -612,6 +612,12 @@ for_sale_signals:
     # Adelante Homes, price on application」で、売出中と明記されているのに
     # 価格が無いという理由で1点止まりだった。
     - 'price\s+(on|upon)\s+(application|request)'
+  # 記事の中に出てくる不動産サイト。2つの役目がある。
+  #   1. 売出中の裏付け（1点。単独では候補にならない）
+  #   2. **ストーリーズに貼る販売ページの取り出し先**（listing_url）
+  # ここに無いドメインは、記事の末尾にリンクがあっても拾えない。
+  # 2026-08-22: Wallpaper* / 6sqft / Dwell が記事末尾で紹介する仲介を足した。
+  # 取り出すのは記事に書いてあるURLだけで、これらのサイトへは接続しない。
   listing_domains:
     - sothebysrealty.com
     - christiesrealestate.com
@@ -622,6 +628,29 @@ for_sale_signals:
     - idealista.com
     - idealista.pt
     - rightmove.co.uk
+    # イギリス（Wallpaper* の物件記事はここが多い）
+    - themodernhouse.com
+    - inigo.com
+    - knightfrank.co.uk
+    - knightfrank.com
+    - savills.com
+    - savills.co.uk
+    - struttandparker.com
+    - onthemarket.com
+    - zoopla.co.uk
+    # アメリカ（6sqft は Compass、Dwell は仲介各社）
+    - douglaselliman.com
+    - elliman.com
+    - corcoran.com
+    - realtor.com
+    - trulia.com
+    - coldwellbankerhomes.com
+    - christiesinternationalrealestate.com
+    - circaoldhouses.com
+    - landvest.com
+    # ヨーロッパその他
+    - engelvoelkers.com
+    - jamesedition.com
 
 # ---------------------------------------------------------------------
 # 重点エリア / 優先ジャンル

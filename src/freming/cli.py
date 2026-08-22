@@ -936,6 +936,42 @@ def _cmd_backfill_captions(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_backfill_listings(args: argparse.Namespace) -> int:
+    """[1] 記事の中にある販売ページのURLを、既存の物件に入れる。
+
+    ストーリーズに貼るのは「その家が買えるページ」。記事の末尾にリンクが
+    あるので、記事をもう一度読んで控える。**販売サイトへは行かない。**
+
+    API費用はかからない（LLMを使わない）。かかるのは記事を取りに行く
+    時間だけで、1件あたり3秒以上あける。
+    """
+    from freming.collect.relink import pending_rows, relink
+    from freming.db.connection import session
+
+    cfg = load_config(args.config)
+    setup_logging(cfg.app.log_dir, cfg.app.log_level)
+
+    with session(cfg.app.target()) as conn:
+        rows = pending_rows(conn, args.limit)
+        if not rows:
+            print("販売ページを入れる対象はありません。")
+            return 0
+        delivered = sum(1 for r in rows if r["status"] == "delivered")
+        wait = len(rows) * cfg.http.request_interval_sec
+        print(f"対象 {len(rows)} 件（うち納品済み {delivered} 件）")
+        print(f"  記事を1件ずつ読み直します。所要 約 {wait / 60:.0f} 分（API費用なし）")
+        print("  読みに行くのは記事のページだけです。販売サイトへは接続しません。")
+        if not args.yes:
+            print("\n実行するには --yes を付けてもう一度。")
+            return 0
+        stats = relink(cfg, conn, args.limit)
+
+    print(stats.summary())
+    if stats.lines:
+        print("\n".join(stats.lines[:40]))
+    return 0
+
+
 def _cmd_sources_report(args: argparse.Namespace) -> int:
     """ソース別の実績（[1]）。自動収集を続けるかの判断に使う。
 
@@ -1574,6 +1610,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_backfill.add_argument("--yes", action="store_true", help="確認せず実行する")
     p_backfill.set_defaults(func=_cmd_backfill_captions)
 
+    p_relink = sub.add_parser(
+        "backfill-listings",
+        help="記事の中にある販売ページのURLを既存分に入れる（API費用なし）",
+    )
+    p_relink.add_argument("--limit", type=int, help="対象の上限")
+    p_relink.add_argument("--yes", action="store_true", help="確認せず実行する")
+    p_relink.set_defaults(func=_cmd_backfill_listings)
+
     p_sources_report = sub.add_parser(
         "source-report", help="ソース別の実績（収集→承認の歩留まり）"
     )
@@ -1591,7 +1635,7 @@ _NEEDS_MIGRATED_DB = frozenset({
     "collect", "score", "serve", "deliver", "learn", "rules",
     "ingest-url", "add-manual", "remove", "reset-images", "status",
     "instagram", "post", "redeliver", "rescore", "source-report",
-    "backfill-captions",
+    "backfill-captions", "backfill-listings",
 })
 
 

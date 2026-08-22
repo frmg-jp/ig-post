@@ -81,6 +81,7 @@ def ingest_url(config: Config, url: str, conn: DbConnection | None = None) -> in
             content_text=page.text,
             for_sale_evidence=result.evidence or "手動投入",
             signal_score=result.score,
+            listing_url=signals.pick_listing_url(result.listing_links),
         )
         property_id = insert_candidate(conn, candidate)
         if property_id is None:  # 競合で先に入った場合

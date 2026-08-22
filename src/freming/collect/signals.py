@@ -131,6 +131,45 @@ def detect(text: str, links: list[str], config: ForSaleSignals) -> SignalResult:
     return result
 
 
+# 販売サイトのドメインではあるが、物件のページではないもの。仲介業者の
+# 自己紹介や検索トップに当たると、ストーリーズに貼っても物件が出てこない。
+#
+# 実例（2026-08-01）: CIRCA の記事にあった Compass のエージェント紹介ページ
+# （/agents/…）を「売出中の裏付け」として拾っていた。
+_NOT_A_LISTING = re.compile(
+    r"/(?:agents?|team|about|contact|offices?|careers?|blog|search|"
+    r"privacy|terms|login|signup)(?:/|$)",
+    re.IGNORECASE,
+)
+
+
+def pick_listing_url(links: list[str]) -> str | None:
+    """販売サイトへのリンクから、**物件のページ**を1つ選ぶ。
+
+    記事末尾の「この物件は Compass に掲載中」のリンクを、ストーリーズに
+    そのまま貼れる形で取り出すためのもの。選び方:
+
+      - 業者紹介・検索トップなどは外す（物件が出てこないため）
+      - 物件ページのURLには番地や掲載IDが入る（`/homedetails/521-ne-6th-st…
+        /43…_zpid/`、`/listing/…/1234567890`）ので、**数字を含むものを優先**
+      - どれも当たらなければ、いちばん深い階層のものを使う（トップページより
+        物件ページの方が深い）
+
+    候補が無ければ None。
+    """
+    usable = []
+    for link in links:
+        path = urlparse(link).path or "/"
+        if path in ("", "/") or _NOT_A_LISTING.search(path):
+            continue
+        usable.append((link, path))
+    if not usable:
+        return None
+    with_digits = [item for item in usable if any(c.isdigit() for c in item[1])]
+    pool = with_digits or usable
+    return max(pool, key=lambda item: item[1].count("/"))[0]
+
+
 def _build_evidence(text: str, result: SignalResult) -> str:
     """人が読んで納得できる根拠テキストを組み立てる。"""
     parts: list[str] = []

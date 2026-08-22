@@ -771,6 +771,10 @@ class EditorialCollector:
             content_text=page.text,
             for_sale_evidence=evidence,
             signal_score=result.score,
+            # 記事の末尾に販売サイトへのリンクがあれば控えておく。
+            # ストーリーズで貼るのは人なので、こちらから販売サイトへ
+            # 取りに行くことはしない。
+            listing_url=signals.pick_listing_url(result.listing_links),
         )
         if insert_candidate(self.conn, candidate) is not None:
             self.conn.commit()

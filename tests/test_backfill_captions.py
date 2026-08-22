@@ -11,7 +11,14 @@ import pytest
 from freming.config import load_config
 from freming.db.connection import connect
 from freming.db.migrate import migrate
-from freming.scoring.backfill import FIELDS, backfill, estimate, pending_rows, save_fields
+from freming.scoring.backfill import (
+    FIELDS,
+    backfill,
+    column_of,
+    estimate,
+    pending_rows,
+    save_fields,
+)
 from freming.scoring.schema import Assessment
 
 CONFIG = load_config("config.yaml")
@@ -72,12 +79,12 @@ def test_納品済みが先に来る(db):
 
 
 def test_全部埋まっている行は対象にならない(db):
-    _add(db, **{f: "x" for f in FIELDS})
+    _add(db, **{column_of(f): "x" for f in FIELDS})
     assert pending_rows(db) == []
 
 
 def test_1つでも空いていれば対象になる(db):
-    filled = {f: "x" for f in FIELDS}
+    filled = {column_of(f): "x" for f in FIELDS}
     filled["photo_credit"] = None
     property_id = _add(db, **filled)
     assert [r["id"] for r in pending_rows(db)] == [property_id]
@@ -165,6 +172,38 @@ def test_空文字は書かない(db):
     assert row["structure"] == "Wood"
 
 
+# --- 市・国（2026-08-22） ---------------------------------------------
+# Dwell の記事はどれも Location を書いているのに、投稿の本文が
+# 「Florida, USA」になっていた。属性名（city）と列名（location_city）が
+# 違い、埋める対象にも書き込み先にもなっていなかった。
+
+
+def test_市と国が空なら対象になる(db):
+    filled = {column_of(f): "x" for f in FIELDS}
+    filled["location_city"] = None
+    _add(db, **filled)
+    assert len(pending_rows(db)) == 1
+
+
+def test_市と国が埋まる(db):
+    property_id = _add(db)
+    backfill(CONFIG, db, client=FakeClient(city="Gainesville", country="United States"))
+    row = db.execute(
+        "SELECT location_city, location_country FROM properties WHERE id = ?",
+        (property_id,),
+    ).fetchone()
+    assert row["location_city"] == "Gainesville"
+    assert row["location_country"] == "United States"
+
+
+def test_収集時に入った市は上書きしない(db):
+    property_id = _add(db, location_city="人が直した市")
+    backfill(CONFIG, db, client=FakeClient(city="LLMの市"))
+    row = db.execute("SELECT location_city FROM properties WHERE id = ?",
+                     (property_id,)).fetchone()
+    assert row["location_city"] == "人が直した市"
+
+
 # --- 費用の見積もり ---------------------------------------------------
 def test_件数が増えれば見積もりも増える(db):
     _add(db)
@@ -176,7 +215,7 @@ def test_件数が増えれば見積もりも増える(db):
 
 # --- 長すぎる物件名の付け直し（2026-08-22） ---------------------------
 LONG = "Renovated 1920s French Eclectic Home in the Historic Duckpond District"
-FULL = {f: "x" for f in FIELDS}
+FULL = {column_of(f): "x" for f in FIELDS}
 
 
 def test_長すぎる物件名は対象になる(db):

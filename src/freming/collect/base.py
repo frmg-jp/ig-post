@@ -72,6 +72,10 @@ class Candidate:
     location_city: str | None = None
     location_country: str | None = None
     is_for_sale: int | None = None
+    # 記事の末尾にある販売サイト（Compass / Zillow など）へのリンク。
+    # ストーリーズにそのまま貼るためのもので、こちらから販売サイトへ
+    # 取りに行くことはしない（記事に書いてあるものを控えるだけ）。
+    listing_url: str | None = None
     collected_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 

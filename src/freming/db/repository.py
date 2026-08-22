@@ -28,8 +28,8 @@ def insert_candidate(conn: DbConnection, candidate: Candidate) -> int | None:
             source, source_rank, source_url, title, thumbnail_url,
             content_text, for_sale_evidence, signal_score,
             price, location_city, location_country, is_for_sale,
-            status, collected_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+            listing_url, status, collected_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
         ON CONFLICT (source_url) DO NOTHING
         RETURNING id
         """,
@@ -46,6 +46,7 @@ def insert_candidate(conn: DbConnection, candidate: Candidate) -> int | None:
             candidate.location_city,
             candidate.location_country,
             candidate.is_for_sale,
+            candidate.listing_url,
             candidate.collected_at,
         ),
     )
