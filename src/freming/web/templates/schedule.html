@@ -124,7 +124,7 @@
         <span class="ptime">{{ item.at }}</span>
         <span class="pname">
           {% if row["kind"] == "reel" %}週次リール（先週のリーチ上位）
-          {% else %}{{ row["display_name"] or row["title"] or "（無題）" }}{% endif %}
+          {% else %}{{ item.name or "（無題）" }}{% endif %}
         </span>
         <span class="tag {{ 'on' if row['state'] == 'published' else ('warn' if row['state'] in ('failed', 'skipped') else '') }}">
           {{ {"planned":"予定","publishing":"投稿中","published":"公開済","failed":"失敗","skipped":"見送り"}.get(row["state"], row["state"]) }}</span>
@@ -165,6 +165,8 @@
         {% if row["property_id"] %}<a href="/p/{{ row['property_id'] }}">物件</a>{% endif %}
         {% if row["source_url"] %}
           <a href="{{ row['source_url'] }}" target="_blank" rel="noopener">引用元</a>
+          <button class="linklike js-copy" type="button"
+                  data-url="{{ row['source_url'] }}">引用元をコピー</button>
         {% endif %}
         {% if row["reach"] is not none %}<span class="quiet">リーチ {{ row["reach"] }}</span>{% endif %}
       </div>
@@ -271,6 +273,25 @@
     }
     strip.addEventListener("pointerup", drop);
     strip.addEventListener("pointercancel", drop);
+  });
+
+  // 引用元のコピー。ストーリーズのリンクスタンプに貼る用。
+  document.querySelectorAll(".js-copy").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const url = btn.dataset.url;
+      const done = () => say("引用元をコピーしました");
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(done, () => say("コピーできませんでした", true));
+      } else {
+        const area = document.createElement("textarea");
+        area.value = url;
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand("copy");
+        area.remove();
+        done();
+      }
+    });
   });
 })();
 </script>

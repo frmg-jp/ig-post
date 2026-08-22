@@ -678,3 +678,23 @@ def test_予定と手動ストーリーズに引用元が出る(config, conn, cl
     page = client.get("/stories").text
     assert "引用元をコピー" in page
     assert "https://e.com/sched" in page
+
+
+def test_住所タイトルはMLS以降を切って出す(config, conn, client):
+    _planned_post(conn)
+    conn.execute("UPDATE properties SET display_name = NULL, "
+                 "title = '21 Bamboo Drive #CD, Briny Breezes, FL 33435 - "
+                 "MLS# B26059678 - Coldwell Banker' "
+                 "WHERE source_url = 'https://e.com/sched'")
+    conn.commit()
+    page = client.get("/schedule").text
+    assert "21 Bamboo Drive #CD, Briny Breezes, FL 33435" in page
+    assert "MLS# B26059678" not in page
+    assert "Coldwell Banker" not in page
+
+
+def test_予定表に引用元コピーのボタンが出る(config, conn, client):
+    _planned_post(conn)
+    page = client.get("/schedule").text
+    assert "引用元をコピー" in page
+    assert 'data-url="https://e.com/sched"' in page

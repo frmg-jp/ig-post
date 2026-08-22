@@ -479,6 +479,22 @@ def create_app(
                 for index, p in enumerate(order)
             ]
 
+        def _display_title(row) -> str:
+            """一覧の見出し。短い物件名が無い行は記事タイトルを整形する。
+
+            住所タイトルのリスティングは「〜 - MLS# ... - 仲介名」まで
+            付いてくる。見出しに要るのは住所までなので、そこで切る。
+            """
+            name = _col(row, "display_name")
+            if name:
+                return name
+            title = row["title"] or ""
+            for marker in (" - MLS", " – MLS", " | MLS"):
+                if marker in title:
+                    title = title.split(marker)[0]
+                    break
+            return title
+
         days: dict[str, list] = {}
         for row in rows:
             moment = datetime.fromisoformat(row["scheduled_at"]).astimezone(zone)
@@ -489,6 +505,7 @@ def create_app(
                     "at_input": moment.strftime("%Y-%m-%dT%H:%M"),
                     "images": _images_for(row),
                     "caption_edited": bool(_col(row, "caption_edited_at")),
+                    "name": _display_title(row),
                 }
             )
         return templates.TemplateResponse(
