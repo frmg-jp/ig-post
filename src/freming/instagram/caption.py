@@ -232,11 +232,11 @@ def build_caption(
 
     # 1行目。Instagram はキャプションの1行目がユーザー名の右に食い込むので、
     # 「・」だけを置いてリード文を下に落とす（config.opener）。
-    if config.opener:
-        blocks.append(config.opener)
-
-    if config.lead:
-        blocks.append("\n".join(config.lead))
+    # 空行は挟まない — リードは2行目から始める。
+    head = [config.opener] if config.opener else []
+    head.extend(config.lead)
+    if head:
+        blocks.append("\n".join(head))
 
     # 見出しは短い物件名。抽出できていなければ記事の見出しで代える。
     title = _get(row, "display_name") or _get(row, "title")
@@ -283,8 +283,11 @@ def build_reel_caption(
     上限で切るのは本文側だけにしてある。
     """
     blocks: list[str] = []
-    if config.lead:
-        blocks.append("\n".join(config.lead))
+    # 通常投稿と同じ型: 1行目に「・」、リードは2行目から。
+    head = [config.opener] if config.opener else []
+    head.extend(config.lead)
+    if head:
+        blocks.append("\n".join(head))
     blocks.append(f"【 今週の{count}件 】")
     # details（ストーリーズ案内と※成約済み）は物件1件の投稿の文言なので
     # 週のまとめには入れない。

@@ -772,12 +772,20 @@ def test_先送りしても物件は候補から外れたまま(db):
 
 
 # --- 2026-08-19 の変更: 1行目の「・」・Location の州・㎡併記・カルーセル ---
-def test_一行目は中黒でリードは3行目から(db):
+def test_一行目は中黒でリードは2行目から(db):
+    """「・」とリードの間に空行を挟まない（2026-08-22 の指示）。"""
     caption = build_caption(_rich(db), CONFIG.caption, "Dezeen")
     head = caption.split("\n")
     assert head[0] == "・"
-    assert head[1] == ""
-    assert head[2].startswith("世界で今、")
+    assert head[1].startswith("世界で今、")
+
+
+def test_リールも一行目は中黒でリードは2行目から():
+    caption = build_reel_caption(7, CONFIG.caption)
+    head = caption.split("\n")
+    assert head[0] == "・"
+    assert head[1].startswith("世界で今、")
+    assert "【 今週の7件 】" in caption
 
 
 def test_Locationに州が入りUSAに縮める(db):
