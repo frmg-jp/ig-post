@@ -174,3 +174,22 @@ def test_物件ページ由来はそのまま写す(db) -> None:
     row = db.execute("SELECT listing_url FROM properties WHERE id = ?",
                      (property_id,)).fetchone()
     assert row["listing_url"] == url
+
+
+def test_仲介の読み物は選ばない() -> None:
+    """Corcoran の市況レポートを拾っていた（2026-08-22 の実測）。
+
+    ドメインは仲介、パスに年号の数字もあるので、深さと数字だけでは
+    物件ページと区別が付かない。
+    """
+    assert signals.pick_listing_url([
+        "https://inhabit.corcoran.com/nyc-residential-rental-market-report-june-2026",
+    ]) is None
+
+
+def test_読み物より物件ページを選ぶ() -> None:
+    found = signals.pick_listing_url([
+        "https://inhabit.corcoran.com/nyc-market-report-june-2026",
+        "https://www.corcoran.com/listing/for-sale/205-clinton-st/1234567/regionId/1",
+    ])
+    assert found is not None and "/listing/" in found

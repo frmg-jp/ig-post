@@ -142,6 +142,17 @@ _NOT_A_LISTING = re.compile(
     re.IGNORECASE,
 )
 
+# 仲介サイトが出している読み物。物件ページではない。
+#
+# 実例（2026-08-22）: Corcoran の
+# `inhabit.corcoran.com/nyc-residential-rental-market-report-june-2026` を
+# 拾っていた。ドメインは仲介、パスに数字（年）もあるので、深さと数字の
+# 規則だけでは物件ページと区別が付かない。語で弾く。
+_EDITORIAL = re.compile(
+    r"(?:market-?report|report|news|press|guide|insights?|journal|stories|"
+    r"magazine|article)", re.IGNORECASE
+)
+
 
 def pick_listing_url(links: list[str]) -> str | None:
     """販売サイトへのリンクから、**物件のページ**を1つ選ぶ。
@@ -161,6 +172,8 @@ def pick_listing_url(links: list[str]) -> str | None:
     for link in links:
         path = urlparse(link).path or "/"
         if path in ("", "/") or _NOT_A_LISTING.search(path):
+            continue
+        if _EDITORIAL.search(path):
             continue
         usable.append((link, path))
     if not usable:
