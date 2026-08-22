@@ -145,10 +145,12 @@ OUTPUT_SCHEMA: dict = {
         "display_name": {
             "type": "string",
             "description": (
-                "投稿の見出しに使う短い物件名。英語。記事に固有名があればそれ"
-                "（'Wade House' / 'The Benson House'）。無ければ年代・様式・種別"
-                "から中立に組む（'1963 Mid-Century Residence' など）。記事に無い"
-                "愛称を発明しない。組めなければ空文字。"
+                "投稿の見出しに使う短い物件名。英語・**2〜4語・30字以内**。"
+                "記事に固有名があればそれ（'Wade House' / 'The Benson House'）。"
+                "無ければ年代・様式・種別から中立に組む（'1963 Mid-Century "
+                "Residence' など）。所在地・'in 〜'・住所・MLS番号・仲介会社名を"
+                "**含めない**。文にしない。記事に無い愛称を発明しない。"
+                "組めなければ空文字。"
             ),
         },
         "caption_body": {

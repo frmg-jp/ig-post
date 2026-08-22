@@ -62,11 +62,14 @@ class BackfillStats:
     empty: int = 0          # 記事に書いていなかった（呼び直しても埋まらない）
     failed: int = 0
     no_text: int = 0        # 本文が無いので読ませようがない
+    renamed: int = 0        # 長すぎた物件名を付け直した
     lines: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
         text = f"埋めました {self.filled} 件"
         parts = []
+        if self.renamed:
+            parts.append(f"物件名を付け直し {self.renamed}")
         if self.empty:
             parts.append(f"記事に記載なし {self.empty}")
         if self.failed:
@@ -76,14 +79,22 @@ class BackfillStats:
         return f"{text}（{' / '.join(parts)}）" if parts else text
 
 
+# 物件名としてこの長さを超えるものは「見出し」であって名前ではない。
+# 実運用の投稿の名前は10〜26字（"Wade House" 〜 "1963 Mid-Century Residence"）。
+MAX_NAME_LEN = 40
+
+
 def pending_rows(conn: DbConnection, limit: int | None = None) -> list[Row]:
     """まだ埋まっていない物件。納品済みも含める。
 
-    1つでも空いていれば対象にする。全部埋まっている行は呼ばない。
+    1つでも空いていれば対象にする。**長すぎる物件名も対象**（付け直す）。
+    全部埋まっていて名前も短い行は呼ばない。
     """
     missing = " OR ".join(f"{f} IS NULL" for f in FIELDS)
     sql = (
-        f"SELECT * FROM properties WHERE ({missing}) AND scored_at IS NOT NULL "
+        f"SELECT * FROM properties WHERE "
+        f"(({missing}) OR LENGTH(display_name) > {MAX_NAME_LEN}) "
+        "AND scored_at IS NOT NULL "
         "ORDER BY status = 'delivered' DESC, score DESC, id DESC"
     )
     params: tuple = ()
@@ -152,6 +163,22 @@ def backfill(
 
         values = {f: getattr(assessment, f, "") for f in FIELDS}
         count = save_fields(conn, int(row["id"]), values)
+
+        # 長すぎる物件名の付け直し。save_fields は空欄しか埋めないので、
+        # ここだけは**規則違反の値に限って**上書きする。人が短く直した
+        # 名前は MAX_NAME_LEN に収まっているはずなので触らない。
+        current = (row["display_name"] or "").strip()
+        fresh = (assessment.display_name or "").strip()
+        if (len(current) > MAX_NAME_LEN and fresh
+                and fresh != current and len(fresh) <= MAX_NAME_LEN):
+            conn.execute(
+                "UPDATE properties SET display_name = ? WHERE id = ?",
+                (fresh, int(row["id"])),
+            )
+            conn.commit()
+            stats.renamed += 1
+            stats.lines.append(f"  {row['id']:>5}  名前: {current[:24]}… → {fresh}")
+
         if count:
             stats.filled += 1
             stats.lines.append(

@@ -172,3 +172,46 @@ def test_件数が増えれば見積もりも増える(db):
     _add(db, status="pending")
     two = estimate(pending_rows(db))
     assert two[2] > one[2] > 0
+
+
+# --- 長すぎる物件名の付け直し（2026-08-22） ---------------------------
+LONG = "Renovated 1920s French Eclectic Home in the Historic Duckpond District"
+FULL = {f: "x" for f in FIELDS}
+
+
+def test_長すぎる物件名は対象になる(db):
+    _add(db, **{**FULL, "display_name": LONG})
+    assert len(pending_rows(db)) == 1
+
+
+def test_短い物件名で全部埋まっていれば対象にならない(db):
+    _add(db, **{**FULL, "display_name": "Duckpond House"})
+    assert pending_rows(db) == []
+
+
+def test_長すぎる物件名は付け直す(db):
+    property_id = _add(db, **{**FULL, "display_name": LONG})
+    stats = backfill(CONFIG, db, client=FakeClient(display_name="Duckpond House"))
+    assert stats.renamed == 1
+    row = db.execute("SELECT display_name FROM properties WHERE id = ?",
+                     (property_id,)).fetchone()
+    assert row["display_name"] == "Duckpond House"
+
+
+def test_短い物件名は上書きしない(db):
+    """人が直した名前を、あとからLLMの出力で潰さない。"""
+    property_id = _add(db, display_name="Casa Milà")
+    backfill(CONFIG, db, client=FakeClient(display_name="Different Name",
+                                           caption_body="本文です。"))
+    row = db.execute("SELECT display_name FROM properties WHERE id = ?",
+                     (property_id,)).fetchone()
+    assert row["display_name"] == "Casa Milà"
+
+
+def test_付け直し先も長すぎるなら触らない(db):
+    property_id = _add(db, **{**FULL, "display_name": LONG})
+    stats = backfill(CONFIG, db, client=FakeClient(display_name=LONG))
+    assert stats.renamed == 0
+    row = db.execute("SELECT display_name FROM properties WHERE id = ?",
+                     (property_id,)).fetchone()
+    assert row["display_name"] == LONG
