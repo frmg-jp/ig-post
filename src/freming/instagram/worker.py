@@ -80,7 +80,17 @@ def _publish_feed(config: Config, conn: DbConnection, post: Row, token: str, ig_
     row = conn.execute(
         "SELECT * FROM properties WHERE id = ?", (property_id,)
     ).fetchone()
-    alt = build_alt_text(row) if row is not None else None
+
+    # 予定は作られたが材料が無い、という行が残っていることがある
+    # （postable_properties の絞り込みより前に作られた予定）。
+    # そのまま出すと見出しが住所・本文が審査用の文章になるので、出さない。
+    if row is None or not (row["display_name"] and row["caption_body"]):
+        raise PostingError(
+            "投稿の材料（物件名・説明文）が揃っていません。"
+            "backfill-captions で埋まらなかった物件は記事が薄すぎます。"
+            "審査UIの投稿予定から見送ってください。"
+        )
+    alt = build_alt_text(row)
 
     positions = media.available_positions(conn, property_id)
     positions = positions[: config.instagram.carousel_max]
@@ -130,8 +140,18 @@ def daily_winners(
         published = datetime.fromisoformat(row["published_at"]).astimezone(zone)
         reach = row["reach"]
         if reach is None and row["ig_media_id"]:
-            reach = media_reach(token, row["ig_media_id"])
-            record_reach(conn, row["id"], reach)
+            try:
+                reach = media_reach(token, row["ig_media_id"])
+            except MissingInsightsScope:
+                raise  # 権限が無いのは全件同じ。呼び出し側が案内を出す
+            except InstagramError as exc:
+                # アプリ側で削除された投稿など、その1件だけ読めない場合。
+                # リーチ0として扱う（消した投稿が1位になることはない）。
+                log.warning("リーチを読めませんでした（media_id=%s）: %s",
+                            row["ig_media_id"], exc)
+                reach = 0
+            else:
+                record_reach(conn, row["id"], reach)
         by_day[published.date().isoformat()].append((reach or 0, row))
 
     winners = []

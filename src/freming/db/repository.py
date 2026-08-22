@@ -661,9 +661,18 @@ def postable_properties(
 
     納品済みに限るのは、そこまで通ったものだけが画像を持っているため。
     承認しただけで画像が用意できなかったものを投稿に回さない。
+
+    **投稿の材料（物件名・説明文）が揃っていないものも回さない。**
+    記事が薄くて抽出できなかった物件は、見出しが住所のまま・本文が
+    審査用の文章のままになる。2026-08-22 に実際にそれが公開された。
     """
     params: list = []
-    where = ["p.status = 'delivered'", "po.id IS NULL"]
+    where = [
+        "p.status = 'delivered'",
+        "po.id IS NULL",
+        "p.display_name IS NOT NULL",
+        "p.caption_body IS NOT NULL",
+    ]
     if sources:
         marks = ",".join("?" for _ in sources)
         where.append(f"p.source IN ({marks})")

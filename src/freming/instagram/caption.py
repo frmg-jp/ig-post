@@ -248,8 +248,12 @@ def build_caption(
         blocks.append("\n".join(specs))
 
     # 説明文。日本語のみ（実運用の投稿に英語の本文は無い）。
-    # 投稿用の説明文が無い古い行は、審査用の短い選定理由で代える。
-    body = _get(row, "caption_body") or _get(row, "summary")
+    #
+    # **summary には絶対に落とさない。** あれは審査用の選定理由で、
+    # 「物語性なし」のような内部の評価がそのまま書いてある。実際に
+    # 2026-08-22、caption_body の無い物件で summary が公開されてしまった。
+    # 公開文に使ってよいのは、公開向けに書かせた caption_body だけ。
+    body = _get(row, "caption_body")
     if body:
         blocks.append(body)
 

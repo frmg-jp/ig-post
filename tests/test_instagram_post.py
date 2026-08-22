@@ -46,13 +46,20 @@ def db(tmp_path):
     return connect(path)
 
 
-def _property(conn, title="Old Mill House", city="Porto", score=80.0, status="delivered"):
+def _property(conn, title="Old Mill House", city="Porto", score=80.0, status="delivered",
+              display_name="Old Mill House", caption_body="製粉所の躯体を残した改修住宅です。"):
+    """投稿の材料（display_name / caption_body）まで揃った物件。
+
+    揃っていないものは postable_properties が外す（2026-08-22 の事故対応）。
+    外れる側を試すテストは display_name=None を渡す。"""
     cursor = conn.execute(
         "INSERT INTO properties (source, source_url, title, location_city, "
-        "location_country, summary, score, status, collected_at) "
-        "VALUES ('dezeen', ?, ?, ?, 'Portugal', '製粉所の躯体を残した改修', ?, ?, ?) "
+        "location_country, summary, score, status, collected_at, "
+        "display_name, caption_body) "
+        "VALUES ('dezeen', ?, ?, ?, 'Portugal', '製粉所の躯体を残した改修', ?, ?, ?, ?, ?) "
         "RETURNING id",
-        (f"https://example.com/{title}", title, city, score, status, NOW.isoformat()),
+        (f"https://example.com/{title}", title, city, score, status, NOW.isoformat(),
+         display_name, caption_body),
     )
     property_id = cursor.fetchone()["id"]
     conn.commit()
@@ -234,7 +241,7 @@ def test_キャプションに場所と選定理由が入る(db):
     caption = build_caption(row, CONFIG.caption)
     assert "Old Mill House" in caption
     assert "Porto, Portugal" in caption
-    assert "製粉所の躯体を残した改修" in caption
+    assert "製粉所の躯体を残した改修住宅です。" in caption
     assert "#FremingCurated" in caption
 
 
@@ -512,16 +519,22 @@ def test_説明文は日本語のみ(db):
     """
     row = _rich(db)
     caption = build_caption(row, CONFIG.caption, "Dezeen")
-    assert row["summary"] in caption
     assert "A 1961 post-and-beam house" not in caption
 
 
-def test_投稿用の説明文があれば選定理由より優先(db):
-    body = "キャニオンを見下ろす1961年のポスト・アンド・ビーム住宅です。"
-    row = _rich(db, caption_body=body)
+def test_審査用の選定理由は公開文に出ない(db):
+    """summary は「物語性なし」のような内部評価を含む。**公開文には
+    絶対に使わない**（2026-08-22 に実際に公開されてしまった）。"""
+    row = _rich(db, caption_body=None)
     caption = build_caption(row, CONFIG.caption, "Dezeen")
-    assert body in caption
     assert row["summary"] not in caption
+
+
+def test_材料が無い物件は投稿の対象にならない(db):
+    """記事が薄くて物件名・説明文を作れなかったものは予定に載せない。
+    見出しが住所のまま・本文が審査用の文章のままで出てしまうため。"""
+    _property(db, "thin listing", display_name=None, caption_body=None)
+    assert postable_properties(db, 10) == []
 
 
 def test_見出しは短い物件名を優先(db):
