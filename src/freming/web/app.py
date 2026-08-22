@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -77,6 +78,38 @@ REJECT_PRESETS = [
     # 分類するので、繰り返されればここから傾向が見えてくる。
     "なんとなくダサい",
 ]
+
+
+def list_url(
+    status: str, sort: str, page: int = 1, series: str | None = None
+) -> str:
+    """一覧の場所を1つのURLに畳む。"""
+    params = {"status": status, "sort": sort, "page": page}
+    if series:
+        params["series"] = series
+    return "/?" + urlencode(params)
+
+
+def safe_back(back: str, status: str) -> str:
+    """承認などのあとに戻る先。
+
+    並べ替えとページを持ち回らないと、1件承認するたびに一覧の先頭
+    （既定の並び・1ページ目）へ飛ばされる。古い順で見ていたのに
+    スコア順の頭に戻る、というのがこれ（2026-08-22 の指摘）。
+
+    **外部URLへは飛ばさない。** フォームの隠し項目なので、書き換えれば
+    任意の場所へ飛ばせてしまう。自サイト内の絶対パスだけを通す。
+    """
+    back = (back or "").strip()
+    if (
+        back.startswith("/")
+        and not back.startswith("//")
+        and "\\" not in back
+        and "\n" not in back
+        and "\r" not in back
+    ):
+        return back
+    return f"/?status={status}"
 
 
 def _axes(row: Row) -> list[dict]:
@@ -218,6 +251,9 @@ def create_app(
                 "series": series,
                 "sort": sort,
                 "sort_options": SORT_LABELS,
+                # 承認などのあとに戻ってくる場所。並べ替えとページを
+                # 持ち回らないと、1件ごとに一覧の先頭へ飛ばされる。
+                "back": list_url(status, sort, page, series),
                 "fx_as_of": fx_as_of,
                 "highlight": config.scoring.thresholds.highlight_above,
                 "thumb_px": config.review_ui.thumbnail_px,
@@ -225,7 +261,7 @@ def create_app(
         )
 
     @app.get("/p/{property_id}", response_class=HTMLResponse)
-    def detail(request: Request, property_id: int):
+    def detail(request: Request, property_id: int, back: str = ""):
         conn = _conn()
         try:
             row = get_property(conn, property_id)
@@ -238,6 +274,7 @@ def create_app(
             "detail.html",
             {
                 "row": row,
+                "back": safe_back(back, row["status"] or "pending"),
                 "presets": REJECT_PRESETS,
                 "series_options": config.series,
                 "auto_deliver": worker is not None,
@@ -248,7 +285,9 @@ def create_app(
         )
 
     @app.post("/p/{property_id}/approve")
-    def approve(property_id: int, status: str = Form("pending")):
+    def approve(
+        property_id: int, status: str = Form("pending"), back: str = Form("")
+    ):
         conn = _conn()
         try:
             approved = approve_property(conn, property_id)
@@ -259,10 +298,12 @@ def create_app(
         # 巡回間隔を待たずに納品を始める
         if approved and worker is not None:
             worker.wake()
-        return RedirectResponse(f"/?status={status}", status_code=303)
+        return RedirectResponse(safe_back(back, status), status_code=303)
 
     @app.post("/p/{property_id}/retry-delivery")
-    def retry(property_id: int, status: str = Form("approved")):
+    def retry(
+        property_id: int, status: str = Form("approved"), back: str = Form("")
+    ):
         """納品の試行回数を戻して自動納品に復帰させる。
 
         画像が消えていた・Driveが落ちていた等で上限まで失敗した候補は、
@@ -275,7 +316,7 @@ def create_app(
             conn.close()
         if ok and worker is not None:
             worker.wake()
-        return RedirectResponse(f"/?status={status}", status_code=303)
+        return RedirectResponse(safe_back(back, status), status_code=303)
 
     @app.post("/p/{property_id}/reject")
     def reject(
@@ -283,6 +324,7 @@ def create_app(
         reason: str = Form(""),
         reason_free: str = Form(""),
         status: str = Form("pending"),
+        back: str = Form(""),
     ):
         # 定型理由と自由入力の両方が来たら、自由入力を優先して両方残す。
         # 具体的な文言の方が [7] の学習材料として価値がある。
@@ -296,32 +338,37 @@ def create_app(
             reject_property(conn, property_id, text)
         finally:
             conn.close()
-        return RedirectResponse(f"/?status={status}", status_code=303)
+        return RedirectResponse(safe_back(back, status), status_code=303)
 
     @app.post("/p/{property_id}/series")
     def assign_series(
-        property_id: int, series: str = Form(""), status: str = Form("pending")
+        property_id: int,
+        series: str = Form(""),
+        status: str = Form("pending"),
+        back: str = Form(""),
     ):
         """連載企画のラベルを付ける。判定はせず、人が選んだものをそのまま保存する。"""
         key = series.strip()
         if key and not config.is_known_series(key):
             log.warning("config.yaml に無い企画キーです: %s", key)
-            return RedirectResponse(f"/?status={status}", status_code=303)
+            return RedirectResponse(safe_back(back, status), status_code=303)
         conn = _conn()
         try:
             set_series(conn, property_id, key or None)
         finally:
             conn.close()
-        return RedirectResponse(f"/?status={status}", status_code=303)
+        return RedirectResponse(safe_back(back, status), status_code=303)
 
     @app.post("/p/{property_id}/reset")
-    def reset(property_id: int, status: str = Form("pending")):
+    def reset(
+        property_id: int, status: str = Form("pending"), back: str = Form("")
+    ):
         conn = _conn()
         try:
             reset_review(conn, property_id)
         finally:
             conn.close()
-        return RedirectResponse(f"/?status={status}", status_code=303)
+        return RedirectResponse(safe_back(back, status), status_code=303)
 
     @app.get("/rules", response_class=HTMLResponse)
     def rules(request: Request):

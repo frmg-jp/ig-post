@@ -847,3 +847,60 @@ def test_画面から見送ると後ろが前に詰まる(config, conn, client):
     client.post(f"/posts/{ids[0]}/skip", follow_redirects=False)
     row = conn.execute("SELECT scheduled_at FROM posts WHERE id=?", (ids[1],)).fetchone()
     assert row["scheduled_at"] == _slot(1)
+
+
+# --- 承認したあとの戻り先（2026-08-22） -------------------------------
+# 「古い順で見ていたのに、1件承認するとスコア順の先頭に戻る」。
+# 承認・非承認のフォームが並べ替えとページを持っていなかった。
+
+
+def test_承認しても並べ替えとページが変わらない(client, conn) -> None:
+    property_id = _add(conn)
+    back = "/?status=pending&sort=oldest&page=3"
+    response = client.post(
+        f"/p/{property_id}/approve",
+        data={"status": "pending", "back": back},
+        follow_redirects=False,
+    )
+    assert response.headers["location"] == back
+
+
+def test_非承認でも戻り先を保つ(client, conn) -> None:
+    property_id = _add(conn)
+    back = "/?status=pending&sort=price_desc&page=2"
+    response = client.post(
+        f"/p/{property_id}/reject",
+        data={"status": "pending", "reason": "なんとなくダサい", "back": back},
+        follow_redirects=False,
+    )
+    assert response.headers["location"] == back
+
+
+def test_戻り先に外部URLは使わない(client, conn) -> None:
+    """隠し項目なので書き換えられる。**外へは飛ばさない。**"""
+    property_id = _add(conn)
+    for evil in ("https://example.com/", "//example.com/", "\\\\example.com"):
+        response = client.post(
+            f"/p/{property_id}/approve",
+            data={"status": "pending", "back": evil},
+            follow_redirects=False,
+        )
+        assert response.headers["location"] == "/?status=pending"
+        conn.execute("UPDATE properties SET status = 'pending' WHERE id = ?",
+                     (property_id,))
+        conn.commit()
+
+
+def test_戻り先が無ければ従来どおり(client, conn) -> None:
+    property_id = _add(conn)
+    response = client.post(
+        f"/p/{property_id}/approve", data={"status": "pending"},
+        follow_redirects=False,
+    )
+    assert response.headers["location"] == "/?status=pending"
+
+
+def test_一覧のフォームが今の並びを持っている(client, conn) -> None:
+    _add(conn)
+    body = client.get("/?status=pending&sort=oldest&page=1").text
+    assert 'name="back" value="/?status=pending&amp;sort=oldest&amp;page=1"' in body

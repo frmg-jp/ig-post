@@ -75,6 +75,8 @@
         {# 連載企画は編集判断なので、スコアリングでは決めずここで人が選ぶ #}
         <form method="post" action="/p/{{ row['id'] }}/series">
           <input type="hidden" name="status" value="{{ status }}">
+          {# 承認したあと、いま見ている並び・ページへ戻す #}
+          <input type="hidden" name="back" value="{{ back }}">
           <select name="series" onchange="this.form.submit()">
             <option value="">企画なし</option>
             {% for s in series_options %}
@@ -94,10 +96,14 @@
       {% elif row["status"] == "pending" %}
         <form class="approve" method="post" action="/p/{{ row['id'] }}/approve">
           <input type="hidden" name="status" value="{{ status }}">
+          {# 承認したあと、いま見ている並び・ページへ戻す #}
+          <input type="hidden" name="back" value="{{ back }}">
           <button class="ok" type="submit">承認</button>
         </form>
         <form class="reject" method="post" action="/p/{{ row['id'] }}/reject">
           <input type="hidden" name="status" value="{{ status }}">
+          {# 承認したあと、いま見ている並び・ページへ戻す #}
+          <input type="hidden" name="back" value="{{ back }}">
           <select name="reason">
             <option value="">理由を選ぶ</option>
             {% for p in presets %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
@@ -113,6 +119,8 @@
           {% elif row["delivery_attempts"] and row["delivery_attempts"] >= max_attempts %}
             <form method="post" action="/p/{{ row['id'] }}/retry-delivery">
               <input type="hidden" name="status" value="{{ status }}">
+          {# 承認したあと、いま見ている並び・ページへ戻す #}
+          <input type="hidden" name="back" value="{{ back }}">
               <button type="submit">納品を再試行</button>
             </form>
           {% else %}
@@ -121,6 +129,8 @@
         {% endif %}
         <form method="post" action="/p/{{ row['id'] }}/reset">
           <input type="hidden" name="status" value="{{ status }}">
+          {# 承認したあと、いま見ている並び・ページへ戻す #}
+          <input type="hidden" name="back" value="{{ back }}">
           <button type="submit">未審査に戻す</button>
         </form>
       {% endif %}

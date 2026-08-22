@@ -7,7 +7,7 @@
 <p class="subnav">
   並べ替え:
   {% for key, label in sort_options %}
-    <a href="/?status={{ status }}&sort={{ key }}"
+    <a href="/?status={{ status }}&sort={{ key }}{% if series %}&series={{ series }}{% endif %}"
        class="{{ 'on' if sort == key else '' }}">{{ label }}</a>
   {% endfor %}
   {# 価格は原文の通貨のまま表示しているので、円換算で並べていることを
@@ -46,8 +46,8 @@
 
 {% if page > 1 or has_next %}
   <p class="pager">
-    {% if page > 1 %}<a href="/?status={{ status }}&sort={{ sort }}&page={{ page - 1 }}">← 前</a>{% endif %}
-    {% if has_next %}<a class="next" href="/?status={{ status }}&sort={{ sort }}&page={{ page + 1 }}">次 →</a>{% endif %}
+    {% if page > 1 %}<a href="/?status={{ status }}&sort={{ sort }}&page={{ page - 1 }}{% if series %}&series={{ series }}{% endif %}">← 前</a>{% endif %}
+    {% if has_next %}<a class="next" href="/?status={{ status }}&sort={{ sort }}&page={{ page + 1 }}{% if series %}&series={{ series }}{% endif %}">次 →</a>{% endif %}
   </p>
 {% endif %}
 
@@ -69,5 +69,31 @@
     <p><button type="submit">登録する</button></p>
   </form>
 </details>
+
+{# 承認・非承認を押すと画面が作り直される。**見ていた場所へ戻す。**
+   並びとページはサーバー側（back）が持ち回るので、ここは縦位置だけ。
+   押した行は一覧から消えるので、1行ぶん詰まった位置＝次に見る行が
+   だいたい同じ高さに来る。 #}
+<script>
+(() => {
+  // 鍵は back（サーバーが組む正規のURL）。location.search を使うと、
+  // 並べ替えのリンク（page 無し）と戻り先（page あり）で鍵が食い違う。
+  const key = "review-scroll:" + {{ back | tojson }};
+  const restore = () => {
+    let saved = null;
+    try { saved = sessionStorage.getItem(key); } catch (e) { return; }
+    if (saved === null) return;
+    try { sessionStorage.removeItem(key); } catch (e) {}
+    window.scrollTo(0, parseInt(saved, 10) || 0);
+  };
+  document.addEventListener("submit", () => {
+    try { sessionStorage.setItem(key, String(window.scrollY)); } catch (e) {}
+  }, true);
+  restore();
+  // 画像の読み込みで高さが決まってからもう一度。aspect-ratio を指定して
+  // いるので大きくはずれないが、端末によっては1回目が早すぎる。
+  window.addEventListener("load", restore, { once: true });
+})();
+</script>
 
 {% endblock %}
