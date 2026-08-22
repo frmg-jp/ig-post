@@ -817,3 +817,33 @@ def test_番地も住所タイトルも無ければ検索リンクを出さな�
     _planned_post(conn)
     page = client.get("/schedule").text
     assert "記事に番地が書かれていないため" in page
+
+
+def test_画面から見送ると後ろが前に詰まる(config, conn, client):
+    """穴を残さない（2026-08-22 の指示）。"""
+    from datetime import UTC, datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    from freming.db.repository import create_post
+
+    jst = ZoneInfo("Asia/Tokyo")
+
+    def _slot(days: int) -> str:
+        day = (datetime.now(UTC).astimezone(jst) + timedelta(days=days)).date()
+        moment = datetime.combine(day, datetime.min.time(), tzinfo=jst)
+        return moment.replace(hour=9).astimezone(UTC).isoformat()
+
+    ids = []
+    for n, when in enumerate((1, 2)):
+        cursor = conn.execute(
+            "INSERT INTO properties (source, source_url, title, summary, score, status, "
+            "collected_at, display_name, caption_body) "
+            f"VALUES ('dezeen', 'https://e.com/c{n}', 'T', 's', 80, 'delivered', "
+            "'2026-08-01T00:00:00+00:00', 'House', '本文') RETURNING id")
+        prop = cursor.fetchone()["id"]
+        conn.commit()
+        ids.append(create_post(conn, "feed", _slot(when), property_id=prop, caption="c"))
+
+    client.post(f"/posts/{ids[0]}/skip", follow_redirects=False)
+    row = conn.execute("SELECT scheduled_at FROM posts WHERE id=?", (ids[1],)).fetchone()
+    assert row["scheduled_at"] == _slot(1)

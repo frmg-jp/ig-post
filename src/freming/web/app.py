@@ -654,10 +654,13 @@ def create_app(
     @app.post("/posts/{post_id}/skip")
     def skip_post_route(post_id: int):
         from freming.db.repository import skip_post
+        from freming.instagram.plan import compact
 
         conn = _conn()
         try:
-            skip_post(conn, post_id)
+            if skip_post(conn, post_id):
+                # 空いた枠を埋めるため、後ろの予定を前に詰める。
+                compact(config, conn)
         finally:
             conn.close()
         return RedirectResponse("/schedule", status_code=303)
@@ -682,14 +685,18 @@ def create_app(
         """予定から消す。**候補には戻さない**（行は deleted として残し、
         この物件が再び予定に載るのを防ぐ）。重複や誤登録を外すためのもの。
         投稿中の行だけは触らない。"""
+        from freming.instagram.plan import compact
+
         conn = _conn()
         try:
-            conn.execute(
+            cursor = conn.execute(
                 "UPDATE posts SET state = 'deleted' "
                 "WHERE id = ? AND state != 'publishing'",
                 (post_id,),
             )
             conn.commit()
+            if cursor.rowcount:
+                compact(config, conn)
         finally:
             conn.close()
         return RedirectResponse("/schedule", status_code=303)

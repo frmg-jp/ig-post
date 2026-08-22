@@ -155,4 +155,44 @@ def _plan_reel(config: Config, conn: DbConnection, now: datetime) -> int:
     return 1 if create_post(conn, KIND_REEL, moment.isoformat()) is not None else 0
 
 
-__all__ = ["PlanStats", "next_reel_time", "plan", "slot_times"]
+def compact(config: Config, conn: DbConnection, now: datetime | None = None) -> int:
+    """空いた枠を詰める。見送り・削除で穴が空いたときに使う。
+
+    **順番は変えない。** これから出る通常投稿を時系列のまま、先頭の
+    空き枠から順に詰め直すだけ。動いた件数を返す。
+
+    触るのは planned の通常投稿だけ:
+      - 公開済み・投稿中は動かさない（出たものの時刻を変える意味がない）
+      - 見送りは詰めない（**出さないと決めたものを前に持ってこない**）
+      - リールは曜日が決まっているので対象外
+    """
+    from freming.db.repository import set_scheduled_at
+
+    now = now or datetime.now(UTC)
+    slots = slot_times(config, now)
+    if not slots:
+        return 0
+
+    until = slots[-1] + timedelta(minutes=1)
+    rows = [
+        row for row in scheduled_posts(conn, until.isoformat())
+        if row["kind"] == KIND_FEED
+        and row["state"] == "planned"
+        and row["scheduled_at"] > now.isoformat()
+    ]
+    if not rows:
+        return 0
+    rows.sort(key=lambda r: (r["scheduled_at"], r["id"]))
+
+    moved = 0
+    for row, moment in zip(rows, slots, strict=False):
+        if row["scheduled_at"] == moment.isoformat():
+            continue
+        if set_scheduled_at(conn, row["id"], moment.isoformat()):
+            moved += 1
+    if moved:
+        log.info("%d 件を前に詰めました", moved)
+    return moved
+
+
+__all__ = ["PlanStats", "compact", "next_reel_time", "plan", "slot_times"]

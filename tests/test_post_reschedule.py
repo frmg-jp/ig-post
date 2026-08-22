@@ -195,3 +195,47 @@ def test_出し直しはnowで今すぐに戻せる(monkeypatch, tmp_path) -> No
     conn = connect(tmp_path / "test.db")
     row = conn.execute("SELECT scheduled_at FROM posts WHERE id=?", (post_id,)).fetchone()
     assert row["scheduled_at"] <= datetime.now(UTC).isoformat()
+
+
+def test_見送りで空いた枠に後ろが詰まる(monkeypatch, tmp_path) -> None:
+    """穴を残さない。順番は変えず、先頭の空き枠から詰め直す。"""
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    config = _config(tmp_path, ["09:00"])
+    conn = _db(tmp_path)
+    first = _post(conn, _at(1, "09:00"), "Day1")
+    second = _post(conn, _at(2, "09:00"), "Day2")
+    third = _post(conn, _at(3, "09:00"), "Day3")
+    conn.close()
+
+    assert main(["--config", config, "post", "skip", "--id", str(first)]) == 0
+    assert main(["--config", config, "post", "compact"]) == 0
+
+    conn = connect(tmp_path / "test.db")
+    rows = {
+        r["id"]: datetime.fromisoformat(r["scheduled_at"]).astimezone(JST).date()
+        for r in conn.execute("SELECT id, scheduled_at FROM posts").fetchall()
+    }
+    today = datetime.now(UTC).astimezone(JST).date()
+    # 2番目が1日目の枠へ、3番目が2日目の枠へ繰り上がる
+    assert rows[second] == today + timedelta(days=1)
+    assert rows[third] == today + timedelta(days=2)
+    # 見送ったものは動かさない（出さないと決めたものを前に持ってこない）
+    assert rows[first] == today + timedelta(days=1)
+
+
+def test_公開済みは詰めても動かない(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    config = _config(tmp_path, ["09:00"])
+    conn = _db(tmp_path)
+    done = _post(conn, _at(-1, "09:00"), "Done")
+    finish_post(conn, done, "media-1", "c1")
+    before = conn.execute("SELECT scheduled_at FROM posts WHERE id=?",
+                          (done,)).fetchone()["scheduled_at"]
+    _post(conn, _at(3, "09:00"), "Later")
+    conn.close()
+
+    assert main(["--config", config, "post", "compact"]) == 0
+    conn = connect(tmp_path / "test.db")
+    after = conn.execute("SELECT scheduled_at FROM posts WHERE id=?",
+                         (done,)).fetchone()["scheduled_at"]
+    assert after == before

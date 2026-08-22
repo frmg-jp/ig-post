@@ -25,6 +25,7 @@ on:
           - post-replan        # 未投稿の予定の本文を作り直す（費用なし）
           - post-reschedule    # 期限切れ・旧枠の予定を先の枠へ動かす（費用なし）
           - post-plan          # 空いている枠を埋める（費用なし）
+          - post-compact       # 空いた枠のぶん、後ろの予定を前に詰める（費用なし）
       apply:
         description: "本当に実行する（外すと見積もりだけ）"
         type: boolean
@@ -101,6 +102,10 @@ jobs:
             post-reschedule)  python -m freming.cli post reschedule ;;
             post-plan)
               python -m freming.cli post plan
+              python -m freming.cli post show
+              ;;
+            post-compact)
+              python -m freming.cli post compact
               python -m freming.cli post show
               ;;
           esac

@@ -1008,6 +1008,13 @@ def _cmd_post(args: argparse.Namespace) -> int:
             print(f"{changed} 件の本文を作り直しました（投稿済みは触っていません）。")
             return 0
 
+        if args.post_action == "compact":
+            from freming.instagram.plan import compact
+
+            moved = compact(cfg, conn)
+            print(f"{moved} 件を前に詰めました。" if moved else "詰める予定はありません。")
+            return 0
+
         if args.post_action == "reschedule":
             # ワーカーが止まっていた間に、時刻を過ぎた予定が溜まる。
             # **そのまま動かすと数分のうちにまとめて出る。**
@@ -1510,13 +1517,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_post.add_argument(
         "post_action",
         choices=["plan", "show", "run", "replan", "reschedule", "requeue",
-                 "skip", "unskip"],
+                 "skip", "unskip", "compact"],
         help=(
             "plan: 予定を作る / show: 予定を見る / run: 時間が来たものを投稿する"
             " / replan: まだ出していない予定の本文を作り直す"
             " / reschedule: 時刻を過ぎたままの予定を先送りする"
             " / requeue: IG側で消した投稿を予定に戻す（--id）"
             " / skip: 見送りにする（--id） / unskip: 見送りを戻す（--id）"
+            " / compact: 空いた枠を詰める"
         ),
     )
     p_post.add_argument(
