@@ -599,7 +599,27 @@ def test_予定の写真が並びつきで出る(config, conn, client):
     _planned_post(conn)
     page = client.get("/schedule").text
     assert "https://img.example.com/1.jpg" in page
-    assert "並び替えると自動で保存されます" in page
+    assert "その場で保存されます" in page
+
+
+def test_予定の見出しは短い物件名(config, conn, client):
+    """記事タイトルではなく display_name を出す（長い見出し対策）。"""
+    _planned_post(conn)
+    conn.execute("UPDATE properties SET title = 'A Very Long Article Headline That Goes On', "
+                 "display_name = 'A House' WHERE source_url = 'https://e.com/sched'")
+    conn.commit()
+    page = client.get("/schedule").text
+    assert "A House" in page
+    assert "A Very Long Article Headline" not in page
+
+
+def test_並び替えは裏保存だと204(config, conn, client):
+    post_id = _planned_post(conn)
+    response = client.post(f"/posts/{post_id}/order", data={"order": "2,1,3"},
+                           headers={"X-Requested-With": "fetch"})
+    assert response.status_code == 204
+    row = conn.execute("SELECT image_order FROM posts WHERE id=?", (post_id,)).fetchone()
+    assert row["image_order"] == "2,1,3"
 
 
 def test_写真の並びを差し替えられる(config, conn, client):

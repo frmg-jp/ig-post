@@ -782,7 +782,7 @@ def scheduled_posts(conn: DbConnection, until: str, states: tuple[str, ...] = ()
         params.extend(states)
     return conn.execute(
         f"""
-        SELECT p.*, pr.title, pr.location_city, pr.location_country,
+        SELECT p.*, pr.title, pr.display_name, pr.location_city, pr.location_country,
                pr.source, pr.score, pr.thumbnail_url, pr.source_url
         FROM posts p
         LEFT JOIN properties pr ON pr.id = p.property_id

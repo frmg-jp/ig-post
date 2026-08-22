@@ -497,6 +497,7 @@ def create_app(
             {
                 "days": days,
                 "days_ahead": config.instagram.plan_days,
+                "carousel_max": config.instagram.carousel_max,
                 "auto_post": config.instagram.auto_post,
                 "ready": bool(config.instagram.public_base_url),
                 "counts": counts,
@@ -598,7 +599,9 @@ def create_app(
     # どれも planned / failed のときだけ効く（repository 側で守っている）。
     # ------------------------------------------------------------------
     @app.post("/posts/{post_id}/order")
-    def order_post_route(post_id: int, order: str = Form("")):
+    def order_post_route(request: Request, post_id: int, order: str = Form("")):
+        from fastapi.responses import Response
+
         from freming.db.repository import set_image_order
         from freming.instagram.worker import _parse_image_order
 
@@ -609,6 +612,9 @@ def create_app(
             set_image_order(conn, post_id, ",".join(map(str, parsed)) or None)
         finally:
             conn.close()
+        # 画面のドラッグからは裏で保存する（fetch）。ページを動かさない。
+        if request.headers.get("x-requested-with") == "fetch":
+            return Response(status_code=204)
         return RedirectResponse("/schedule", status_code=303)
 
     @app.post("/posts/{post_id}/caption")

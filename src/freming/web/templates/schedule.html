@@ -2,237 +2,277 @@
 {% block body %}
 
 <style>
-  /* 予定表は「眺めて止める」ための画面。承認・非承認のような重い操作は
-     無いので、ボタンは塗らず罫だけにする。10件並んでも騒がしくならない。 */
-  .row { display: flex; align-items: center; gap: 14px; margin-top: 10px; }
-  .row form { margin: 0; }
-  button.plain {
-    height: var(--control-h); padding: 0 12px; border: 1px solid var(--fg);
-    border-radius: 0; background: transparent; color: var(--fg);
-    font: inherit; font-size: 12px; cursor: pointer;
+  /* 予定表は「眺めて、気になる所だけ直して、止める」場所。
+     一覧（審査）と同じ組み方にする: 囲みは持たず、下罫で行を区切る。
+     操作はどれも軽い（並び替えは裏で保存、重い編集は畳んでおく）。 */
+  h3.day {
+    margin: 30px 0 0; font-size: 12px; font-weight: 400;
+    font-family: var(--mono); letter-spacing: var(--track-label);
+    color: var(--muted);
   }
-  button.plain:hover { background: var(--fg); color: var(--on-fill); }
-  /* 実際に投稿される本文。見出しと重なる部分があるが省略しない
-     （これを見て止めるかどうかを決めるため） */
-  .cap { margin-top: 8px; font-size: 13px; white-space: pre-wrap; }
-  .cap-label {
-    display: inline-block; margin-right: 8px; font-size: 10px;
-    padding: 1px 6px; border: 1px solid var(--fg); vertical-align: 2px;
-  }
-  h3.day { margin: 28px 0 4px; font-size: 13px; font-weight: 400; }
+  .post { border-bottom: 1px solid var(--line); padding: 16px 0 20px; }
+  .post:hover { border-bottom-color: var(--fg); }
 
-  /* 写真の並び。1枚目が表紙。ドラッグでも矢印でも入れ替えられる */
-  .thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-  .thumb { position: relative; width: 92px; cursor: grab; }
+  .phead { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .ptime { font: 400 22px/1 var(--mono); font-variant-numeric: tabular-nums; }
+  .pname {
+    font-size: 17px; font-weight: 400; line-height: 1.5;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    min-width: 0; flex: 1;
+  }
+  .phead .tag { margin: 0; }
+
+  /* 写真。1枚目が表紙。掴んで動かす。 */
+  .thumbs {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px;
+    user-select: none; -webkit-user-select: none;
+  }
+  .thumb {
+    position: relative; width: 86px;
+    cursor: grab; touch-action: pan-y;   /* 縦スクロールは通し、横の指の動きだけ拾う */
+  }
   .thumb img {
-    width: 92px; height: 92px; object-fit: cover; display: block;
-    border: 1px solid var(--fg);
+    width: 86px; height: 86px; object-fit: cover; display: block;
+    background: var(--fill); pointer-events: none;
   }
-  .thumb.unused img { opacity: .35; }
   .thumb .no {
-    position: absolute; top: 2px; left: 2px; font-size: 10px;
-    background: var(--fg); color: var(--on-fill); padding: 0 4px;
+    position: absolute; top: 0; left: 0; min-width: 16px; text-align: center;
+    font: 10px/1.7 var(--mono); background: var(--bg); color: var(--fg);
+    padding: 0 3px;
   }
-  .thumb .arrows { display: flex; justify-content: space-between; }
-  .thumb .arrows button {
-    border: none; background: transparent; color: var(--fg);
-    font: inherit; font-size: 14px; cursor: pointer; padding: 2px 8px;
+  .thumb.unused img { opacity: .3; }
+  .thumb.dragging { opacity: .35; cursor: grabbing; }
+  .thumb.cover::after {
+    content: "表紙"; position: absolute; left: 0; bottom: 0;
+    font: 9px/1.7 var(--mono); background: var(--fg); color: var(--on-fill);
+    padding: 0 4px;
   }
-  .thumb.dragging { opacity: .4; }
-  .edit-note { font-size: 11px; color: var(--fg); opacity: .7; margin-top: 4px; }
-  .edit-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
-  .edit-row input[type="datetime-local"] {
-    font: inherit; font-size: 12px; padding: 4px 6px;
-    border: 1px solid var(--fg); background: transparent; color: var(--fg);
+  .hint { font: 11px/1.8 var(--mono); color: var(--muted); margin-top: 6px; }
+
+  /* 保存の合図。ページは動かさない。 */
+  #toast {
+    position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
+    font: 12px var(--mono); letter-spacing: var(--track-label);
+    background: var(--fg); color: var(--on-fill); padding: 8px 18px;
+    opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 20;
   }
+  #toast.show { opacity: 1; }
+  #toast.err { background: var(--ng); }
+
+  /* 操作列。線のボタンを並べず、静かなテキストで置く。 */
+  .ops {
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+    margin-top: 12px; font-family: var(--mono); font-size: 12px;
+  }
+  .ops form { display: flex; align-items: center; gap: 8px; margin: 0; }
+  .ops a, .ops button.linklike, .ops summary {
+    color: var(--muted); text-decoration: none; cursor: pointer;
+    border: 0; background: none; padding: 0; height: auto;
+    font: 12px var(--mono); letter-spacing: var(--track-label);
+    border-bottom: 1px solid var(--line);
+  }
+  .ops a:hover, .ops button.linklike:hover { color: var(--hi); border-bottom-color: var(--hi); }
+  .ops input[type="datetime-local"] {
+    font: 12px var(--mono); height: 26px; padding: 0 6px;
+    border: 1px solid var(--line); background: var(--surface); color: var(--fg);
+  }
+  .ops .quiet { color: var(--muted); border: 0; }
+
+  details.body-edit { margin-top: 10px; }
+  details.body-edit summary {
+    cursor: pointer; list-style: none;
+    font: 12px var(--mono); color: var(--muted); letter-spacing: var(--track-label);
+  }
+  details.body-edit summary::before { content: "＋ "; }
+  details.body-edit[open] summary::before { content: "− "; }
+  details.body-edit summary:hover { color: var(--fg); }
   textarea.cap-edit {
-    width: 100%; min-height: 220px; margin-top: 8px; font: inherit;
-    font-size: 13px; padding: 8px; border: 1px solid var(--fg);
-    background: transparent; color: var(--fg); box-sizing: border-box;
+    width: 100%; min-height: 240px; margin-top: 10px;
+    font: 13px/1.9 var(--serif); padding: 10px;
+    border: 1px solid var(--line); background: var(--surface); color: var(--fg);
   }
-  details.cap-details { margin-top: 8px; }
-  details.cap-details summary { cursor: pointer; font-size: 12px; }
+  .cap-view { margin-top: 10px; font-size: 13px; line-height: 1.9; white-space: pre-wrap; }
+  .err-line { margin-top: 8px; font: 12px var(--mono); color: var(--ng); }
+  .meta-line { margin-top: 6px; font: 11px var(--mono); color: var(--muted); }
 </style>
 
 <h2>投稿予定</h2>
 <p class="note">
-  これから {{ days_ahead }} 日ぶんの予定です。
-  <strong>承認がそのまま公開になるわけではありません。</strong>
-  出したくないものは「見送る」で外してください。外した枠は埋め直しません。
+  これから {{ days_ahead }} 日ぶんの予定です。承認がそのまま公開になるわけではありません。
+  出したくないものは「見送る」で外してください。
 </p>
 
 {% if not auto_post %}
-  <p class="note">
-    <strong>自動投稿は止まっています。</strong>
-    予定は作られますが、時間が来ても投稿されません。
-    動かすには <code>config.yaml</code> の <code>instagram.auto_post</code> を
-    true にしてください。<strong>true にするのは1箇所だけ</strong>にすること。
-  </p>
+  <p class="note"><strong>自動投稿は止まっています。</strong>
+    予定は作られますが、時間が来ても投稿されません。</p>
 {% endif %}
 {% if not ready %}
-  <p class="note">
-    <strong>instagram.public_base_url が未設定です。</strong>
-    Meta は投稿のたびにこちらのサーバーへ画像を取りに来るため、
-    設定するまで投稿は行われません。
-  </p>
+  <p class="note"><strong>instagram.public_base_url が未設定です。</strong>
+    設定するまで投稿は行われません。</p>
 {% endif %}
 
 {% if not days %}
-  <p class="empty">
-    予定はまだありません。<br>
-    <code>python -m freming.cli post plan</code> で作られます。
-  </p>
+  <p class="empty">予定はまだありません。<br>毎朝の定期実行が作ります。</p>
 {% endif %}
 
 {% for day, items in days.items() %}
   <h3 class="day">{{ day }}</h3>
   {% for item in items %}
     {% set row = item.row %}
-    <div class="card no-thumb">
-      <div>
-        <div>
-          <span class="tag on">{{ item.at }}</span>
-          <span class="tag">{{ {"feed":"通常","story":"ストーリーズ","reel":"リール"}.get(row["kind"], row["kind"]) }}</span>
-          <span class="tag">{{ {"planned":"予定","publishing":"投稿中","published":"公開済","failed":"失敗","skipped":"見送り"}.get(row["state"], row["state"]) }}</span>
-          {% if row["source"] %}<span class="tag">{{ row["source"] }}</span>{% endif %}
-          {% if row["score"] %}<span class="tag">{{ row["score"] | round | int }}</span>{% endif %}
-        </div>
-        <div class="reason">
-          {% if row["kind"] == "reel" %}
-            先週の各日でいちばんリーチした投稿を集めた縦動画。
-            中身は投稿の直前に決まります。
-          {% else %}
-            <strong>{{ row["title"] or "（無題）" }}</strong>
-            {% if row["location_city"] or row["location_country"] %}
-              — {{ [row["location_city"], row["location_country"]] | select | join(", ") }}
-            {% endif %}
-          {% endif %}
-        </div>
-        {# 投稿に使う写真。1枚目が表紙。ドラッグか矢印で入れ替えると
-           その場で保存される。薄いものは上限（carousel_max）から漏れる分。 #}
-        {% if item.images %}
-          <form method="post" action="/posts/{{ row['id'] }}/order" class="order-form"
-                data-post="{{ row['id'] }}">
-            <input type="hidden" name="order"
-                   value="{{ item.images | map(attribute='position') | join(',') }}">
-            <div class="thumbs">
-              {% for img in item.images %}
-                <div class="thumb {{ '' if img.used else 'unused' }}"
-                     draggable="true" data-position="{{ img.position }}">
-                  <img src="{{ img.url }}" loading="lazy" alt="">
-                  <span class="no">{{ loop.index }}</span>
-                  <div class="arrows">
-                    <button type="button" class="left" title="前へ">←</button>
-                    <button type="button" class="right" title="後ろへ">→</button>
-                  </div>
-                </div>
-              {% endfor %}
-            </div>
-          </form>
-          <div class="edit-note">1枚目が表紙になります。並び替えると自動で保存されます。</div>
+    <div class="post">
+      <div class="phead">
+        <span class="ptime">{{ item.at }}</span>
+        <span class="pname">
+          {% if row["kind"] == "reel" %}週次リール（先週のリーチ上位）
+          {% else %}{{ row["display_name"] or row["title"] or "（無題）" }}{% endif %}
+        </span>
+        <span class="tag {{ 'on' if row['state'] == 'published' else ('warn' if row['state'] in ('failed', 'skipped') else '') }}">
+          {{ {"planned":"予定","publishing":"投稿中","published":"公開済","failed":"失敗","skipped":"見送り"}.get(row["state"], row["state"]) }}</span>
+        {% if row["kind"] != "feed" %}
+          <span class="tag">{{ {"story":"ストーリーズ","reel":"リール"}.get(row["kind"], row["kind"]) }}</span>
         {% endif %}
-
-        {# 時刻の変更。予定のものだけ。 #}
-        {% if row["state"] in ("planned", "failed") %}
-          <form method="post" action="/posts/{{ row['id'] }}/time" class="edit-row">
-            <input type="datetime-local" name="at" value="{{ item.at_input }}">
-            <button class="plain" type="submit">時刻を保存</button>
-          </form>
-        {% endif %}
-
-        {# 実際に投稿される本文。ここで止めるかどうかの判断材料なので、
-           見出しと重なっても省略しない。予定のうちは直せる。 #}
-        {% if row["caption"] and row["state"] in ("planned", "failed") %}
-          <details class="cap-details">
-            <summary>
-              <span class="cap-label">本文</span>開いて確認・編集
-              {% if item.caption_edited %}（手で直した本文。replan は触りません）{% endif %}
-            </summary>
-            <form method="post" action="/posts/{{ row['id'] }}/caption">
-              <textarea class="cap-edit" name="caption">{{ row["caption"] }}</textarea>
-              <div class="edit-row">
-                <button class="plain" type="submit">本文を保存</button>
-              </div>
-            </form>
-          </details>
-        {% elif row["caption"] %}
-          <div class="cap"><span class="cap-label">本文</span>{{ row["caption"] }}</div>
-        {% endif %}
-        {% if row["error"] %}
-          <div class="reason err">失敗: {{ row["error"] }}（試行 {{ row["attempts"] }} 回）</div>
-        {% endif %}
-        {% if row["ig_media_id"] %}
-          <div class="reason">media_id: {{ row["ig_media_id"] }}{% if row["reach"] is not none %} / リーチ {{ row["reach"] }}{% endif %}</div>
-        {% endif %}
-
-        <div class="row">
-          {% if row["state"] in ("planned", "failed") %}
-            <form method="post" action="/posts/{{ row['id'] }}/skip">
-              <button class="plain" type="submit">見送る</button>
-            </form>
-          {% endif %}
-          {% if row["state"] in ("failed", "skipped") %}
-            <form method="post" action="/posts/{{ row['id'] }}/retry">
-              <button class="plain" type="submit">予定に戻す</button>
-            </form>
-          {% endif %}
-          {% if row["property_id"] %}<a href="/p/{{ row['property_id'] }}">物件を見る</a>{% endif %}
-          {% if row["source_url"] %}
-            <a href="{{ row['source_url'] }}" target="_blank" rel="noopener">引用元</a>
-          {% endif %}
-        </div>
+        {% if row["source"] %}<span class="tag">{{ row["source"] }}</span>{% endif %}
       </div>
+
+      {% if item.images %}
+        <div class="thumbs" data-save="/posts/{{ row['id'] }}/order" data-limit="{{ carousel_max }}">
+          {% for img in item.images %}
+            <div class="thumb {{ 'cover' if loop.first }} {{ '' if img.used else 'unused' }}"
+                 data-position="{{ img.position }}">
+              <img src="{{ img.url }}" loading="lazy" alt="">
+              <span class="no">{{ loop.index }}</span>
+            </div>
+          {% endfor %}
+        </div>
+        <div class="hint">写真を掴んで動かすと並びが変わり、その場で保存されます。</div>
+      {% endif %}
+
+      <div class="ops">
+        {% if row["state"] in ("planned", "failed") %}
+          <form method="post" action="/posts/{{ row['id'] }}/time">
+            <input type="datetime-local" name="at" value="{{ item.at_input }}">
+            <button class="linklike" type="submit">時刻を保存</button>
+          </form>
+          <form method="post" action="/posts/{{ row['id'] }}/skip">
+            <button class="linklike" type="submit">見送る</button>
+          </form>
+        {% endif %}
+        {% if row["state"] in ("failed", "skipped") %}
+          <form method="post" action="/posts/{{ row['id'] }}/retry">
+            <button class="linklike" type="submit">予定に戻す</button>
+          </form>
+        {% endif %}
+        {% if row["property_id"] %}<a href="/p/{{ row['property_id'] }}">物件</a>{% endif %}
+        {% if row["source_url"] %}
+          <a href="{{ row['source_url'] }}" target="_blank" rel="noopener">引用元</a>
+        {% endif %}
+        {% if row["reach"] is not none %}<span class="quiet">リーチ {{ row["reach"] }}</span>{% endif %}
+      </div>
+
+      {% if row["caption"] and row["state"] in ("planned", "failed") %}
+        <details class="body-edit">
+          <summary>本文を確認・編集{% if item.caption_edited %}（手で直した本文）{% endif %}</summary>
+          <form method="post" action="/posts/{{ row['id'] }}/caption">
+            <textarea class="cap-edit" name="caption">{{ row["caption"] }}</textarea>
+            <div class="ops"><button class="linklike" type="submit">本文を保存</button></div>
+          </form>
+        </details>
+      {% elif row["caption"] %}
+        <details class="body-edit">
+          <summary>本文</summary>
+          <div class="cap-view">{{ row["caption"] }}</div>
+        </details>
+      {% endif %}
+
+      {% if row["error"] %}
+        <div class="err-line">失敗: {{ row["error"] }}（試行 {{ row["attempts"] }} 回）</div>
+      {% endif %}
     </div>
   {% endfor %}
 {% endfor %}
 
-<script>
-  // 写真の並び替え。ドラッグ（PC）と矢印（スマホ）。動かしたら hidden の
-  // order を組み直してフォームを送信する＝その場で保存される。
-  document.querySelectorAll(".order-form").forEach(function (form) {
-    var strip = form.querySelector(".thumbs");
+<div id="toast"></div>
 
-    function save() {
-      var order = Array.from(strip.querySelectorAll(".thumb"))
-        .map(function (t) { return t.dataset.position; });
-      form.querySelector("input[name=order]").value = order.join(",");
-      form.submit();
+<script>
+// 写真の並び替え。ポインタで掴んで動かす（PCのマウスもスマホの指も同じ経路）。
+// 保存は裏で行い、ページは再読み込みしない。
+(function () {
+  const toast = document.getElementById("toast");
+  let toastTimer = null;
+  function say(text, bad) {
+    toast.textContent = text;
+    toast.classList.toggle("err", !!bad);
+    toast.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove("show"), 1800);
+  }
+
+  document.querySelectorAll(".thumbs[data-save]").forEach((strip) => {
+    const limit = parseInt(strip.dataset.limit || "10", 10);
+
+    function renumber() {
+      Array.from(strip.querySelectorAll(".thumb")).forEach((el, i) => {
+        el.querySelector(".no").textContent = i + 1;
+        el.classList.toggle("cover", i === 0);
+        el.classList.toggle("unused", i >= limit);
+      });
     }
 
-    strip.addEventListener("click", function (event) {
-      var button = event.target.closest("button");
-      if (!button) return;
-      var thumb = button.closest(".thumb");
-      if (button.classList.contains("left") && thumb.previousElementSibling) {
-        strip.insertBefore(thumb, thumb.previousElementSibling);
-        save();
-      } else if (button.classList.contains("right") && thumb.nextElementSibling) {
-        strip.insertBefore(thumb.nextElementSibling, thumb);
-        save();
+    function save() {
+      const order = Array.from(strip.querySelectorAll(".thumb"))
+        .map((el) => el.dataset.position).join(",");
+      fetch(strip.dataset.save, {
+        method: "POST",
+        headers: {
+          "X-Requested-With": "fetch",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({ order: order }),
+      }).then((r) => {
+        if (r.ok) say("並び順を保存しました");
+        else say("保存できませんでした。再読み込みしてください", true);
+      }).catch(() => say("保存できませんでした。再読み込みしてください", true));
+    }
+
+    let drag = null;
+    strip.addEventListener("pointerdown", (e) => {
+      const thumb = e.target.closest(".thumb");
+      if (!thumb) return;
+      drag = { el: thumb, x: e.clientX, y: e.clientY, active: false };
+      thumb.setPointerCapture(e.pointerId);
+    });
+    strip.addEventListener("pointermove", (e) => {
+      if (!drag) return;
+      if (!drag.active) {
+        // 6px 動くまでは待つ。タップやスクロールの始まりを拾わない。
+        if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 6) return;
+        drag.active = true;
+        drag.el.classList.add("dragging");
+      }
+      e.preventDefault();
+      // 指の下にある別の写真を探して、その前後に入れる。
+      drag.el.style.visibility = "hidden";
+      const under = document.elementFromPoint(e.clientX, e.clientY);
+      drag.el.style.visibility = "";
+      const over = under && under.closest && under.closest(".thumb");
+      if (over && over !== drag.el && over.parentElement === strip) {
+        const box = over.getBoundingClientRect();
+        const before = e.clientX < box.left + box.width / 2;
+        strip.insertBefore(drag.el, before ? over : over.nextElementSibling);
+        renumber();
       }
     });
-
-    var dragging = null;
-    strip.addEventListener("dragstart", function (event) {
-      dragging = event.target.closest(".thumb");
-      if (dragging) dragging.classList.add("dragging");
-    });
-    strip.addEventListener("dragover", function (event) {
-      event.preventDefault();
-      var over = event.target.closest(".thumb");
-      if (!dragging || !over || over === dragging) return;
-      var rect = over.getBoundingClientRect();
-      var before = (event.clientX - rect.left) < rect.width / 2;
-      strip.insertBefore(dragging, before ? over : over.nextElementSibling);
-    });
-    strip.addEventListener("drop", function (event) { event.preventDefault(); });
-    strip.addEventListener("dragend", function () {
-      if (!dragging) return;
-      dragging.classList.remove("dragging");
-      dragging = null;
-      save();
-    });
+    function drop() {
+      if (!drag) return;
+      const moved = drag.active;
+      drag.el.classList.remove("dragging");
+      drag = null;
+      if (moved) { renumber(); save(); }
+    }
+    strip.addEventListener("pointerup", drop);
+    strip.addEventListener("pointercancel", drop);
   });
+})();
 </script>
 
 {% endblock %}
