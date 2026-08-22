@@ -24,6 +24,7 @@ on:
           - check-ig-token     # トークンの疎通とスコープ（費用なし）
           - post-replan        # 未投稿の予定の本文を作り直す（費用なし）
           - post-reschedule    # 期限切れ・旧枠の予定を先の枠へ動かす（費用なし）
+          - post-plan          # 空いている枠を埋める（費用なし）
       apply:
         description: "本当に実行する（外すと見積もりだけ）"
         type: boolean
@@ -98,4 +99,8 @@ jobs:
             check-ig-token)   python -m freming.cli instagram check ;;
             post-replan)      python -m freming.cli post replan ;;
             post-reschedule)  python -m freming.cli post reschedule ;;
+            post-plan)
+              python -m freming.cli post plan
+              python -m freming.cli post show
+              ;;
           esac
