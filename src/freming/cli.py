@@ -1121,10 +1121,12 @@ def _cmd_post(args: argparse.Namespace) -> int:
             if not rows:
                 print("予定はありません。post plan で作ってください。")
                 return 0
+            # 先頭の番号が post_id。requeue --id で使う。
             for row in rows:
                 at = datetime.fromisoformat(row["scheduled_at"]).astimezone(zone)
                 title = row["title"] or ("週次リール" if row["kind"] == "reel" else "—")
-                print(f'  {at:%m/%d %H:%M}  {row["kind"]:<5} {row["state"]:<10} {title[:44]}')
+                print(f'  {row["id"]:>4}  {at:%m/%d %H:%M}  '
+                      f'{row["kind"]:<5} {row["state"]:<10} {title[:44]}')
             counts = count_posts_by_state(conn)
             print("  " + " / ".join(f"{k} {v}" for k, v in sorted(counts.items())))
             return 0
