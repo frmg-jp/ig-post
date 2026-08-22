@@ -790,6 +790,73 @@ def _cmd_instagram(args: argparse.Namespace) -> int:
                 )
         return 0
 
+    if args.ig_action in ("media", "fetch-media"):
+        # **自分のアカウントの投稿だけ**を読む。手で運用していた頃の投稿を
+        # 週次リールの材料にするための経路（instagram/mymedia.py）。
+        from freming.instagram.mymedia import (
+            download_image,
+            get_media,
+            recent_media,
+        )
+        from freming.instagram.publish import account_id
+
+        with session(target) as conn:
+            record = ig.load_token(conn)
+        if record is None:
+            print("トークンが未設定です。instagram set-token を先に。", file=sys.stderr)
+            return 2
+        try:
+            ig_id = account_id(record.value)
+        except ig.InstagramError as exc:
+            print(f"アカウントを読めませんでした: {exc}", file=sys.stderr)
+            return 1
+
+        if args.ig_action == "media":
+            try:
+                items = recent_media(record.value, ig_id, args.limit)
+            except ig.InstagramError as exc:
+                print(f"投稿を読めませんでした: {exc}", file=sys.stderr)
+                return 1
+            if not items:
+                print("投稿がありません。")
+                return 0
+            for item in items:
+                when = item.timestamp[:16].replace("T", " ")
+                pages = f"{item.child_count}枚" if item.child_count else item.media_type
+                print(f"  {item.id}  {when}  {pages:<9} {item.head()}")
+            print("\n画像を取るには:")
+            print("  python -m freming.cli instagram fetch-media --id <ID> --out frames/")
+            return 0
+
+        if not args.id:
+            print("--id で投稿のIDを指定してください（instagram media の先頭の値）。",
+                  file=sys.stderr)
+            return 2
+        out = Path(args.out)
+        saved = []
+        for index, media_id in enumerate(args.id, start=1):
+            try:
+                item = get_media(record.value, media_id)
+            except ig.InstagramError as exc:
+                print(f"{media_id}: 読めませんでした（{exc}）", file=sys.stderr)
+                return 1
+            if not item.image_url:
+                print(f"{media_id}: 画像が取れません（{item.media_type}）", file=sys.stderr)
+                return 1
+            # 並べる順が分かる名前にする。リールに渡すときこの順で並ぶ。
+            dest = out / f"{index:02d}-{media_id}.jpg"
+            try:
+                download_image(item.image_url, dest)
+            except Exception as exc:  # noqa: BLE001 - 原因をそのまま見せる
+                print(f"{media_id}: 保存に失敗しました（{exc}）", file=sys.stderr)
+                return 1
+            saved.append(dest)
+            print(f"  {dest}  {item.timestamp[:10]}  {item.head()}")
+        print(f"\n{len(saved)} 枚保存しました。リールに渡すには:")
+        print("  python -m freming.cli reel build " + " ".join(str(p) for p in saved)
+              + " --out reel.mp4")
+        return 0
+
     # refresh: 定期実行から毎日呼ばれる。未設定の環境では何もせず正常終了する。
     with session(target) as conn:
         try:
@@ -1256,6 +1323,70 @@ def _cmd_post(args: argparse.Namespace) -> int:
         return 0
 
 
+def _publish_prebuilt_reel(cfg, args, result, track) -> int:
+    """組み上がった動画をリールとして出す。
+
+    自動の週次リールは「直近8日の日ごとの1位」を自分で選ぶ。こちらは
+    **人が画像を選んだとき**の経路で、仕組みが始まる前の投稿を材料に
+    混ぜられる。予定の行（post show の reel）に紐づけて、出したことを
+    記録する。紐づけないと、同じ週にもう1本出てしまう。
+    """
+    from freming.db.connection import session
+    from freming.db.repository import finish_post
+    from freming.instagram import tokens as ig
+    from freming.instagram.caption import build_reel_caption
+    from freming.instagram.publish import account_id, publish_reel
+
+    caption = build_reel_caption(result.image_count, cfg.caption, track.caption_line())
+    if args.dry_run:
+        print("\n--- 出しません（dry-run）。本文 ---")
+        print(caption)
+        print(f"\n動画: {result.path}")
+        print("出すときは --dry-run を外してください。")
+        return 0
+
+    with session(cfg.app.target()) as conn:
+        record = ig.load_token(conn)
+        if record is None:
+            print("トークンが未設定です。", file=sys.stderr)
+            return 2
+        post = None
+        if args.post_id:
+            post = conn.execute(
+                "SELECT id, kind, state FROM posts WHERE id = ?", (args.post_id,)
+            ).fetchone()
+            if post is None:
+                print(f"post {args.post_id} が見つかりません。", file=sys.stderr)
+                return 2
+            if post["kind"] != "reel":
+                print(f"post {args.post_id} はリールではありません（{post['kind']}）。",
+                      file=sys.stderr)
+                return 2
+            if post["state"] == "published":
+                print(f"post {args.post_id} は既に公開済みです。", file=sys.stderr)
+                return 2
+
+        try:
+            ig_id = account_id(record.value)
+            published = publish_reel(record.value, ig_id, Path(args.out), caption)
+        except ig.InstagramError as exc:
+            print(f"投稿に失敗しました: {exc}", file=sys.stderr)
+            return 1
+
+        if post is not None:
+            conn.execute(
+                "UPDATE posts SET caption = ?, credit = ? WHERE id = ?",
+                (caption, track.caption_line() or None, post["id"]),
+            )
+            finish_post(conn, post["id"], published.media_id, published.container_id)
+            print(f"post {post['id']} を公開済みにしました。")
+        else:
+            print("**予定の行に紐づけていません。**「--post-id」を付けると、"
+                  "同じ週に自動のリールが二重に出るのを防げます。")
+    print(f"投稿しました: media_id={published.media_id}")
+    return 0
+
+
 def _cmd_reel(args: argparse.Namespace) -> int:
     """[9] 正方形の画像を並べて縦動画を1本作る。
 
@@ -1293,6 +1424,9 @@ def _cmd_reel(args: argparse.Namespace) -> int:
     except ReelError as exc:
         print(str(exc), file=sys.stderr)
         return 1
+
+    if args.reel_action == "publish":
+        return _publish_prebuilt_reel(cfg, args, result, track)
 
     print(f"作りました: {result.path}")
     print(f"  {result.image_count}枚 / {result.seconds:.1f}秒"
@@ -1516,12 +1650,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_ig = sub.add_parser("instagram", help="Instagram のトークン管理（[8] 自動投稿の土台）")
     p_ig.add_argument(
         "ig_action",
-        choices=["auth-url", "exchange-code", "set-token", "check", "refresh"],
+        choices=["auth-url", "exchange-code", "set-token", "check", "refresh",
+                 "media", "fetch-media"],
         help=(
             "auth-url: 管理者に送る認可URLを出す / exchange-code: 受け取った code を"
             "トークンに換える / set-token: ダッシュボードで生成したトークンを直接貼る"
+            " / media: **自分の**過去投稿を並べる / fetch-media: その画像を保存する"
         ),
     )
+    p_ig.add_argument("--limit", type=int, default=25, help="media で並べる件数")
+    p_ig.add_argument(
+        "--id", action="append", default=[],
+        help="fetch-media で取る投稿のID。**渡した順に 01- から番号が付く**",
+    )
+    p_ig.add_argument("--out", default="frames", help="fetch-media の保存先")
     p_ig.add_argument(
         "--redirect-uri",
         default="https://freming-curated-review.onrender.com/ig/callback",
@@ -1538,14 +1680,24 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_reel = sub.add_parser("reel", help="正方形の画像から週次リールを作る（[9]）")
     p_reel.add_argument(
-        "reel_action", choices=["build", "tracks"],
-        help="build: 動画を作る / tracks: 週ごとの音源の並びを表示",
+        "reel_action", choices=["build", "publish", "tracks"],
+        help=("build: 動画を作る / publish: 作って**そのまま出す** / "
+              "tracks: 週ごとの音源の並びを表示"),
     )
     p_reel.add_argument("images", nargs="*", help="正方形画像のパス（投稿順）")
     p_reel.add_argument("--out", default="reel.mp4", help="書き出し先")
     p_reel.add_argument(
         "--week", type=int, default=0,
         help="週番号。音源はこの剰余で選ぶので、同じ週なら何度作っても同じ曲になる",
+    )
+    p_reel.add_argument(
+        "--post-id", type=int,
+        help="publish で紐づける予定の行（post show の reel の番号）。"
+             "付けないと自動のリールが同じ週にもう1本出る",
+    )
+    p_reel.add_argument(
+        "--dry-run", action="store_true",
+        help="publish で、動画と本文だけ作って投稿しない",
     )
     p_reel.set_defaults(func=_cmd_reel)
 
