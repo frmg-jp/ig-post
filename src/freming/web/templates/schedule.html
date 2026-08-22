@@ -26,25 +26,27 @@
     display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px;
     user-select: none; -webkit-user-select: none;
   }
+  /* 一辺は 172px（86px の倍）。中身を見て並べ替えるので、小さいと
+     どの部屋の写真か分からない。狭い画面では画面幅に合わせて縮める。 */
   .thumb {
-    position: relative; width: 86px;
+    position: relative; width: 172px; max-width: calc(50% - 3px);
     cursor: grab; touch-action: pan-y;   /* 縦スクロールは通し、横の指の動きだけ拾う */
   }
   .thumb img {
-    width: 86px; height: 86px; object-fit: cover; display: block;
+    width: 100%; aspect-ratio: 1; object-fit: cover; display: block;
     background: var(--fill); pointer-events: none;
   }
   .thumb .no {
-    position: absolute; top: 0; left: 0; min-width: 16px; text-align: center;
-    font: 10px/1.7 var(--mono); background: var(--bg); color: var(--fg);
-    padding: 0 3px;
+    position: absolute; top: 0; left: 0; min-width: 20px; text-align: center;
+    font: 11px/1.8 var(--mono); background: var(--bg); color: var(--fg);
+    padding: 0 5px;
   }
   .thumb.unused img { opacity: .3; }
   .thumb.dragging { opacity: .35; cursor: grabbing; }
   .thumb.cover::after {
     content: "表紙"; position: absolute; left: 0; bottom: 0;
-    font: 9px/1.7 var(--mono); background: var(--fg); color: var(--on-fill);
-    padding: 0 4px;
+    font: 10px/1.8 var(--mono); background: var(--fg); color: var(--on-fill);
+    padding: 0 6px;
   }
   .hint { font: 11px/1.8 var(--mono); color: var(--muted); margin-top: 6px; }
 
