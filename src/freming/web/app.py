@@ -458,7 +458,7 @@ def create_app(
         def _images_for(row) -> list[dict]:
             if row["kind"] != "feed" or not row["property_id"]:
                 return []
-            if row["state"] not in ("planned", "failed"):
+            if row["state"] not in ("planned", "failed", "skipped"):
                 return []
             conn2 = _conn()
             try:

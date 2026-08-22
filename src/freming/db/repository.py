@@ -741,18 +741,21 @@ def set_caption(
 ) -> bool:
     """まだ出していない予定の本文を差し替える。投稿済みには効かない。
 
+    見送り中も直せる（戻す前に整えておけるように）。
+
     edited=True は**人が直した**とき。印が付き、以後の replan が触らない。
     replan 自身は edited=False で呼ぶ（印を上書きしない）。
     """
     if edited:
         cursor = conn.execute(
             "UPDATE posts SET caption = ?, caption_edited_at = ? "
-            "WHERE id = ? AND state IN ('planned', 'failed')",
+            "WHERE id = ? AND state IN ('planned', 'failed', 'skipped')",
             (caption, _now(), post_id),
         )
     else:
         cursor = conn.execute(
-            "UPDATE posts SET caption = ? WHERE id = ? AND state IN ('planned', 'failed')",
+            "UPDATE posts SET caption = ? "
+            "WHERE id = ? AND state IN ('planned', 'failed', 'skipped')",
             (caption, post_id),
         )
     conn.commit()
@@ -765,7 +768,8 @@ def set_image_order(conn: DbConnection, post_id: int, order: str | None) -> bool
     images 側の position は動かさない（納品済みの 01.jpg〜 と対応しているため）。
     """
     cursor = conn.execute(
-        "UPDATE posts SET image_order = ? WHERE id = ? AND state IN ('planned', 'failed')",
+        "UPDATE posts SET image_order = ? "
+        "WHERE id = ? AND state IN ('planned', 'failed', 'skipped')",
         (order, post_id),
     )
     conn.commit()
@@ -810,9 +814,15 @@ def stale_planned_posts(conn: DbConnection, now: str) -> list[Row]:
 
 
 def set_scheduled_at(conn: DbConnection, post_id: int, when: str) -> bool:
-    """まだ出していない予定の時刻を動かす。投稿済みには効かない。"""
+    """まだ出していない予定の時刻を動かす。投稿済みには効かない。
+
+    見送り中・失敗も動かせる。**先に時刻を未来へ置いてから「予定に戻す」**
+    という順番を可能にするため（自動投稿が動いている間、戻した瞬間に
+    期限切れだと1分以内に拾われてしまう）。
+    """
     cursor = conn.execute(
-        "UPDATE posts SET scheduled_at = ? WHERE id = ? AND state = 'planned'",
+        "UPDATE posts SET scheduled_at = ? "
+        "WHERE id = ? AND state IN ('planned', 'failed', 'skipped')",
         (when, post_id),
     )
     conn.commit()

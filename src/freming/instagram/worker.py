@@ -99,11 +99,16 @@ def _publish_feed(config: Config, conn: DbConnection, post: Row, token: str, ig_
     # 予定は作られたが材料が無い、という行が残っていることがある
     # （postable_properties の絞り込みより前に作られた予定）。
     # そのまま出すと見出しが住所・本文が審査用の文章になるので、出さない。
-    if row is None or not (row["display_name"] and row["caption_body"]):
+    #
+    # **人が本文を書いた場合（caption_edited_at 付き）は例外。** 公開文を
+    # 人が用意したなら、抽出できなかったことは問題にならない。
+    if row is None:
+        raise PostingError("物件が見つかりません。")
+    edited = bool(post["caption_edited_at"]) if "caption_edited_at" in post.keys() else False
+    if not edited and not (row["display_name"] and row["caption_body"]):
         raise PostingError(
             "投稿の材料（物件名・説明文）が揃っていません。"
-            "backfill-captions で埋まらなかった物件は記事が薄すぎます。"
-            "審査UIの投稿予定から見送ってください。"
+            "審査UIで本文を手で書けば出せます。出さないなら見送ってください。"
         )
     alt = build_alt_text(row)
 

@@ -154,3 +154,44 @@ def test_見送りはIDが無ければ何もしない(monkeypatch, tmp_path, cap
     config = _config(tmp_path, ["20:00"])
     _db(tmp_path).close()
     assert main(["--config", config, "post", "skip"]) == 2
+
+
+def test_出し直しは次の空き枠に置かれる(monkeypatch, tmp_path, capsys) -> None:
+    """auto_post が動いている間に「今」へ戻すと、時刻を直す暇なく出てしまう。"""
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    config = _config(tmp_path, ["09:00"])
+    conn = _db(tmp_path)
+    post_id = _post(conn, _at(-1, "09:00"), "Republish")
+    from freming.db.repository import claim_due_post
+
+    claim_due_post(conn, datetime.now(UTC).isoformat(), 3)
+    finish_post(conn, post_id, "media-1", "c1")
+    conn.close()
+
+    assert main(["--config", config, "post", "requeue", "--id", str(post_id)]) == 0
+
+    conn = connect(tmp_path / "test.db")
+    row = conn.execute("SELECT state, scheduled_at FROM posts WHERE id=?",
+                       (post_id,)).fetchone()
+    assert row["state"] == "planned"
+    assert row["scheduled_at"] > datetime.now(UTC).isoformat()
+    local = datetime.fromisoformat(row["scheduled_at"]).astimezone(JST)
+    assert local.strftime("%H:%M") == "09:00"
+
+
+def test_出し直しはnowで今すぐに戻せる(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    config = _config(tmp_path, ["09:00"])
+    conn = _db(tmp_path)
+    post_id = _post(conn, _at(-1, "09:00"), "RepublishNow")
+    from freming.db.repository import claim_due_post
+
+    claim_due_post(conn, datetime.now(UTC).isoformat(), 3)
+    finish_post(conn, post_id, "media-1", "c1")
+    conn.close()
+
+    assert main(["--config", config, "post", "requeue", "--id", str(post_id),
+                 "--now"]) == 0
+    conn = connect(tmp_path / "test.db")
+    row = conn.execute("SELECT scheduled_at FROM posts WHERE id=?", (post_id,)).fetchone()
+    assert row["scheduled_at"] <= datetime.now(UTC).isoformat()

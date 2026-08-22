@@ -148,7 +148,7 @@
       {% endif %}
 
       <div class="ops">
-        {% if row["state"] in ("planned", "failed") %}
+        {% if row["state"] in ("planned", "failed", "skipped") %}
           <form method="post" action="/posts/{{ row['id'] }}/time">
             <input type="datetime-local" name="at" value="{{ item.at_input }}">
             <button class="linklike" type="submit">時刻を保存</button>
@@ -169,7 +169,7 @@
         {% if row["reach"] is not none %}<span class="quiet">リーチ {{ row["reach"] }}</span>{% endif %}
       </div>
 
-      {% if row["caption"] and row["state"] in ("planned", "failed") %}
+      {% if row["caption"] and row["state"] in ("planned", "failed", "skipped") %}
         <details class="body-edit">
           <summary>本文を確認・編集{% if item.caption_edited %}（手で直した本文）{% endif %}</summary>
           <form method="post" action="/posts/{{ row['id'] }}/caption">

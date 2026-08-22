@@ -1124,6 +1124,40 @@ def _cmd_post(args: argparse.Namespace) -> int:
                     file=sys.stderr,
                 )
                 return 2
+            zone = ZoneInfo(cfg.instagram.timezone)
+            if args.now:
+                # すぐ出したいとき。auto_post が動いていれば1分以内に出る。
+                target = datetime.now(UTC)
+            else:
+                # 既定は**次の空き枠**。「今」に戻すと、自動投稿が動いている間は
+                # 1分以内にワーカーが拾ってしまい、時刻を直す暇がない。
+                from freming.instagram.plan import _parse_hhmm
+
+                local_now = datetime.now(UTC).astimezone(zone)
+                horizon = (datetime.now(UTC) + timedelta(days=31)).isoformat()
+                taken = {
+                    r["scheduled_at"] for r in scheduled_posts(conn, horizon)
+                    if r["kind"] == "feed" and r["id"] != args.id
+                    and r["state"] in ("planned", "publishing")
+                }
+                target = None
+                for offset in range(31):
+                    day = (local_now + timedelta(days=offset)).date()
+                    for text in cfg.instagram.post_times:
+                        moment = datetime.combine(day, _parse_hhmm(text), tzinfo=zone)
+                        if moment <= local_now:
+                            continue
+                        as_utc = moment.astimezone(UTC)
+                        if as_utc.isoformat() in taken:
+                            continue
+                        target = as_utc
+                        break
+                    if target is not None:
+                        break
+                if target is None:
+                    print("31日先まで空き枠がありません。", file=sys.stderr)
+                    return 1
+
             conn.execute(
                 """
                 UPDATE posts SET state = 'planned', scheduled_at = ?,
@@ -1131,11 +1165,13 @@ def _cmd_post(args: argparse.Namespace) -> int:
                     attempts = 0, error = NULL, published_at = NULL
                 WHERE id = ?
                 """,
-                (datetime.now(UTC).isoformat(), args.id),
+                (target.isoformat(), args.id),
             )
             conn.commit()
-            print(f"post {args.id} を予定に戻しました（時刻は今）。")
-            print("本文を作り直すなら post replan、出すなら post run --limit 1。")
+            local = target.astimezone(zone)
+            when = "今すぐ" if args.now else f"{local:%m/%d %H:%M}"
+            print(f"post {args.id} を予定に戻しました（{when}）。")
+            print("本文を作り直すなら post replan。時刻は審査UIでも直せます。")
             print("**Instagram 側の元の投稿を消していなければ、先に消してください。**")
             return 0
 
@@ -1485,7 +1521,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_post.add_argument(
         "--id", type=int,
-        help="requeue で戻す投稿のID（post show に出る post_id）",
+        help="requeue / skip / unskip で使う投稿のID（post show の先頭の番号）",
+    )
+    p_post.add_argument(
+        "--now", action="store_true",
+        help="requeue で「次の空き枠」ではなく今すぐ出す列に戻す",
     )
     p_post.add_argument(
         "--limit", type=int,
