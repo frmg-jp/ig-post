@@ -721,22 +721,52 @@ def planned_posts_with_property(conn: DbConnection) -> list[Row]:
 
     本文は**予定を作った時点**で組んで持っている。あとから項目を足しても、
     既にある予定には反映されない。出す前に作り直せるようにしておく。
+
+    **人が直した本文（caption_edited_at 付き）は対象にしない。**
+    replan で機械が上書きしたら、直した意味がなくなる。
     """
     return conn.execute(
         """
         SELECT p.id AS post_id, pr.*
         FROM posts p JOIN properties pr ON pr.id = p.property_id
         WHERE p.kind = 'feed' AND p.state IN ('planned', 'failed')
+          AND p.caption_edited_at IS NULL
         ORDER BY p.scheduled_at
         """
     ).fetchall()
 
 
-def set_caption(conn: DbConnection, post_id: int, caption: str) -> bool:
-    """まだ出していない予定の本文を差し替える。投稿済みには効かない。"""
+def set_caption(
+    conn: DbConnection, post_id: int, caption: str, *, edited: bool = False
+) -> bool:
+    """まだ出していない予定の本文を差し替える。投稿済みには効かない。
+
+    edited=True は**人が直した**とき。印が付き、以後の replan が触らない。
+    replan 自身は edited=False で呼ぶ（印を上書きしない）。
+    """
+    if edited:
+        cursor = conn.execute(
+            "UPDATE posts SET caption = ?, caption_edited_at = ? "
+            "WHERE id = ? AND state IN ('planned', 'failed')",
+            (caption, _now(), post_id),
+        )
+    else:
+        cursor = conn.execute(
+            "UPDATE posts SET caption = ? WHERE id = ? AND state IN ('planned', 'failed')",
+            (caption, post_id),
+        )
+    conn.commit()
+    return bool(cursor.rowcount)
+
+
+def set_image_order(conn: DbConnection, post_id: int, order: str | None) -> bool:
+    """この投稿の写真の並びを差し替える。「3,1,2」の形。None で既定に戻す。
+
+    images 側の position は動かさない（納品済みの 01.jpg〜 と対応しているため）。
+    """
     cursor = conn.execute(
-        "UPDATE posts SET caption = ? WHERE id = ? AND state IN ('planned', 'failed')",
-        (caption, post_id),
+        "UPDATE posts SET image_order = ? WHERE id = ? AND state IN ('planned', 'failed')",
+        (order, post_id),
     )
     conn.commit()
     return bool(cursor.rowcount)
@@ -753,7 +783,7 @@ def scheduled_posts(conn: DbConnection, until: str, states: tuple[str, ...] = ()
     return conn.execute(
         f"""
         SELECT p.*, pr.title, pr.location_city, pr.location_country,
-               pr.source, pr.score, pr.thumbnail_url
+               pr.source, pr.score, pr.thumbnail_url, pr.source_url
         FROM posts p
         LEFT JOIN properties pr ON pr.id = p.property_id
         WHERE {" AND ".join(where)}
@@ -914,7 +944,8 @@ def posts_awaiting_story(conn: DbConnection, since: str, until: str) -> list[Row
     """
     return conn.execute(
         """
-        SELECT p.*, pr.title, pr.location_city, pr.location_country, pr.thumbnail_url
+        SELECT p.*, pr.title, pr.location_city, pr.location_country,
+               pr.thumbnail_url, pr.source_url
         FROM posts p
         LEFT JOIN properties pr ON pr.id = p.property_id
         WHERE p.kind = 'feed' AND p.state = 'published'

@@ -69,7 +69,13 @@
         {% if row["permalink"] %}
           <a class="open" href="{{ row['permalink'] }}" target="_blank" rel="noopener">投稿を開く</a>
           <button class="plain js-copy" type="button" data-url="{{ row['permalink'] }}">URLをコピー</button>
-        {% else %}
+        {% endif %}
+        {% if row["source_url"] %}
+          {# 引用元の記事。ストーリーズにリンクスタンプで貼る用 #}
+          <a class="open" href="{{ row['source_url'] }}" target="_blank" rel="noopener">引用元を開く</a>
+          <button class="plain js-copy" type="button" data-url="{{ row['source_url'] }}">引用元をコピー</button>
+        {% endif %}
+        {% if not row["permalink"] %}
           {# permalink は投稿の直後に取りに行く。取れなかった場合はここに出る。 #}
           <span class="no-link">URLを取得できていません（media_id: {{ row["ig_media_id"] }}）</span>
         {% endif %}

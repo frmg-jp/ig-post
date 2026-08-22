@@ -569,3 +569,92 @@ def test_price_sort_says_it_compares_in_yen(client, conn) -> None:
 def test_other_sorts_do_not_mention_the_conversion(client, conn) -> None:
     _add(conn)
     assert "円換算で比較" not in client.get("/?sort=score").text
+
+
+# --- 投稿予定の編集（写真の並び・時刻・本文 / 2026-08-22） ------------
+def _planned_post(conn, *, with_images=True) -> int:
+    from freming.db.repository import create_post
+
+    cursor = conn.execute(
+        "INSERT INTO properties (source, source_url, title, summary, score, status, "
+        "collected_at, display_name, caption_body) "
+        "VALUES ('dezeen', 'https://e.com/sched', 'A House', 's', 80, 'delivered', "
+        "'2026-08-01T00:00:00+00:00', 'A House', '本文です。') RETURNING id"
+    )
+    property_id = cursor.fetchone()["id"]
+    if with_images:
+        for position in (1, 2, 3):
+            conn.execute(
+                "INSERT INTO images (property_id, source_url, position) VALUES (?, ?, ?)",
+                (property_id, f"https://img.example.com/{position}.jpg", position),
+            )
+    conn.commit()
+    from datetime import UTC, datetime, timedelta
+
+    soon = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    return create_post(conn, "feed", soon, property_id=property_id, caption="元の本文")
+
+
+def test_予定の写真が並びつきで出る(config, conn, client):
+    _planned_post(conn)
+    page = client.get("/schedule").text
+    assert "https://img.example.com/1.jpg" in page
+    assert "並び替えると自動で保存されます" in page
+
+
+def test_写真の並びを差し替えられる(config, conn, client):
+    post_id = _planned_post(conn)
+    response = client.post(f"/posts/{post_id}/order", data={"order": "3,1,2"},
+                           follow_redirects=False)
+    assert response.status_code == 303
+    row = conn.execute("SELECT image_order FROM posts WHERE id=?", (post_id,)).fetchone()
+    assert row["image_order"] == "3,1,2"
+
+
+def test_壊れた並びは既定に戻る(config, conn, client):
+    post_id = _planned_post(conn)
+    client.post(f"/posts/{post_id}/order", data={"order": "3,evil,2"},
+                follow_redirects=False)
+    row = conn.execute("SELECT image_order FROM posts WHERE id=?", (post_id,)).fetchone()
+    assert row["image_order"] is None
+
+
+def test_本文を直すと印が付きreplanが触らない(config, conn, client):
+    from freming.db.repository import planned_posts_with_property
+
+    post_id = _planned_post(conn)
+    client.post(f"/posts/{post_id}/caption", data={"caption": "直した本文"},
+                follow_redirects=False)
+    row = conn.execute("SELECT caption, caption_edited_at FROM posts WHERE id=?",
+                       (post_id,)).fetchone()
+    assert row["caption"] == "直した本文"
+    assert row["caption_edited_at"] is not None
+    # replan の対象一覧に出ない＝機械が上書きしない
+    assert [r["post_id"] for r in planned_posts_with_property(conn)] == []
+
+
+def test_時刻をJSTで直せる(config, conn, client):
+    post_id = _planned_post(conn)
+    client.post(f"/posts/{post_id}/time", data={"at": "2099-02-01T09:00"},
+                follow_redirects=False)
+    row = conn.execute("SELECT scheduled_at FROM posts WHERE id=?", (post_id,)).fetchone()
+    # JST 09:00 = UTC 00:00
+    assert row["scheduled_at"].startswith("2099-02-01T00:00")
+
+
+def test_予定と手動ストーリーズに引用元が出る(config, conn, client):
+    from datetime import UTC, datetime
+
+    from freming.db.repository import finish_post
+
+    post_id = _planned_post(conn)
+    page = client.get("/schedule").text
+    assert "https://e.com/sched" in page
+
+    finish_post(conn, post_id, "media-1", "c1")
+    conn.execute("UPDATE posts SET published_at = ? WHERE id = ?",
+                 (datetime.now(UTC).isoformat(), post_id))
+    conn.commit()
+    page = client.get("/stories").text
+    assert "引用元をコピー" in page
+    assert "https://e.com/sched" in page

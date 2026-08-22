@@ -20,6 +20,38 @@
     padding: 1px 6px; border: 1px solid var(--fg); vertical-align: 2px;
   }
   h3.day { margin: 28px 0 4px; font-size: 13px; font-weight: 400; }
+
+  /* 写真の並び。1枚目が表紙。ドラッグでも矢印でも入れ替えられる */
+  .thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .thumb { position: relative; width: 92px; cursor: grab; }
+  .thumb img {
+    width: 92px; height: 92px; object-fit: cover; display: block;
+    border: 1px solid var(--fg);
+  }
+  .thumb.unused img { opacity: .35; }
+  .thumb .no {
+    position: absolute; top: 2px; left: 2px; font-size: 10px;
+    background: var(--fg); color: var(--on-fill); padding: 0 4px;
+  }
+  .thumb .arrows { display: flex; justify-content: space-between; }
+  .thumb .arrows button {
+    border: none; background: transparent; color: var(--fg);
+    font: inherit; font-size: 14px; cursor: pointer; padding: 2px 8px;
+  }
+  .thumb.dragging { opacity: .4; }
+  .edit-note { font-size: 11px; color: var(--fg); opacity: .7; margin-top: 4px; }
+  .edit-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .edit-row input[type="datetime-local"] {
+    font: inherit; font-size: 12px; padding: 4px 6px;
+    border: 1px solid var(--fg); background: transparent; color: var(--fg);
+  }
+  textarea.cap-edit {
+    width: 100%; min-height: 220px; margin-top: 8px; font: inherit;
+    font-size: 13px; padding: 8px; border: 1px solid var(--fg);
+    background: transparent; color: var(--fg); box-sizing: border-box;
+  }
+  details.cap-details { margin-top: 8px; }
+  details.cap-details summary { cursor: pointer; font-size: 12px; }
 </style>
 
 <h2>投稿予定</h2>
@@ -76,9 +108,54 @@
             {% endif %}
           {% endif %}
         </div>
+        {# 投稿に使う写真。1枚目が表紙。ドラッグか矢印で入れ替えると
+           その場で保存される。薄いものは上限（carousel_max）から漏れる分。 #}
+        {% if item.images %}
+          <form method="post" action="/posts/{{ row['id'] }}/order" class="order-form"
+                data-post="{{ row['id'] }}">
+            <input type="hidden" name="order"
+                   value="{{ item.images | map(attribute='position') | join(',') }}">
+            <div class="thumbs">
+              {% for img in item.images %}
+                <div class="thumb {{ '' if img.used else 'unused' }}"
+                     draggable="true" data-position="{{ img.position }}">
+                  <img src="{{ img.url }}" loading="lazy" alt="">
+                  <span class="no">{{ loop.index }}</span>
+                  <div class="arrows">
+                    <button type="button" class="left" title="前へ">←</button>
+                    <button type="button" class="right" title="後ろへ">→</button>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          </form>
+          <div class="edit-note">1枚目が表紙になります。並び替えると自動で保存されます。</div>
+        {% endif %}
+
+        {# 時刻の変更。予定のものだけ。 #}
+        {% if row["state"] in ("planned", "failed") %}
+          <form method="post" action="/posts/{{ row['id'] }}/time" class="edit-row">
+            <input type="datetime-local" name="at" value="{{ item.at_input }}">
+            <button class="plain" type="submit">時刻を保存</button>
+          </form>
+        {% endif %}
+
         {# 実際に投稿される本文。ここで止めるかどうかの判断材料なので、
-           見出しと重なっても省略しない。 #}
-        {% if row["caption"] %}
+           見出しと重なっても省略しない。予定のうちは直せる。 #}
+        {% if row["caption"] and row["state"] in ("planned", "failed") %}
+          <details class="cap-details">
+            <summary>
+              <span class="cap-label">本文</span>開いて確認・編集
+              {% if row["caption_edited_at"] %}（手で直した本文。replan は触りません）{% endif %}
+            </summary>
+            <form method="post" action="/posts/{{ row['id'] }}/caption">
+              <textarea class="cap-edit" name="caption">{{ row["caption"] }}</textarea>
+              <div class="edit-row">
+                <button class="plain" type="submit">本文を保存</button>
+              </div>
+            </form>
+          </details>
+        {% elif row["caption"] %}
           <div class="cap"><span class="cap-label">本文</span>{{ row["caption"] }}</div>
         {% endif %}
         {% if row["error"] %}
@@ -100,10 +177,62 @@
             </form>
           {% endif %}
           {% if row["property_id"] %}<a href="/p/{{ row['property_id'] }}">物件を見る</a>{% endif %}
+          {% if row["source_url"] %}
+            <a href="{{ row['source_url'] }}" target="_blank" rel="noopener">引用元</a>
+          {% endif %}
         </div>
       </div>
     </div>
   {% endfor %}
 {% endfor %}
+
+<script>
+  // 写真の並び替え。ドラッグ（PC）と矢印（スマホ）。動かしたら hidden の
+  // order を組み直してフォームを送信する＝その場で保存される。
+  document.querySelectorAll(".order-form").forEach(function (form) {
+    var strip = form.querySelector(".thumbs");
+
+    function save() {
+      var order = Array.from(strip.querySelectorAll(".thumb"))
+        .map(function (t) { return t.dataset.position; });
+      form.querySelector("input[name=order]").value = order.join(",");
+      form.submit();
+    }
+
+    strip.addEventListener("click", function (event) {
+      var button = event.target.closest("button");
+      if (!button) return;
+      var thumb = button.closest(".thumb");
+      if (button.classList.contains("left") && thumb.previousElementSibling) {
+        strip.insertBefore(thumb, thumb.previousElementSibling);
+        save();
+      } else if (button.classList.contains("right") && thumb.nextElementSibling) {
+        strip.insertBefore(thumb.nextElementSibling, thumb);
+        save();
+      }
+    });
+
+    var dragging = null;
+    strip.addEventListener("dragstart", function (event) {
+      dragging = event.target.closest(".thumb");
+      if (dragging) dragging.classList.add("dragging");
+    });
+    strip.addEventListener("dragover", function (event) {
+      event.preventDefault();
+      var over = event.target.closest(".thumb");
+      if (!dragging || !over || over === dragging) return;
+      var rect = over.getBoundingClientRect();
+      var before = (event.clientX - rect.left) < rect.width / 2;
+      strip.insertBefore(dragging, before ? over : over.nextElementSibling);
+    });
+    strip.addEventListener("drop", function (event) { event.preventDefault(); });
+    strip.addEventListener("dragend", function () {
+      if (!dragging) return;
+      dragging.classList.remove("dragging");
+      dragging = null;
+      save();
+    });
+  });
+</script>
 
 {% endblock %}

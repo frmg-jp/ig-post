@@ -69,6 +69,21 @@ def describe_error(exc: BaseException) -> str:
 # ----------------------------------------------------------------------
 # 1件を投稿する
 # ----------------------------------------------------------------------
+def _parse_image_order(text: str | None) -> list[int]:
+    """「3,1,2」を [3, 1, 2] に。壊れた値は無視して既定の並びに落とす。"""
+    if not text:
+        return []
+    out: list[int] = []
+    for piece in str(text).split(","):
+        piece = piece.strip()
+        if not piece.isdigit():
+            return []
+        value = int(piece)
+        if value not in out:
+            out.append(value)
+    return out
+
+
 def _publish_feed(config: Config, conn: DbConnection, post: Row, token: str, ig_id: str):
     """通常投稿。**納品と同じ並びの複数枚をカルーセルで出す。**
 
@@ -93,6 +108,13 @@ def _publish_feed(config: Config, conn: DbConnection, post: Row, token: str, ig_
     alt = build_alt_text(row)
 
     positions = media.available_positions(conn, property_id)
+    # 審査UIで並びを直してあれば、その順で出す。並びに無い番号は無視し、
+    # 並びから漏れた番号は後ろに足す（写真を黙って落とさない）。
+    custom = _parse_image_order(post["image_order"] if "image_order" in post.keys() else None)
+    if custom:
+        ordered = [p for p in custom if p in positions]
+        ordered += [p for p in positions if p not in ordered]
+        positions = ordered
     positions = positions[: config.instagram.carousel_max]
 
     urls: list[str] = []

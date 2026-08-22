@@ -443,11 +443,44 @@ def create_app(
         finally:
             conn.close()
 
+        # 投稿に使う写真の一覧。並び替えのUIに出す。image_order があれば
+        # その順（投稿ワーカーと同じ解釈）。サムネイルは取得元のURLを
+        # そのまま使う（審査画面の thumbnail_url と同じ扱い）。
+        from freming.instagram.worker import _parse_image_order
+
+        def _images_for(row) -> list[dict]:
+            if row["kind"] != "feed" or not row["property_id"]:
+                return []
+            if row["state"] not in ("planned", "failed"):
+                return []
+            conn2 = _conn()
+            try:
+                found = conn2.execute(
+                    "SELECT position, source_url FROM images "
+                    "WHERE property_id = ? AND position IS NOT NULL ORDER BY position",
+                    (row["property_id"],),
+                ).fetchall()
+            finally:
+                conn2.close()
+            by_position = {int(r["position"]): r["source_url"] for r in found}
+            order = [p for p in _parse_image_order(row["image_order"]) if p in by_position]
+            order += [p for p in sorted(by_position) if p not in order]
+            limit = config.instagram.carousel_max
+            return [
+                {"position": p, "url": by_position[p], "used": index < limit}
+                for index, p in enumerate(order)
+            ]
+
         days: dict[str, list] = {}
         for row in rows:
             moment = datetime.fromisoformat(row["scheduled_at"]).astimezone(zone)
             days.setdefault(moment.strftime("%m/%d (%a)"), []).append(
-                {"row": row, "at": moment.strftime("%H:%M")}
+                {
+                    "row": row,
+                    "at": moment.strftime("%H:%M"),
+                    "at_input": moment.strftime("%Y-%m-%dT%H:%M"),
+                    "images": _images_for(row),
+                }
             )
         return templates.TemplateResponse(
             request,
@@ -547,6 +580,61 @@ def create_app(
         conn = _conn()
         try:
             retry_post(conn, post_id)
+        finally:
+            conn.close()
+        return RedirectResponse("/schedule", status_code=303)
+
+    # ------------------------------------------------------------------
+    # 投稿予定の編集（写真の並び・時刻・本文）。出す前に人が直す場所。
+    # どれも planned / failed のときだけ効く（repository 側で守っている）。
+    # ------------------------------------------------------------------
+    @app.post("/posts/{post_id}/order")
+    def order_post_route(post_id: int, order: str = Form("")):
+        from freming.db.repository import set_image_order
+        from freming.instagram.worker import _parse_image_order
+
+        # 受け取った並びを一度解釈し直す。壊れた値は既定の並びに戻す。
+        parsed = _parse_image_order(order)
+        conn = _conn()
+        try:
+            set_image_order(conn, post_id, ",".join(map(str, parsed)) or None)
+        finally:
+            conn.close()
+        return RedirectResponse("/schedule", status_code=303)
+
+    @app.post("/posts/{post_id}/caption")
+    def caption_post_route(post_id: int, caption: str = Form("")):
+        from freming.db.repository import set_caption
+
+        text = caption.replace("\r\n", "\n").strip()
+        if text:
+            conn = _conn()
+            try:
+                # 人が直した印が付き、以後の replan は上書きしない。
+                set_caption(conn, post_id, text, edited=True)
+            finally:
+                conn.close()
+        return RedirectResponse("/schedule", status_code=303)
+
+    @app.post("/posts/{post_id}/time")
+    def time_post_route(post_id: int, at: str = Form("")):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from freming.db.repository import set_scheduled_at
+
+        try:
+            local = datetime.fromisoformat(at)
+        except ValueError:
+            return RedirectResponse("/schedule", status_code=303)
+        if local.tzinfo is None:
+            # datetime-local の値は無タイムゾーン。審査UIの時刻＝JSTで解釈する。
+            local = local.replace(tzinfo=ZoneInfo(config.instagram.timezone))
+        from datetime import UTC
+
+        conn = _conn()
+        try:
+            set_scheduled_at(conn, post_id, local.astimezone(UTC).isoformat())
         finally:
             conn.close()
         return RedirectResponse("/schedule", status_code=303)
