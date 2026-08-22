@@ -219,8 +219,8 @@ def test_見送りで空いた枠に後ろが詰まる(monkeypatch, tmp_path) ->
     # 2番目が1日目の枠へ、3番目が2日目の枠へ繰り上がる
     assert rows[second] == today + timedelta(days=1)
     assert rows[third] == today + timedelta(days=2)
-    # 見送ったものは動かさない（出さないと決めたものを前に持ってこない）
-    assert rows[first] == today + timedelta(days=1)
+    # 見送ったものは枠を空ける（**同じ日に2本並ばせない**）
+    assert rows[first] > rows[third]
 
 
 def test_公開済みは詰めても動かない(monkeypatch, tmp_path) -> None:
@@ -239,3 +239,28 @@ def test_公開済みは詰めても動かない(monkeypatch, tmp_path) -> None:
     after = conn.execute("SELECT scheduled_at FROM posts WHERE id=?",
                          (done,)).fetchone()["scheduled_at"]
     assert after == before
+
+
+def test_同じ日に2本並ばない(monkeypatch, tmp_path) -> None:
+    """見送りが枠を塞いだまま詰めると、その日に2本出る（2026-08-22 の不具合）。"""
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    config = _config(tmp_path, ["09:00"])
+    conn = _db(tmp_path)
+    for day, title in ((1, "A"), (2, "B"), (3, "C"), (4, "D")):
+        _post(conn, _at(day, "09:00"), title)
+    ids = [r["id"] for r in conn.execute("SELECT id FROM posts ORDER BY id").fetchall()]
+    conn.close()
+
+    # 1日目と3日目を見送る
+    for post_id in (ids[0], ids[2]):
+        assert main(["--config", config, "post", "skip", "--id", str(post_id)]) == 0
+    assert main(["--config", config, "post", "compact"]) == 0
+
+    conn = connect(tmp_path / "test.db")
+    days = [
+        datetime.fromisoformat(r["scheduled_at"]).astimezone(JST).date()
+        for r in conn.execute(
+            "SELECT scheduled_at FROM posts WHERE state = 'planned'"
+        ).fetchall()
+    ]
+    assert len(days) == len(set(days)), f"同じ日に複数の予定がある: {days}"

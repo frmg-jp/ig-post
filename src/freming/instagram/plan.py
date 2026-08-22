@@ -161,9 +161,9 @@ def compact(config: Config, conn: DbConnection, now: datetime | None = None) -> 
     **順番は変えない。** これから出る通常投稿を時系列のまま、先頭の
     空き枠から順に詰め直すだけ。動いた件数を返す。
 
-    触るのは planned の通常投稿だけ:
-      - 公開済み・投稿中は動かさない（出たものの時刻を変える意味がない）
-      - 見送りは詰めない（**出さないと決めたものを前に持ってこない**）
+      - 公開済み・投稿中は動かさず、その枠も使わない（**同じ日に2本
+        並ぶのを防ぐ**）
+      - 見送りは枠を持たない。予定を詰めたあとの後ろへ寄せる
       - リールは曜日が決まっているので対象外
     """
     from freming.db.repository import set_scheduled_at
@@ -174,24 +174,45 @@ def compact(config: Config, conn: DbConnection, now: datetime | None = None) -> 
         return 0
 
     until = slots[-1] + timedelta(minutes=1)
-    rows = [
+    upcoming = [
         row for row in scheduled_posts(conn, until.isoformat())
-        if row["kind"] == KIND_FEED
-        and row["state"] == "planned"
-        and row["scheduled_at"] > now.isoformat()
+        if row["kind"] == KIND_FEED and row["scheduled_at"] > now.isoformat()
     ]
-    if not rows:
-        return 0
-    rows.sort(key=lambda r: (r["scheduled_at"], r["id"]))
+
+    # **既に出たもの・出している最中のものが居る枠は使わない。**
+    # ここを見落とすと、その日に2本並ぶ。
+    taken = {
+        row["scheduled_at"] for row in upcoming
+        if row["state"] in ("published", "publishing")
+    }
+    free = [s for s in slots if s.isoformat() not in taken]
+
+    rows = sorted(
+        (row for row in upcoming if row["state"] == "planned"),
+        key=lambda r: (r["scheduled_at"], r["id"]),
+    )
+    # 見送りは枠を持たない。**出さないと決めたものが枠を塞ぐと、
+    # その日に2本並ぶ（2026-08-22 に実際に起きた）。** 予定を詰めた
+    # あとの、いちばん後ろの枠へ寄せる。
+    parked = [row for row in upcoming if row["state"] == "skipped"]
 
     moved = 0
-    for row, moment in zip(rows, slots, strict=False):
+    for row, moment in zip(rows, free, strict=False):
         if row["scheduled_at"] == moment.isoformat():
             continue
         if set_scheduled_at(conn, row["id"], moment.isoformat()):
             moved += 1
+
+    tail = free[len(rows):] or [slots[-1]]
+    for index, row in enumerate(parked):
+        moment = tail[min(index, len(tail) - 1)]
+        if row["scheduled_at"] == moment.isoformat():
+            continue
+        if set_scheduled_at(conn, row["id"], moment.isoformat()):
+            moved += 1
+
     if moved:
-        log.info("%d 件を前に詰めました", moved)
+        log.info("%d 件を詰めました", moved)
     return moved
 
 
