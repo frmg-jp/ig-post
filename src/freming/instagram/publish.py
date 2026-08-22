@@ -90,9 +90,12 @@ def account_id(token: str) -> str:
 # ----------------------------------------------------------------------
 def create_image_container(
     token: str, ig_id: str, image_url: str, caption: str | None = None,
-    *, story: bool = False, alt_text: str | None = None,
+    *, story: bool = False, alt_text: str | None = None, carousel_item: bool = False,
 ) -> str:
     """画像のコンテナを作る。story=True でストーリーズ。
+
+    carousel_item=True はカルーセルの1枚。キャプションは親のカルーセル
+    コンテナに付けるので、ここでは送らない。
 
     ストーリーズはキャプションも alt_text も受け付けないので送らない
     （送っても無視される）。
@@ -100,6 +103,10 @@ def create_image_container(
     params: dict[str, str] = {"image_url": image_url}
     if story:
         params["media_type"] = "STORIES"
+    elif carousel_item:
+        params["is_carousel_item"] = "true"
+        if alt_text:
+            params["alt_text"] = alt_text
     else:
         if caption:
             params["caption"] = caption
@@ -111,6 +118,27 @@ def create_image_container(
     container = body.get("id")
     if not container:
         raise InstagramError(f"コンテナIDが返りませんでした: {body}")
+    return str(container)
+
+
+def create_carousel_container(
+    token: str, ig_id: str, children: list[str], caption: str | None = None
+) -> str:
+    """カルーセル（複数枚投稿）の親コンテナを作る。
+
+    children は先に作った各枚のコンテナID。並びがそのまま表示順になる。
+    キャプションは親にだけ付ける。
+    """
+    params: dict[str, str] = {
+        "media_type": "CAROUSEL",
+        "children": ",".join(children),
+    }
+    if caption:
+        params["caption"] = caption
+    body = _request("POST", f"{GRAPH}/{API_VERSION}/{ig_id}/media", token, params=params)
+    container = body.get("id")
+    if not container:
+        raise InstagramError(f"カルーセルのコンテナIDが返りませんでした: {body}")
     return str(container)
 
 
@@ -235,6 +263,31 @@ def publish_image(
     return PublishResult(media_id=media_id, container_id=container)
 
 
+def publish_carousel(
+    token: str, ig_id: str, image_urls: list[str], caption: str | None = None,
+    *, alt_text: str | None = None, sleep=time.sleep,
+) -> PublishResult:
+    """複数枚を1つの投稿として出す。
+
+    各枚のコンテナを作って仕上がりを待ち、親のカルーセルにまとめて公開する。
+    1枚しか無いときは呼ばない（publish_image を使う）。
+    """
+    if len(image_urls) < 2:
+        raise InstagramError("カルーセルには2枚以上要ります。1枚なら publish_image を使ってください。")
+    children = []
+    for url in image_urls:
+        child = create_image_container(
+            token, ig_id, url, carousel_item=True, alt_text=alt_text
+        )
+        wait_until_ready(token, child, sleep=sleep)
+        children.append(child)
+    container = create_carousel_container(token, ig_id, children, caption)
+    wait_until_ready(token, container, sleep=sleep)
+    media_id = publish_container(token, ig_id, container)
+    log.info("投稿しました（カルーセル %d枚）: media_id=%s", len(children), media_id)
+    return PublishResult(media_id=media_id, container_id=container)
+
+
 def publish_reel(
     token: str, ig_id: str, video: Path, caption: str | None = None, *, sleep=time.sleep
 ) -> PublishResult:
@@ -253,10 +306,12 @@ __all__ = [
     "PublishResult",
     "account_id",
     "container_status",
+    "create_carousel_container",
     "create_image_container",
     "create_reel_container",
     "media_permalink",
     "publish_container",
+    "publish_carousel",
     "publish_image",
     "publish_reel",
     "publishing_limit",

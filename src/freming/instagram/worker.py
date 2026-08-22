@@ -47,6 +47,7 @@ from freming.instagram.publish import (
     KIND_STORY,
     account_id,
     media_permalink,
+    publish_carousel,
     publish_image,
     publish_reel,
 )
@@ -69,14 +70,39 @@ def describe_error(exc: BaseException) -> str:
 # 1件を投稿する
 # ----------------------------------------------------------------------
 def _publish_feed(config: Config, conn: DbConnection, post: Row, token: str, ig_id: str):
-    square = media.square_bytes(config, conn, post["property_id"], position=1)
-    media_token = media.store_media(conn, post["id"], square)
-    url = config.instagram.public_media_url(media_token)
+    """通常投稿。**納品と同じ並びの複数枚をカルーセルで出す。**
+
+    1枚目は必須（用意できなければ投稿ごと失敗させる）。2枚目以降は
+    取得元から消えていることがあるので、欠けた分は飛ばして詰める。
+    結果的に1枚しか無ければ、1枚の通常投稿として出す。
+    """
+    property_id = post["property_id"]
     row = conn.execute(
-        "SELECT * FROM properties WHERE id = ?", (post["property_id"],)
+        "SELECT * FROM properties WHERE id = ?", (property_id,)
     ).fetchone()
     alt = build_alt_text(row) if row is not None else None
-    return publish_image(token, ig_id, url, post["caption"], alt_text=alt)
+
+    positions = media.available_positions(conn, property_id)
+    positions = positions[: config.instagram.carousel_max]
+
+    urls: list[str] = []
+    for index, position in enumerate(positions, start=1):
+        try:
+            square = media.square_bytes(config, conn, property_id, position=position)
+        except media.MediaError:
+            if position == positions[0]:
+                raise  # 1枚目が無いなら出せない。理由ごと上へ
+            log.warning(
+                "%d 枚目を用意できなかったので飛ばします（property_id=%s）",
+                position, property_id,
+            )
+            continue
+        media_token = media.store_media(conn, post["id"], square, position=index)
+        urls.append(config.instagram.public_media_url(media_token))
+
+    if len(urls) == 1:
+        return publish_image(token, ig_id, urls[0], post["caption"], alt_text=alt)
+    return publish_carousel(token, ig_id, urls, post["caption"], alt_text=alt)
 
 
 def _publish_story(config: Config, conn: DbConnection, post: Row, token: str, ig_id: str):
@@ -208,6 +234,11 @@ def preview(config: Config, conn: DbConnection, post: Row) -> str:
         size = media.probe_size(square)
         lines.append(f"画像: {size[0]}x{size[1]}  {len(square) // 1024}KB" if size
                      else "画像: 形式を判定できません")
+        if post["kind"] == KIND_FEED:
+            count = len(media.available_positions(conn, post["property_id"]))
+            count = min(count, config.instagram.carousel_max)
+            how = f"カルーセル {count}枚" if count > 1 else "1枚"
+            lines.append(f"枚数: {how}（納品と同じ並び）")
     if post["caption"]:
         lines.append("--- 本文 ---")
         lines.append(post["caption"])

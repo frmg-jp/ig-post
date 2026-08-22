@@ -417,6 +417,10 @@ class CaptionConfig(BaseModel):
     変わり、成約後も直せない）。
     """
 
+    # 1行目に単独で置く文字。Instagram はキャプションの1行目が
+    # ユーザー名の右に食い込んで表示されるため、ここに「・」を置いて
+    # リード文を2行目以降に落とす（実運用の投稿の見え方に合わせる）。
+    opener: str = ""
     lead: list[str] = Field(default_factory=list)
     # 出力する順とラベル。key は properties の列名（location だけ特別扱い）。
     spec: list[tuple[str, str]] = Field(default_factory=list)
@@ -533,6 +537,9 @@ class InstagramConfig(BaseModel):
     timezone: str = "Asia/Tokyo"
     # 予定を何日先まで作るか。審査UIの予定表もこの日数を出す。
     plan_days: int = 3
+    # 通常投稿に載せる最大枚数。納品と同じ並びの先頭から使う。
+    # Instagram のカルーセル上限が10。1 にすると常に1枚で出す。
+    carousel_max: int = 10
     # 投稿のあと何分でストーリーズを出すか。0 で同時。
     story_delay_min: int = 5
     post_story: bool = True

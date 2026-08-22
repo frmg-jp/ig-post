@@ -769,3 +769,84 @@ def test_先送りしても物件は候補から外れたまま(db):
                           property_id=property_id)
     assert set_scheduled_at(db, post_id, (NOW + timedelta(hours=5)).isoformat()) is True
     assert [row["id"] for row in postable_properties(db, 10)] == []
+
+
+# --- 2026-08-19 の変更: 1行目の「・」・Location の州・㎡併記・カルーセル ---
+def test_一行目は中黒でリードは3行目から(db):
+    caption = build_caption(_rich(db), CONFIG.caption, "Dezeen")
+    head = caption.split("\n")
+    assert head[0] == "・"
+    assert head[1] == ""
+    assert head[2].startswith("世界で今、")
+
+
+def test_Locationに州が入りUSAに縮める(db):
+    row = _rich(db, location_region="California")
+    db.execute("UPDATE properties SET location_city='Pasadena', "
+               "location_country='United States' WHERE id=?", (row["id"],))
+    db.commit()
+    row = db.execute("SELECT * FROM properties WHERE id=?", (row["id"],)).fetchone()
+    caption = build_caption(row, CONFIG.caption, "Dezeen")
+    assert "Location: Pasadena, California, USA" in caption
+
+
+def test_面積に平米の併記が付く(db):
+    row = _rich(db, building_area="1,962 sq ft", site_area="2 Acres")
+    caption = build_caption(row, CONFIG.caption, "Dezeen")
+    assert "Building Area: 1,962 sq ft (Approx. 182㎡)" in caption
+    assert "Site Area: 2 Acres (Approx. 8,094㎡)" in caption
+
+
+def test_既に平米がある面積は触らない(db):
+    row = _rich(db, building_area="713 sq ft (Approx. 66㎡)")
+    caption = build_caption(row, CONFIG.caption, "Dezeen")
+    assert caption.count("66㎡") == 1
+    assert "66㎡ (Approx." not in caption
+
+
+def test_カルーセルの子コンテナはキャプションを持たない(monkeypatch):
+    from freming.instagram import publish
+
+    calls = []
+
+    def fake_request(method, url, token, **kwargs):
+        calls.append(kwargs.get("params", {}))
+        return {"id": f"c{len(calls)}"}
+
+    monkeypatch.setattr(publish, "_request", fake_request)
+    monkeypatch.setattr(publish, "wait_until_ready", lambda *a, **k: None)
+    result = publish.publish_carousel(
+        "t", "ig1", ["https://e/1", "https://e/2"], "本文", alt_text="alt"
+    )
+    assert result.media_id == "c4"  # 子2 + 親1 + publish1
+    child1, child2, parent, published = calls
+    assert child1["is_carousel_item"] == "true" and "caption" not in child1
+    assert child1["alt_text"] == "alt"
+    assert parent["media_type"] == "CAROUSEL"
+    assert parent["children"] == "c1,c2"
+    assert parent["caption"] == "本文"
+    assert published["creation_id"] == "c3"
+
+
+def test_カルーセルは1枚では作らない():
+    from freming.instagram import publish
+
+    with pytest.raises(InstagramError):
+        publish.publish_carousel("t", "ig1", ["https://e/1"], "本文")
+
+
+def test_公開済みの投稿を予定に戻せる(db, monkeypatch, tmp_path):
+    """IG側で消した投稿の出し直し。物件は候補に出ないままがよい
+    （postsの行は残るので postable からは外れ続ける）。"""
+    property_id = _property(db)
+    post_id = create_post(db, "feed", NOW.isoformat(), property_id=property_id)
+    claim_due_post(db, NOW.isoformat(), 3)
+    finish_post(db, post_id, "media-1", "c1")
+
+    db.execute(
+        "UPDATE posts SET state='planned', ig_media_id=NULL, attempts=0, "
+        "published_at=NULL WHERE id=?", (post_id,))
+    db.commit()
+    row = db.execute("SELECT state FROM posts WHERE id=?", (post_id,)).fetchone()
+    assert row["state"] == "planned"
+    assert [r["id"] for r in postable_properties(db, 10)] == []

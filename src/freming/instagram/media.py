@@ -102,6 +102,22 @@ def square_bytes(
     return data
 
 
+def available_positions(conn: DbConnection, property_id: int) -> list[int]:
+    """この物件で使える画像の並び（1始まりの position）。
+
+    納品と同じ images の行から引く。**行が無い＝1枚目しか期待できない**
+    ので [1] を返す（古いデータへの逃げ道。square_bytes が取れなければ
+    そこで分かる）。
+    """
+    rows = conn.execute(
+        "SELECT position FROM images WHERE property_id = ? AND position IS NOT NULL "
+        "ORDER BY position",
+        (property_id,),
+    ).fetchall()
+    positions = [int(row["position"]) for row in rows]
+    return positions or [1]
+
+
 def to_vertical(square: bytes, config: Config) -> bytes:
     """正方形をストーリーズ用の 1080×1920 にする。
 

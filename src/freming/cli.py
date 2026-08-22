@@ -1078,6 +1078,42 @@ def _cmd_post(args: argparse.Namespace) -> int:
                 )
             return 0
 
+        if args.post_action == "requeue":
+            # 出し直し。Instagram 側で消した投稿を、もう一度予定に戻す。
+            # **先にアプリ側で削除してから使うこと。** 消さずに戻すと
+            # 同じ物件が2回並ぶ。APIから削除はしない（消す判断は人がする）。
+            if not args.id:
+                print("--id で投稿のIDを指定してください（post show の post_id）。",
+                      file=sys.stderr)
+                return 2
+            row = conn.execute(
+                "SELECT * FROM posts WHERE id = ?", (args.id,)
+            ).fetchone()
+            if row is None:
+                print(f"post {args.id} が見つかりません。", file=sys.stderr)
+                return 2
+            if row["kind"] != "feed" or row["state"] != "published":
+                print(
+                    f"post {args.id} は {row['kind']}/{row['state']} です。"
+                    "出し直せるのは公開済みの通常投稿だけです。",
+                    file=sys.stderr,
+                )
+                return 2
+            conn.execute(
+                """
+                UPDATE posts SET state = 'planned', scheduled_at = ?,
+                    ig_media_id = NULL, ig_container_id = NULL, permalink = NULL,
+                    attempts = 0, error = NULL, published_at = NULL
+                WHERE id = ?
+                """,
+                (datetime.now(UTC).isoformat(), args.id),
+            )
+            conn.commit()
+            print(f"post {args.id} を予定に戻しました（時刻は今）。")
+            print("本文を作り直すなら post replan、出すなら post run --limit 1。")
+            print("**Instagram 側の元の投稿を消していなければ、先に消してください。**")
+            return 0
+
         if args.post_action == "show":
             zone = ZoneInfo(cfg.instagram.timezone)
             until = datetime.now(UTC) + timedelta(days=cfg.instagram.plan_days)
@@ -1409,12 +1445,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_post = sub.add_parser("post", help="Instagram への投稿（[9]）")
     p_post.add_argument(
-        "post_action", choices=["plan", "show", "run", "replan", "reschedule"],
+        "post_action",
+        choices=["plan", "show", "run", "replan", "reschedule", "requeue"],
         help=(
             "plan: 予定を作る / show: 予定を見る / run: 時間が来たものを投稿する"
             " / replan: まだ出していない予定の本文を作り直す"
             " / reschedule: 時刻を過ぎたままの予定を先送りする"
+            " / requeue: IG側で消した投稿を予定に戻す（--id）"
         ),
+    )
+    p_post.add_argument(
+        "--id", type=int,
+        help="requeue で戻す投稿のID（post show に出る post_id）",
     )
     p_post.add_argument(
         "--limit", type=int,

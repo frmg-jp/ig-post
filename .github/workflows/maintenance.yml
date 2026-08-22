@@ -22,6 +22,7 @@ on:
           - post-show          # 投稿予定の一覧（費用なし）
           - exchange-ig-code   # 受け取った code をトークンに換える（費用なし）
           - check-ig-token     # トークンの疎通とスコープ（費用なし）
+          - post-replan        # 未投稿の予定の本文を作り直す（費用なし）
       apply:
         description: "本当に実行する（外すと見積もりだけ）"
         type: boolean
@@ -94,4 +95,5 @@ jobs:
               python -m freming.cli instagram check
               ;;
             check-ig-token)   python -m freming.cli instagram check ;;
+            post-replan)      python -m freming.cli post replan ;;
           esac

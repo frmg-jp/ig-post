@@ -49,12 +49,53 @@ def _get(row: Row, key: str) -> str:
     return str(value).strip() if value else ""
 
 
+# 国名の表示。実運用の投稿は "USA" / "UK" の短い形で書いている。
+_COUNTRY_DISPLAY = {
+    "united states": "USA", "united states of america": "USA",
+    "united kingdom": "UK",
+}
+
+
 def _place(row: Row) -> str:
+    """Location の値。実運用の「Pasadena, California, USA」の形に合わせて
+    州・地域（location_region）が取れていれば間に挟む。"""
     city = _get(row, "location_city")
+    region = _get(row, "location_region")
     country = _get(row, "location_country")
-    if city and country:
-        return f"{city}, {country}"
-    return city or country
+    country = _COUNTRY_DISPLAY.get(country.lower(), country)
+    parts = [p for p in (city, region, country) if p]
+    # 都市と地域が同じ文字列のときは1つにする（"London, London" を防ぐ）
+    deduped: list[str] = []
+    for part in parts:
+        if not deduped or deduped[-1].lower() != part.lower():
+            deduped.append(part)
+    return ", ".join(deduped)
+
+
+# ㎡への換算。実運用の投稿は「713 sq ft (Approx. 66㎡)」の形で併記する。
+_SQFT_TO_SQM = 0.09290304
+_ACRE_TO_SQM = 4046.8564224
+
+
+def _area_with_metric(text: str) -> str:
+    """面積に㎡の併記を足す。換算できない形・既に㎡があるものはそのまま。
+
+    抽出は原文の単位のまま（推測しない）で、換算は機械計算なのでここで行う。
+    """
+    lowered = text.lower()
+    if "㎡" in text or "m²" in lowered or "sq m" in lowered or "sqm" in lowered:
+        return text
+    found = re.search(r"([\d,]+(?:\.\d+)?)", text)
+    if not found:
+        return text
+    number = float(found.group(1).replace(",", ""))
+    if "acre" in lowered:
+        sqm = number * _ACRE_TO_SQM
+    elif "sq" in lowered and "ft" in lowered:
+        sqm = number * _SQFT_TO_SQM
+    else:
+        return text
+    return f"{text} (Approx. {sqm:,.0f}㎡)"
 
 
 def _spec_lines(row: Row, config: CaptionConfig) -> list[str]:
@@ -62,6 +103,8 @@ def _spec_lines(row: Row, config: CaptionConfig) -> list[str]:
     lines = []
     for key, label in config.spec:
         value = _place(row) if key == "location" else _get(row, key)
+        if value and key in ("building_area", "site_area"):
+            value = _area_with_metric(value)
         if value:
             lines.append(f"{label}: {value}")
     return lines
@@ -186,6 +229,11 @@ def build_caption(
 ) -> str:
     """物件1件ぶんの本文。source_name は写真のクレジットの代替に使う。"""
     blocks: list[str] = []
+
+    # 1行目。Instagram はキャプションの1行目がユーザー名の右に食い込むので、
+    # 「・」だけを置いてリード文を下に落とす（config.opener）。
+    if config.opener:
+        blocks.append(config.opener)
 
     if config.lead:
         blocks.append("\n".join(config.lead))
