@@ -422,9 +422,14 @@ def create_app(
         return Response(content, media_type=mime, headers={"Cache-Control": "public, max-age=600"})
 
     @app.get("/schedule", response_class=HTMLResponse)
-    def schedule(request: Request):
-        """投稿予定。承認がそのまま公開にならないよう、人が見て止める場所。"""
+    def schedule(request: Request, view: str = "todo"):
+        """投稿予定。承認がそのまま公開にならないよう、人が見て止める場所。
+
+        view=todo は予定（これから出るもの・見送り・失敗）、
+        view=done は投稿済み。出たものが予定の列に混ざると読みにくい。
+        """
         from datetime import UTC, datetime, timedelta
+        from urllib.parse import quote
         from zoneinfo import ZoneInfo
 
         from freming.db.repository import scheduled_posts
@@ -479,6 +484,18 @@ def create_app(
                 for index, p in enumerate(order)
             ]
 
+        def _zillow_search(row) -> str:
+            """Zillow の検索URL。**開くのは人のブラウザ**（自動では叩かない）。
+
+            リスティングはタイトルが住所そのものなので、検索でほぼ直接
+            物件ページに着く。編集メディア由来は住所を持たないので、
+            名前と街で近づけるところまで。
+            """
+            title = (_col(row, "display_name") or row["title"] or "").split(" - MLS")[0]
+            city = row["location_city"] or ""
+            query = title if ("," in title and any(c.isdigit() for c in title))                 else f"{title} {city}".strip()
+            return f"https://www.zillow.com/homes/{quote(query)}_rb/" if query else ""
+
         def _display_title(row) -> str:
             """一覧の見出し。短い物件名が無い行は記事タイトルを整形する。
 
@@ -495,6 +512,15 @@ def create_app(
                     break
             return title
 
+        view = "done" if view == "done" else "todo"
+        rows = [r for r in rows if r["state"] != "deleted"]
+        done_count = sum(1 for r in rows if r["state"] == "published")
+        todo_count = len(rows) - done_count
+        rows = [r for r in rows if (r["state"] == "published") == (view == "done")]
+        if view == "done":
+            # 投稿済みは新しい順。予定は時系列のまま。
+            rows = sorted(rows, key=lambda r: r["scheduled_at"], reverse=True)
+
         days: dict[str, list] = {}
         for row in rows:
             moment = datetime.fromisoformat(row["scheduled_at"]).astimezone(zone)
@@ -502,10 +528,13 @@ def create_app(
                 {
                     "row": row,
                     "at": moment.strftime("%H:%M"),
+                    "day": moment.strftime("%m/%d (%a)"),
                     "at_input": moment.strftime("%Y-%m-%dT%H:%M"),
                     "images": _images_for(row),
                     "caption_edited": bool(_col(row, "caption_edited_at")),
                     "name": _display_title(row),
+                    "listing_url": _col(row, "listing_url") or "",
+                    "zillow_search": _zillow_search(row) if row["property_id"] else "",
                 }
             )
         return templates.TemplateResponse(
@@ -515,6 +544,9 @@ def create_app(
                 "days": days,
                 "days_ahead": config.instagram.plan_days,
                 "carousel_max": config.instagram.carousel_max,
+                "view": view,
+                "todo_count": todo_count,
+                "done_count": done_count,
                 "auto_post": config.instagram.auto_post,
                 "ready": bool(config.instagram.public_base_url),
                 "counts": counts,
@@ -557,11 +589,18 @@ def create_app(
         finally:
             conn.close()
 
+        def _maybe(row, key):
+            try:
+                return row[key]
+            except (KeyError, IndexError):
+                return None
+
         items = [
             {
                 "row": row,
                 "at": datetime.fromisoformat(row["published_at"]).astimezone(zone).strftime("%H:%M"),
                 "done": bool(row["story_shared_at"]),
+                "listing_url": _maybe(row, "listing_url") or "",
             }
             for row in rows
         ]
@@ -615,6 +654,62 @@ def create_app(
     # 投稿予定の編集（写真の並び・時刻・本文）。出す前に人が直す場所。
     # どれも planned / failed のときだけ効く（repository 側で守っている）。
     # ------------------------------------------------------------------
+    @app.post("/posts/{post_id}/delete")
+    def delete_post_route(post_id: int):
+        """予定から消す。**候補には戻さない**（行は deleted として残し、
+        この物件が再び予定に載るのを防ぐ）。重複や誤登録を外すためのもの。
+        投稿中の行だけは触らない。"""
+        conn = _conn()
+        try:
+            conn.execute(
+                "UPDATE posts SET state = 'deleted' "
+                "WHERE id = ? AND state != 'publishing'",
+                (post_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return RedirectResponse("/schedule", status_code=303)
+
+    @app.post("/p/{property_id}/display-name")
+    def display_name_route(property_id: int, name: str = Form("")):
+        """表示名（投稿の見出し）を人が付ける。
+
+        記事が薄くて抽出できなかった物件（住所タイトルのリスティング）用。
+        空で保存すると消え、記事タイトルの整形表示に戻る。
+        """
+        text = name.strip()
+        conn = _conn()
+        try:
+            conn.execute(
+                "UPDATE properties SET display_name = ? WHERE id = ?",
+                (text or None, property_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return RedirectResponse("/schedule", status_code=303)
+
+    @app.post("/p/{property_id}/listing-url")
+    def listing_url_route(property_id: int, url: str = Form("")):
+        """販売ページのURLを物件に持たせる。人が探して貼る（自動では探さない）。
+
+        空で保存すると消える。http(s) 以外は受け付けない。
+        """
+        text = url.strip()
+        if text and not text.startswith(("http://", "https://")):
+            return RedirectResponse("/schedule", status_code=303)
+        conn = _conn()
+        try:
+            conn.execute(
+                "UPDATE properties SET listing_url = ? WHERE id = ?",
+                (text or None, property_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return RedirectResponse("/schedule", status_code=303)
+
     @app.post("/posts/{post_id}/order")
     def order_post_route(request: Request, post_id: int, order: str = Form("")):
         from fastapi.responses import Response

@@ -787,7 +787,7 @@ def scheduled_posts(conn: DbConnection, until: str, states: tuple[str, ...] = ()
     return conn.execute(
         f"""
         SELECT p.*, pr.title, pr.display_name, pr.location_city, pr.location_country,
-               pr.source, pr.score, pr.thumbnail_url, pr.source_url
+               pr.source, pr.score, pr.thumbnail_url, pr.source_url, pr.listing_url
         FROM posts p
         LEFT JOIN properties pr ON pr.id = p.property_id
         WHERE {" AND ".join(where)}
@@ -955,7 +955,7 @@ def posts_awaiting_story(conn: DbConnection, since: str, until: str) -> list[Row
     return conn.execute(
         """
         SELECT p.*, pr.title, pr.location_city, pr.location_country,
-               pr.thumbnail_url, pr.source_url
+               pr.thumbnail_url, pr.source_url, pr.listing_url
         FROM posts p
         LEFT JOIN properties pr ON pr.id = p.property_id
         WHERE p.kind = 'feed' AND p.state = 'published'

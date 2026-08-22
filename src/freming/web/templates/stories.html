@@ -70,8 +70,12 @@
           <a class="open" href="{{ row['permalink'] }}" target="_blank" rel="noopener">投稿を開く</a>
           <button class="plain js-copy" type="button" data-url="{{ row['permalink'] }}">URLをコピー</button>
         {% endif %}
-        {% if row["source_url"] %}
-          {# 引用元の記事。ストーリーズにリンクスタンプで貼る用 #}
+        {% if item.listing_url %}
+          {# 実際に買えるページ。リンクスタンプにはこちらを優先して貼る #}
+          <a class="open" href="{{ item.listing_url }}" target="_blank" rel="noopener">販売ページを開く</a>
+          <button class="plain js-copy" type="button" data-url="{{ item.listing_url }}">販売ページをコピー</button>
+        {% elif row["source_url"] %}
+          {# 引用元の記事。販売ページが未設定のときの代わり #}
           <a class="open" href="{{ row['source_url'] }}" target="_blank" rel="noopener">引用元を開く</a>
           <button class="plain js-copy" type="button" data-url="{{ row['source_url'] }}">引用元をコピー</button>
         {% endif %}

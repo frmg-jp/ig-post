@@ -698,3 +698,104 @@ def test_予定表に引用元コピーのボタンが出る(config, conn, clien
     page = client.get("/schedule").text
     assert "引用元をコピー" in page
     assert 'data-url="https://e.com/sched"' in page
+
+
+def test_販売ページを保存するとコピーはそちらを優先(config, conn, client):
+    from datetime import UTC, datetime
+
+    from freming.db.repository import finish_post
+
+    post_id = _planned_post(conn)
+    prop = conn.execute("SELECT property_id FROM posts WHERE id=?",
+                        (post_id,)).fetchone()["property_id"]
+    zillow = "https://www.zillow.com/homedetails/521-NE-6th-St/42735118_zpid/"
+    response = client.post(f"/p/{prop}/listing-url", data={"url": zillow},
+                           follow_redirects=False)
+    assert response.status_code == 303
+    page = client.get("/schedule").text
+    assert "販売ページをコピー" in page
+    assert zillow in page
+
+    finish_post(conn, post_id, "media-1", "c1")
+    conn.execute("UPDATE posts SET published_at = ? WHERE id = ?",
+                 (datetime.now(UTC).isoformat(), post_id))
+    conn.commit()
+    stories = client.get("/stories").text
+    assert "販売ページをコピー" in stories
+    assert "引用元をコピー" not in stories
+
+
+def test_販売ページはhttp以外を受け付けない(config, conn, client):
+    post_id = _planned_post(conn)
+    prop = conn.execute("SELECT property_id FROM posts WHERE id=?",
+                        (post_id,)).fetchone()["property_id"]
+    client.post(f"/p/{prop}/listing-url", data={"url": "javascript:alert(1)"},
+                follow_redirects=False)
+    row = conn.execute("SELECT listing_url FROM properties WHERE id=?",
+                       (prop,)).fetchone()
+    assert row["listing_url"] is None
+
+
+def test_表示名を画面から付けられる(config, conn, client):
+    post_id = _planned_post(conn)
+    prop = conn.execute("SELECT property_id FROM posts WHERE id=?",
+                        (post_id,)).fetchone()["property_id"]
+    response = client.post(f"/p/{prop}/display-name",
+                           data={"name": "Briny Breezes Cottage"},
+                           follow_redirects=False)
+    assert response.status_code == 303
+    row = conn.execute("SELECT display_name FROM properties WHERE id=?",
+                       (prop,)).fetchone()
+    assert row["display_name"] == "Briny Breezes Cottage"
+    assert "Briny Breezes Cottage" in client.get("/schedule").text
+
+
+def test_予定と投稿済みはタブで分かれる(config, conn, client):
+    from datetime import UTC, datetime
+
+    from freming.db.repository import finish_post
+
+    todo_id = _planned_post(conn)
+    conn.execute("UPDATE properties SET display_name='Future House' "
+                 "WHERE id = (SELECT property_id FROM posts WHERE id=?)", (todo_id,))
+    cursor = conn.execute(
+        "INSERT INTO properties (source, source_url, title, summary, score, status, "
+        "collected_at, display_name, caption_body) "
+        "VALUES ('dezeen', 'https://e.com/done', 'Done Article', 's', 80, 'delivered', "
+        "'2026-08-01T00:00:00+00:00', 'Done House', '本文') RETURNING id")
+    done_prop = cursor.fetchone()["id"]
+    conn.commit()
+    from freming.db.repository import create_post
+
+    done_id = create_post(conn, "feed", datetime.now(UTC).isoformat(),
+                          property_id=done_prop, caption="c")
+    finish_post(conn, done_id, "media-9", "c9")
+
+    todo = client.get("/schedule").text
+    assert "Future House" in todo and "Done House" not in todo
+    done = client.get("/schedule?view=done").text
+    assert "Done House" in done and "Future House" not in done
+
+
+def test_削除すると一覧から消え候補にも戻らない(config, conn, client):
+    from freming.db.repository import postable_properties
+
+    post_id = _planned_post(conn)
+    response = client.post(f"/posts/{post_id}/delete", follow_redirects=False)
+    assert response.status_code == 303
+    row = conn.execute("SELECT state FROM posts WHERE id=?", (post_id,)).fetchone()
+    assert row["state"] == "deleted"
+    assert "Future House" not in client.get("/schedule").text
+    # 行が残っているので、この物件が明日の予定に戻ることはない
+    assert postable_properties(conn, 10) == []
+
+
+def test_販売ページ欄にZillow検索の入り口が出る(config, conn, client):
+    _planned_post(conn)
+    conn.execute("UPDATE properties SET display_name = NULL, "
+                 "title = '209 Java Drive #K, Briny Breezes, FL 33435 - MLS# X' "
+                 "WHERE source_url = 'https://e.com/sched'")
+    conn.commit()
+    page = client.get("/schedule").text
+    assert "Zillowで探す" in page
+    assert "zillow.com/homes/" in page

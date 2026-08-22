@@ -5,16 +5,15 @@
   /* 予定表は「眺めて、気になる所だけ直して、止める」場所。
      一覧（審査）と同じ組み方にする: 囲みは持たず、下罫で行を区切る。
      操作はどれも軽い（並び替えは裏で保存、重い編集は畳んでおく）。 */
-  h3.day {
-    margin: 30px 0 0; font-size: 12px; font-weight: 400;
-    font-family: var(--mono); letter-spacing: var(--track-label);
-    color: var(--muted);
-  }
   .post { border-bottom: 1px solid var(--line); padding: 16px 0 20px; }
   .post:hover { border-bottom-color: var(--fg); }
 
+  /* 日時は1行・控えめに。主役は物件名。 */
+  .pwhen {
+    font: 400 13px/1 var(--mono); font-variant-numeric: tabular-nums;
+    color: var(--muted); margin-bottom: 6px;
+  }
   .phead { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-  .ptime { font: 400 22px/1 var(--mono); font-variant-numeric: tabular-nums; }
   .pname {
     font-size: 17px; font-weight: 400; line-height: 1.5;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -77,6 +76,8 @@
     border: 1px solid var(--line); background: var(--surface); color: var(--fg);
   }
   .ops .quiet { color: var(--muted); border: 0; }
+  .ops form.push-right { margin-left: auto; }
+  .ops button.danger:hover { color: var(--ng); border-bottom-color: var(--ng); }
 
   details.body-edit { margin-top: 10px; }
   details.body-edit summary {
@@ -97,10 +98,18 @@
 </style>
 
 <h2>投稿予定</h2>
+
+<div class="subnav">
+  <a href="/schedule" class="{{ 'on' if view == 'todo' else '' }}">投稿予定 <span class="n">{{ todo_count }}</span></a>
+  <a href="/schedule?view=done" class="{{ 'on' if view == 'done' else '' }}">投稿済み <span class="n">{{ done_count }}</span></a>
+</div>
+
+{% if view == 'todo' %}
 <p class="note">
   これから {{ days_ahead }} 日ぶんの予定です。承認がそのまま公開になるわけではありません。
   出したくないものは「見送る」で外してください。
 </p>
+{% endif %}
 
 {% if not auto_post %}
   <p class="note"><strong>自動投稿は止まっています。</strong>
@@ -112,16 +121,19 @@
 {% endif %}
 
 {% if not days %}
-  <p class="empty">予定はまだありません。<br>毎朝の定期実行が作ります。</p>
+  {% if view == 'done' %}
+    <p class="empty">投稿済みはまだありません。</p>
+  {% else %}
+    <p class="empty">予定はまだありません。<br>毎朝の定期実行が作ります。</p>
+  {% endif %}
 {% endif %}
 
 {% for day, items in days.items() %}
-  <h3 class="day">{{ day }}</h3>
   {% for item in items %}
     {% set row = item.row %}
     <div class="post">
+      <div class="pwhen">{{ item.day }} {{ item.at }}</div>
       <div class="phead">
-        <span class="ptime">{{ item.at }}</span>
         <span class="pname">
           {% if row["kind"] == "reel" %}週次リール（先週のリーチ上位）
           {% else %}{{ item.name or "（無題）" }}{% endif %}
@@ -153,14 +165,9 @@
             <input type="datetime-local" name="at" value="{{ item.at_input }}">
             <button class="linklike" type="submit">時刻を保存</button>
           </form>
-          <form method="post" action="/posts/{{ row['id'] }}/skip">
-            <button class="linklike" type="submit">見送る</button>
-          </form>
         {% endif %}
-        {% if row["state"] in ("failed", "skipped") %}
-          <form method="post" action="/posts/{{ row['id'] }}/retry">
-            <button class="linklike" type="submit">予定に戻す</button>
-          </form>
+        {% if row["permalink"] %}
+          <a href="{{ row['permalink'] }}" target="_blank" rel="noopener">投稿を開く</a>
         {% endif %}
         {% if row["property_id"] %}<a href="/p/{{ row['property_id'] }}">物件</a>{% endif %}
         {% if row["source_url"] %}
@@ -168,7 +175,26 @@
           <button class="linklike js-copy" type="button"
                   data-url="{{ row['source_url'] }}">引用元をコピー</button>
         {% endif %}
+        {% if item.listing_url %}
+          <a href="{{ item.listing_url }}" target="_blank" rel="noopener">販売ページ</a>
+          <button class="linklike js-copy" type="button"
+                  data-url="{{ item.listing_url }}">販売ページをコピー</button>
+        {% endif %}
         {% if row["reach"] is not none %}<span class="quiet">リーチ {{ row["reach"] }}</span>{% endif %}
+
+        {# 押し間違いやすい操作は右端に離す。削除は確認を挟む #}
+        {% if row["state"] in ("planned", "failed", "skipped") %}
+          <form method="post" action="/posts/{{ row['id'] }}/skip" class="push-right">
+            <button class="linklike" type="submit">見送る</button>
+          </form>
+        {% endif %}
+        {% if row["state"] != "publishing" %}
+          <form method="post" action="/posts/{{ row['id'] }}/delete"
+                class="{{ '' if row['state'] in ('planned', 'failed', 'skipped') else 'push-right' }}"
+                onsubmit="return confirm('この予定を削除しますか？ 一覧から消え、この物件は今後の予定にも載らなくなります。')">
+            <button class="linklike danger" type="submit">削除</button>
+          </form>
+        {% endif %}
       </div>
 
       {% if row["caption"] and row["state"] in ("planned", "failed", "skipped") %}
@@ -183,6 +209,32 @@
         <details class="body-edit">
           <summary>本文</summary>
           <div class="cap-view">{{ row["caption"] }}</div>
+        </details>
+      {% endif %}
+
+      {% if row["property_id"] %}
+        <details class="body-edit">
+          <summary>名前・販売ページ{% if item.listing_url %}（販売ページ設定済み）{% endif %}</summary>
+          <form method="post" action="/p/{{ row['property_id'] }}/display-name" class="ops">
+            <input type="text" name="name" value="{{ row['display_name'] or '' }}"
+                   placeholder="表示名（投稿の【 】に使う短い名前）"
+                   style="flex:1; min-width: 240px;">
+            <button class="linklike" type="submit">名前を保存</button>
+          </form>
+          <form method="post" action="/p/{{ row['property_id'] }}/listing-url" class="ops">
+            <input type="text" name="url" value="{{ item.listing_url }}"
+                   placeholder="https://www.zillow.com/…（実際に買えるページ）"
+                   style="flex:1; min-width: 240px;">
+            <button class="linklike" type="submit">販売ページを保存</button>
+          </form>
+          <div class="hint">
+            {% if item.zillow_search %}
+              <a href="{{ item.zillow_search }}" target="_blank" rel="noopener">Zillowで探す</a>
+              → 出てきた物件ページのURLをここに貼って保存。
+            {% endif %}
+            ストーリーズのリンクには販売ページを優先して使います。
+            名前を変えたら、本文の【 】も本文編集で合わせてください。
+          </div>
         </details>
       {% endif %}
 
