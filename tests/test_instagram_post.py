@@ -871,3 +871,10 @@ def test_公開済みの投稿を予定に戻せる(db, monkeypatch, tmp_path):
     row = db.execute("SELECT state FROM posts WHERE id=?", (post_id,)).fetchone()
     assert row["state"] == "planned"
     assert [r["id"] for r in postable_properties(db, 10)] == []
+
+
+def test_クレジットは仕様欄の最終行に入る(db):
+    """Photo: は Built in: の直下。独立した段落にしない（2026-08-22）。"""
+    caption = build_caption(_rich(db), CONFIG.caption, "Dezeen")
+    assert "Built in: 1961\nPhoto: Darren Bradley" in caption
+    assert "\n\nPhoto:" not in caption

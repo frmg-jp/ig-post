@@ -243,7 +243,12 @@ def build_caption(
     if title:
         blocks.append(f"【 {title} 】")
 
+    # 写真のクレジットは仕様欄の最終行に入れる（Built in: の下）。
+    # 独立した段落にしない（2026-08-22 の指示）。
     specs = _spec_lines(row, config)
+    credit = photo_credit(row, config, source_name)
+    if credit:
+        specs.append(credit)
     if specs:
         blocks.append("\n".join(specs))
 
@@ -256,10 +261,6 @@ def build_caption(
     body = _get(row, "caption_body")
     if body:
         blocks.append(body)
-
-    credit = photo_credit(row, config, source_name)
-    if credit:
-        blocks.append(credit)
 
     if config.details:
         blocks.append("\n".join(config.details))
