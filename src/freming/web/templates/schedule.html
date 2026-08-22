@@ -146,7 +146,7 @@
           <details class="cap-details">
             <summary>
               <span class="cap-label">本文</span>開いて確認・編集
-              {% if row["caption_edited_at"] %}（手で直した本文。replan は触りません）{% endif %}
+              {% if item.caption_edited %}（手で直した本文。replan は触りません）{% endif %}
             </summary>
             <form method="post" action="/posts/{{ row['id'] }}/caption">
               <textarea class="cap-edit" name="caption">{{ row["caption"] }}</textarea>

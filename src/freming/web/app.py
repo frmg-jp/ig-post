@@ -448,6 +448,13 @@ def create_app(
         # そのまま使う（審査画面の thumbnail_url と同じ扱い）。
         from freming.instagram.worker import _parse_image_order
 
+        def _col(row, key):
+            """マイグレーション前の行にも耐える読み方。無い列は None。"""
+            try:
+                return row[key]
+            except (KeyError, IndexError):
+                return None
+
         def _images_for(row) -> list[dict]:
             if row["kind"] != "feed" or not row["property_id"]:
                 return []
@@ -463,7 +470,8 @@ def create_app(
             finally:
                 conn2.close()
             by_position = {int(r["position"]): r["source_url"] for r in found}
-            order = [p for p in _parse_image_order(row["image_order"]) if p in by_position]
+            order = [p for p in _parse_image_order(_col(row, "image_order"))
+                     if p in by_position]
             order += [p for p in sorted(by_position) if p not in order]
             limit = config.instagram.carousel_max
             return [
@@ -480,6 +488,7 @@ def create_app(
                     "at": moment.strftime("%H:%M"),
                     "at_input": moment.strftime("%Y-%m-%dT%H:%M"),
                     "images": _images_for(row),
+                    "caption_edited": bool(_col(row, "caption_edited_at")),
                 }
             )
         return templates.TemplateResponse(
