@@ -484,17 +484,40 @@ def create_app(
                 for index, p in enumerate(order)
             ]
 
-        def _zillow_search(row) -> str:
-            """Zillow の検索URL。**開くのは人のブラウザ**（自動では叩かない）。
+        def _address(row) -> str:
+            """検索に使う住所。記事から抽出した番地＋市＋州＋国。
 
-            リスティングはタイトルが住所そのものなので、検索でほぼ直接
-            物件ページに着く。編集メディア由来は住所を持たないので、
-            名前と街で近づけるところまで。
+            番地が取れていない行（記事に住所を書いていない編集メディアや、
+            抽出前の古い行）は、タイトルが住所そのもののリスティングなら
+            それを使う。どちらも無ければ空。
             """
-            title = (_col(row, "display_name") or row["title"] or "").split(" - MLS")[0]
-            city = row["location_city"] or ""
-            query = title if ("," in title and any(c.isdigit() for c in title))                 else f"{title} {city}".strip()
-            return f"https://www.zillow.com/homes/{quote(query)}_rb/" if query else ""
+            street = _col(row, "street_address") or ""
+            if not street:
+                title = (row["title"] or "").split(" - MLS")[0].strip()
+                head = title.split()[0].rstrip("-") if title.split() else ""
+                # 「209 Java Drive #K, Briny Breezes, FL 33435」の形かどうか
+                return title if ("," in title and head.isdigit()) else ""
+            parts = [
+                street,
+                row["location_city"] or "",
+                _col(row, "location_region") or "",
+                row["location_country"] or "",
+            ]
+            return ", ".join(p for p in parts if p)
+
+        def _search_links(row) -> dict:
+            """住所からの検索リンク。**開くのは人のブラウザ**で、
+            こちらから Zillow を叩くことはしない。"""
+            address = _address(row)
+            if not address:
+                return {}
+            return {
+                "address": address,
+                # Zillow 内の検索。住所そのものを渡すのでほぼ直接着く
+                "zillow": f"https://www.zillow.com/homes/{quote(address)}_rb/",
+                # 検索エンジン経由。Zillow に無い物件でも仲介ページに当たる
+                "web": f"https://duckduckgo.com/?q={quote(address + ' zillow')}",
+            }
 
         def _display_title(row) -> str:
             """一覧の見出し。短い物件名が無い行は記事タイトルを整形する。
@@ -534,7 +557,7 @@ def create_app(
                     "caption_edited": bool(_col(row, "caption_edited_at")),
                     "name": _display_title(row),
                     "listing_url": _col(row, "listing_url") or "",
-                    "zillow_search": _zillow_search(row) if row["property_id"] else "",
+                    "search": _search_links(row) if row["property_id"] else {},
                 }
             )
         return templates.TemplateResponse(

@@ -228,9 +228,14 @@
             <button class="linklike" type="submit">販売ページを保存</button>
           </form>
           <div class="hint">
-            {% if item.zillow_search %}
-              <a href="{{ item.zillow_search }}" target="_blank" rel="noopener">Zillowで探す</a>
-              → 出てきた物件ページのURLをここに貼って保存。
+            {% if item.search %}
+              住所: {{ item.search.address }}<br>
+              <a href="{{ item.search.zillow }}" target="_blank" rel="noopener">Zillowで開く</a>
+              ／
+              <a href="{{ item.search.web }}" target="_blank" rel="noopener">検索で探す</a>
+              → 出てきた物件ページのURLを上に貼って保存。<br>
+            {% else %}
+              記事に番地が書かれていないため、検索リンクは出せません。<br>
             {% endif %}
             ストーリーズのリンクには販売ページを優先して使います。
             名前を変えたら、本文の【 】も本文編集で合わせてください。

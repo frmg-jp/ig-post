@@ -790,12 +790,30 @@ def test_削除すると一覧から消え候補にも戻らない(config, conn,
     assert postable_properties(conn, 10) == []
 
 
-def test_販売ページ欄にZillow検索の入り口が出る(config, conn, client):
+def test_抽出した番地で検索リンクを作る(config, conn, client):
+    """記事の Location から番地が取れていれば、それを検索に渡す。"""
     _planned_post(conn)
-    conn.execute("UPDATE properties SET display_name = NULL, "
+    conn.execute("UPDATE properties SET street_address = '521 Northeast 6th Street', "
+                 "location_city = 'Gainesville', location_region = 'Florida', "
+                 "location_country = 'USA' WHERE source_url = 'https://e.com/sched'")
+    conn.commit()
+    page = client.get("/schedule").text
+    assert "521 Northeast 6th Street, Gainesville, Florida, USA" in page
+    assert "zillow.com/homes/521%20Northeast%206th%20Street" in page
+    assert "duckduckgo.com" in page
+
+
+def test_番地が無ければ住所タイトルで代える(config, conn, client):
+    _planned_post(conn)
+    conn.execute("UPDATE properties SET display_name = NULL, street_address = NULL, "
                  "title = '209 Java Drive #K, Briny Breezes, FL 33435 - MLS# X' "
                  "WHERE source_url = 'https://e.com/sched'")
     conn.commit()
     page = client.get("/schedule").text
-    assert "Zillowで探す" in page
-    assert "zillow.com/homes/" in page
+    assert "zillow.com/homes/209%20Java%20Drive" in page
+
+
+def test_番地も住所タイトルも無ければ検索リンクを出さない(config, conn, client):
+    _planned_post(conn)
+    page = client.get("/schedule").text
+    assert "記事に番地が書かれていないため" in page

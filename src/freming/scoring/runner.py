@@ -151,6 +151,7 @@ def score_pending(
             display_name=assessment.display_name,
             caption_body=assessment.caption_body,
             location_region=assessment.location_region,
+            street_address=assessment.street_address,
         )
 
     log.info(stats.summary())

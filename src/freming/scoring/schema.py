@@ -48,6 +48,7 @@ OUTPUT_SCHEMA: dict = {
         "display_name",
         "caption_body",
         "location_region",
+        "street_address",
     ],
     "properties": {
         "is_for_sale": {
@@ -163,6 +164,14 @@ OUTPUT_SCHEMA: dict = {
                 "カタカナに置き換えない。文が3つ作れないほど情報が薄ければ空文字。"
             ),
         },
+        "street_address": {
+            "type": "string",
+            "description": (
+                "記事に書かれている番地（'521 Northeast 6th Street' のように"
+                "通り名と番号まで）。市・州・国は含めない。**書かれている"
+                "ときだけ**返す。推測しない。無ければ空文字。"
+            ),
+        },
         "location_region": {
             "type": "string",
             "description": (
@@ -229,6 +238,7 @@ class Assessment:
     display_name: str = ""
     caption_body: str = ""
     location_region: str = ""
+    street_address: str = ""
 
     @classmethod
     def from_json(cls, data: dict) -> Assessment:

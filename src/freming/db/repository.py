@@ -145,6 +145,7 @@ def save_score(
     display_name: str | None = None,
     caption_body: str | None = None,
     location_region: str | None = None,
+    street_address: str | None = None,
 ) -> None:
     """スコアと、判定の過程で分かった属性を書き戻す。
 
@@ -163,7 +164,8 @@ def save_score(
             provenance_visible = ?, scored_at = ?,
             usage_type = ?, structure = ?, building_area = ?,
             site_area = ?, style_name = ?, summary_en = ?, photo_credit = ?,
-            display_name = ?, caption_body = ?, location_region = ?
+            display_name = ?, caption_body = ?, location_region = ?,
+            street_address = COALESCE(street_address, ?)
         WHERE id = ?
         """,
         (
@@ -175,6 +177,7 @@ def save_score(
             site_area or None, style_name or None,
             summary_en or None, photo_credit or None,
             display_name or None, caption_body or None, location_region or None,
+            street_address or None,
             property_id,
         ),
     )
@@ -787,6 +790,7 @@ def scheduled_posts(conn: DbConnection, until: str, states: tuple[str, ...] = ()
     return conn.execute(
         f"""
         SELECT p.*, pr.title, pr.display_name, pr.location_city, pr.location_country,
+               pr.location_region, pr.street_address,
                pr.source, pr.score, pr.thumbnail_url, pr.source_url, pr.listing_url
         FROM posts p
         LEFT JOIN properties pr ON pr.id = p.property_id

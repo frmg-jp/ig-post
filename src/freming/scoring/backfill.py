@@ -53,6 +53,8 @@ FIELDS = (
     "display_name",
     "caption_body",
     "location_region",
+    # 0017。Zillow の検索を一発で当てるために使う
+    "street_address",
 )
 
 

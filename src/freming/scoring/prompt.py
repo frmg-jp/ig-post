@@ -55,6 +55,8 @@ _SYSTEM = """あなたは建築キュレーションメディア「FREMING CURAT
   カタカナに置き換えない**（「Wadhal Architects設計の住宅」のように）。
 - location_region は州・地域（California など）。記事に書かれている
   ときだけ。都市名・国名は入れない。
+- street_address は番地（"521 Northeast 6th Street"）。記事に書かれて
+  いるときだけ。市・州・国は含めない。**推測しない。**
 """
 
 _EMPTY = "（まだ蓄積がありません）"
