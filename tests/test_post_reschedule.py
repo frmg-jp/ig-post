@@ -127,3 +127,30 @@ def test_動かすものが無ければ何もしない(monkeypatch, tmp_path, ca
 
     assert main(["--config", config, "post", "reschedule"]) == 0
     assert "動かす予定はありません" in capsys.readouterr().out
+
+
+def test_CLIから見送りと取り消しができる(monkeypatch, tmp_path, capsys) -> None:
+    """審査UIが開けない状況でも、run の前に順番を整えられること。"""
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    config = _config(tmp_path, ["20:00"])
+    conn = _db(tmp_path)
+    post_id = _post(conn, _at(-1, "20:00"), "Skippable")
+    conn.close()
+
+    assert main(["--config", config, "post", "skip", "--id", str(post_id)]) == 0
+    conn = connect(tmp_path / "test.db")
+    assert conn.execute("SELECT state FROM posts WHERE id=?",
+                        (post_id,)).fetchone()["state"] == "skipped"
+    conn.close()
+
+    assert main(["--config", config, "post", "unskip", "--id", str(post_id)]) == 0
+    conn = connect(tmp_path / "test.db")
+    assert conn.execute("SELECT state FROM posts WHERE id=?",
+                        (post_id,)).fetchone()["state"] == "planned"
+
+
+def test_見送りはIDが無ければ何もしない(monkeypatch, tmp_path, capsys) -> None:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    config = _config(tmp_path, ["20:00"])
+    _db(tmp_path).close()
+    assert main(["--config", config, "post", "skip"]) == 2

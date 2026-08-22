@@ -1078,6 +1078,31 @@ def _cmd_post(args: argparse.Namespace) -> int:
                 )
             return 0
 
+        if args.post_action in ("skip", "unskip"):
+            # 見送りと、その取り消し。審査UIからもできるが、requeue や run と
+            # 同じ場所（ターミナル）で完結できないと、順番の操作を間違える。
+            from freming.db.repository import retry_post, skip_post
+
+            if not args.id:
+                print("--id で投稿のIDを指定してください（post show の先頭の番号）。",
+                      file=sys.stderr)
+                return 2
+            if args.post_action == "skip":
+                if skip_post(conn, args.id):
+                    print(f"post {args.id} を見送りにしました。post unskip --id で戻せます。")
+                    return 0
+                print(
+                    f"post {args.id} は見送りにできません（予定/失敗の状態のみ）。",
+                    file=sys.stderr,
+                )
+                return 2
+            if retry_post(conn, args.id):
+                print(f"post {args.id} を予定に戻しました。時刻が過ぎていれば "
+                      "post reschedule で先の枠に入ります。")
+                return 0
+            print(f"post {args.id} は戻せません（見送り/失敗の状態のみ）。", file=sys.stderr)
+            return 2
+
         if args.post_action == "requeue":
             # 出し直し。Instagram 側で消した投稿を、もう一度予定に戻す。
             # **先にアプリ側で削除してから使うこと。** 消さずに戻すと
@@ -1448,12 +1473,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_post = sub.add_parser("post", help="Instagram への投稿（[9]）")
     p_post.add_argument(
         "post_action",
-        choices=["plan", "show", "run", "replan", "reschedule", "requeue"],
+        choices=["plan", "show", "run", "replan", "reschedule", "requeue",
+                 "skip", "unskip"],
         help=(
             "plan: 予定を作る / show: 予定を見る / run: 時間が来たものを投稿する"
             " / replan: まだ出していない予定の本文を作り直す"
             " / reschedule: 時刻を過ぎたままの予定を先送りする"
             " / requeue: IG側で消した投稿を予定に戻す（--id）"
+            " / skip: 見送りにする（--id） / unskip: 見送りを戻す（--id）"
         ),
     )
     p_post.add_argument(
