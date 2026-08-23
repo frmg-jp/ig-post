@@ -27,6 +27,7 @@ on:
           - post-reschedule    # 期限切れ・旧枠の予定を先の枠へ動かす（費用なし）
           - post-plan          # 空いている枠を埋める（費用なし）
           - post-compact       # 空いた枠のぶん、後ろの予定を前に詰める（費用なし）
+          - post-run           # 時間が来た通常投稿を1本出す（**本番のIGに出る**）
       apply:
         description: "本当に実行する（外すと見積もりだけ）"
         type: boolean
@@ -110,6 +111,20 @@ jobs:
               ;;
             post-compact)
               python -m freming.cli post compact
+              python -m freming.cli post show
+              ;;
+            post-run)
+              # **本番の @frmg.jpn に出る。** 「本当に実行する」を外すと
+              # 中身を出すだけで投稿しない。
+              #
+              # 通常は審査UI（Render）の常駐ワーカーが 09:00 に出す。
+              # ここはその取りこぼしを人が出し直すための経路で、
+              # 1回につき1本だけにしてある（まとめて出ない）。
+              if [ -n "$YES" ]; then
+                python -m freming.cli post run --kind feed --limit 1
+              else
+                python -m freming.cli post run --kind feed --limit 1 --dry-run
+              fi
               python -m freming.cli post show
               ;;
           esac
