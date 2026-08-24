@@ -28,6 +28,7 @@ on:
           - post-plan          # 空いている枠を埋める（費用なし）
           - post-compact       # 空いた枠のぶん、後ろの予定を前に詰める（費用なし）
           - post-run           # 時間が来た通常投稿を1本出す（**本番のIGに出る**）
+          - image-report       # 1件の画像の内訳（枚数が足りない理由。費用なし）
       apply:
         description: "本当に実行する（外すと見積もりだけ）"
         type: boolean
@@ -112,6 +113,14 @@ jobs:
             post-compact)
               python -m freming.cli post compact
               python -m freming.cli post show
+              ;;
+            image-report)
+              # limit に post_id を入れて実行する（枚数の「!」が付いた行の番号）。
+              if [ -z "${{ github.event.inputs.limit }}" ]; then
+                echo "「対象の上限」欄に post_id を入れてください。" >&2
+                exit 2
+              fi
+              python -m freming.cli image-report --post-id ${{ github.event.inputs.limit }}
               ;;
             post-run)
               # **本番の @frmg.jpn に出る。** 「本当に実行する」を外すと

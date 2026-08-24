@@ -612,6 +612,80 @@ def _cmd_remove(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_image_report(args: argparse.Namespace) -> int:
+    """1物件の画像の内訳を出す。**枚数が足りない理由を目で確かめるため。**
+
+    「3枚しか無い」には2つの原因があり、対処がまったく違う。
+
+      1. 掲載ページに元々3枚しか無い → こちらでできることは無い
+      2. 取ったが弾かれた（小さすぎる・形式違い・取得失敗）→ 基準を
+         見直せば増える（reset-images --stale-skips）
+
+    images と image_skips を並べれば、どちらかがその場で分かる。
+    読むだけで、外部への通信はしない。
+    """
+    from freming.db.connection import session
+
+    cfg = load_config(args.config)
+    setup_logging(cfg.app.log_dir, cfg.app.log_level)
+
+    with session(cfg.app.target()) as conn:
+        property_id = args.id
+        if property_id is None:
+            # 予定の一覧（post show）に出るのは post_id なので、そこから
+            # 引けるようにしておく。物件IDを別の画面で探させない。
+            post = conn.execute(
+                "SELECT property_id FROM posts WHERE id = ?", (args.post_id,)
+            ).fetchone()
+            if post is None or post["property_id"] is None:
+                print(f"post {args.post_id} に物件が紐づいていません。", file=sys.stderr)
+                return 1
+            property_id = int(post["property_id"])
+        row = conn.execute(
+            "SELECT id, title, display_name, source, source_url, listing_url, status "
+            "FROM properties WHERE id = ?", (property_id,),
+        ).fetchone()
+        if row is None:
+            print(f"property {property_id} がありません。", file=sys.stderr)
+            return 1
+        images = conn.execute(
+            "SELECT position, width, height, source_url FROM images "
+            "WHERE property_id = ? ORDER BY position", (property_id,),
+        ).fetchall()
+        skips = conn.execute(
+            "SELECT reason, source_url FROM image_skips WHERE property_id = ? "
+            "ORDER BY reason, id", (property_id,),
+        ).fetchall()
+
+    print(f"property {row['id']}  {row['display_name'] or row['title']}（{row['source']} / {row['status']}）")
+    print(f"  引用元: {row['source_url']}")
+    if row["listing_url"]:
+        print(f"  販売ページ: {row['listing_url']}")
+
+    print(f"\n採用 {len(images)} 枚（上限 {cfg.images.max_per_property}）")
+    for image in images:
+        size = f"{image['width']}x{image['height']}" if image["width"] else "寸法不明"
+        print(f"  {image['position'] or '-':>2}  {size:>10}  {image['source_url'][:78]}")
+
+    if not skips:
+        print("\n弾いた画像はありません。**掲載ページに元々この枚数しか無い**"
+              "ということです。")
+        return 0
+
+    counts: dict[str, int] = {}
+    for skip in skips:
+        counts[skip["reason"]] = counts.get(skip["reason"], 0) + 1
+    print(f"\n弾いた {len(skips)} 枚: " + " / ".join(f"{k} {v}" for k, v in sorted(counts.items())))
+    for skip in skips[:20]:
+        print(f"  {skip['reason']:<10} {skip['source_url'][:78]}")
+    if len(skips) > 20:
+        print(f"  …ほか {len(skips) - 20} 件")
+    if counts.get("too_small") or counts.get("wrong_type"):
+        print("\ntoo_small / wrong_type は基準を変えれば復活しえます:")
+        print("  python -m freming.cli reset-images --stale-skips")
+    return 0
+
+
 def _cmd_reset_images(args: argparse.Namespace) -> int:
     """取得済み画像を捨てて取り直せるようにする（抽出ルールを直したとき用）。"""
     import shutil
@@ -1659,6 +1733,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_reset_img.set_defaults(func=_cmd_reset_images)
 
+    p_img_report = sub.add_parser(
+        "image-report", help="1物件の画像の内訳（採用・弾いた理由）を出す"
+    )
+    group_report = p_img_report.add_mutually_exclusive_group(required=True)
+    group_report.add_argument("--id", type=int, help="property_id")
+    group_report.add_argument(
+        "--post-id", type=int, help="post_id（post show の先頭の番号）",
+    )
+    p_img_report.set_defaults(func=_cmd_image_report)
+
     p_ig = sub.add_parser("instagram", help="Instagram のトークン管理（[8] 自動投稿の土台）")
     p_ig.add_argument(
         "ig_action",
@@ -1799,7 +1883,7 @@ _NEEDS_MIGRATED_DB = frozenset({
     "collect", "score", "serve", "deliver", "learn", "rules",
     "ingest-url", "add-manual", "remove", "reset-images", "status",
     "instagram", "post", "redeliver", "rescore", "source-report",
-    "backfill-captions", "backfill-listings",
+    "backfill-captions", "backfill-listings", "image-report",
 })
 
 
