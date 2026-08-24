@@ -719,8 +719,17 @@ def _cmd_image_report(args: argparse.Namespace) -> int:
         print(f"  {image['position'] or '-':>2}  {size:>10}  {image['source_url'][:78]}")
 
     if not skips:
-        print("\n弾いた画像はありません。**掲載ページに元々この枚数しか無い**"
-              "ということです。")
+        # **「弾いた記録が無い」は「元々無い」の証明にならない。**
+        # 上限に達して打ち切った場合も、そもそも抽出できていない場合も、
+        # image_skips には何も残らない。断定せずに次の手を出す。
+        if len(images) >= cfg.images.max_per_property:
+            print("\n弾いた画像はありません。**上限に達して打ち切っています。**"
+                  "掲載ページにはこれより多くある可能性があります。")
+        else:
+            print("\n弾いた画像はありません。掲載ページに元々この枚数しか無いか、"
+                  "**抽出が拾えていない**かのどちらかです。")
+            print("  確かめるには: python -m freming.cli refetch-images --id "
+                  f"{row['id']}")
         return 0
 
     counts: dict[str, int] = {}

@@ -10,7 +10,11 @@ services:
   - type: web
     name: freming-curated-review
     runtime: python
-    plan: free
+    # **無料枠は15分アクセスが無いとコンテナを落とす。** 投稿ワーカーが
+    # ここに常駐しているので、寝ている間は 09:00 の枠が来ても誰も出さない。
+    # 実測（2026-08-23 / 24）で定刻から30分・53分の遅れが出たため、
+    # 2026-08-24 に Starter へ切り替えた。
+    plan: starter
     # Neon を Singapore に置いてあるので、DBに近い側に寄せる。
     region: singapore
     buildCommand: pip install -e ".[postgres]"
