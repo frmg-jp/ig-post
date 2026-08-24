@@ -616,8 +616,13 @@ def _refetch_targets(conn, cfg, source: str | None, limit: int | None):
     """枚数が上限に届いていない物件を、投稿に近い順に返す。
 
     納品済みを先に見る。**そこが投稿に回るので、直す価値が一番高い。**
+
+    **承認済みと納品済みだけを対象にする。** 画像は承認してから取りに
+    行くので、未審査・非承認の行は「足りない」のではなく最初から0枚。
+    それを混ぜると、出す予定の無い候補のために相手サイトを何百回も
+    叩くことになる（実測で 384 件が並び、うち大半が0枚だった）。
     """
-    where = ["p.source_url IS NOT NULL"]
+    where = ["p.source_url IS NOT NULL", "p.status IN ('approved', 'delivered')"]
     params: list = [cfg.images.max_per_property]
     if source:
         where.append("p.source = ?")

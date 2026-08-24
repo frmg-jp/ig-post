@@ -675,3 +675,63 @@ def test_delivered_properties_keep_their_skips(config, conn, row) -> None:
     conn.commit()
 
     assert clear_stale_skips(conn) == 0
+
+
+# ----------------------------------------------------------------------
+# まとめて取り直す対象の絞り込み（2026-08-24）
+#
+# 画像は**承認してから**取りに行く。未審査・非承認の行は「足りない」の
+# ではなく最初から0枚なので、上限との差だけで選ぶと出す予定の無い候補が
+# 全部並ぶ。本番で 384 件（大半が0枚）が対象になったのを見て絞った。
+# ----------------------------------------------------------------------
+
+def _add_property(conn, url: str, status: str, images: int) -> int:
+    property_id = insert_candidate(
+        conn,
+        Candidate(
+            source="wowhaus", source_rank="A", source_url=url,
+            title=url, content_text="...", is_for_sale=1,
+        ),
+    )
+    conn.execute("UPDATE properties SET status = ? WHERE id = ?", (status, property_id))
+    for position in range(images):
+        conn.execute(
+            "INSERT INTO images (property_id, source_url, position, fetched_at) "
+            "VALUES (?, ?, ?, '2026-08-24')",
+            (property_id, f"{url}#{position}", position + 1),
+        )
+    conn.commit()
+    return property_id
+
+
+def test_bulk_refetch_skips_candidates_that_were_never_fetched(config, conn) -> None:
+    from freming.cli import _refetch_targets
+
+    pending = _add_property(conn, "https://example.com/pending", "pending", 0)
+    rejected = _add_property(conn, "https://example.com/rejected", "rejected", 0)
+    approved = _add_property(conn, "https://example.com/approved", "approved", 3)
+    delivered = _add_property(conn, "https://example.com/delivered", "delivered", 3)
+
+    found = [int(r["id"]) for r in _refetch_targets(conn, config, None, None)]
+    assert pending not in found
+    assert rejected not in found
+    assert set(found) == {approved, delivered}
+
+
+def test_bulk_refetch_puts_delivered_first(config, conn) -> None:
+    """納品済みが先。**そこが投稿に回るので、直す価値が一番高い。**"""
+    from freming.cli import _refetch_targets
+
+    approved = _add_property(conn, "https://example.com/a", "approved", 2)
+    delivered = _add_property(conn, "https://example.com/d", "delivered", 2)
+
+    found = [int(r["id"]) for r in _refetch_targets(conn, config, None, None)]
+    assert found == [delivered, approved]
+
+
+def test_bulk_refetch_leaves_full_properties_alone(config, conn) -> None:
+    from freming.cli import _refetch_targets
+
+    _add_property(conn, "https://example.com/full", "delivered",
+                  config.images.max_per_property)
+    assert _refetch_targets(conn, config, None, None) == []
