@@ -1293,11 +1293,23 @@ def _cmd_post(args: argparse.Namespace) -> int:
                 print("予定はありません。post plan で作ってください。")
                 return 0
             # 先頭の番号が post_id。requeue --id で使う。
+            #
+            # 枚数も出す。**カルーセルが何枚になるかは出してみるまで
+            # 分からない**、では順番を整える判断ができない。上限
+            # （carousel_max）に届かない行は目印を付ける。
+            from freming.instagram import media as _media
+
+            cap = cfg.instagram.carousel_max
             for row in rows:
                 at = datetime.fromisoformat(row["scheduled_at"]).astimezone(zone)
                 title = row["title"] or ("週次リール" if row["kind"] == "reel" else "—")
+                shots = ""
+                if row["kind"] == "feed" and row["property_id"]:
+                    count = len(_media.available_positions(conn, row["property_id"]))
+                    count = min(count, cap)
+                    shots = f'{count:>2}枚{"!" if count < cap else " "}'
                 print(f'  {row["id"]:>4}  {at:%m/%d %H:%M}  '
-                      f'{row["kind"]:<5} {row["state"]:<10} {title[:44]}')
+                      f'{row["kind"]:<5} {row["state"]:<10} {shots:<5} {title[:40]}')
             counts = count_posts_by_state(conn)
             print("  " + " / ".join(f"{k} {v}" for k, v in sorted(counts.items())))
             return 0
