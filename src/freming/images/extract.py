@@ -42,6 +42,43 @@ def _is_image_url(url: str) -> bool:
     return path.endswith(_EXTENSIONS)
 
 
+# `<script>` の中のJSONに入っている画像URL。
+#
+# **物件サイトのギャラリーは遅延読み込みで、HTMLの `<img>` には最初の
+# 数枚しか出ない。** 残りは埋め込みJSONに入っている。
+#
+# 実例（2026-08-24、Coldwell Banker の 209 Java Drive）: 掲載写真は19枚
+# あるのに3枚しか取れていなかった。og:image の1枚と `<img>` の2枚だけで、
+# 残り16枚は `{"indexNum":3,"mediaUrl":"https://…_P03.jpg"}` の形で
+# `<script>` の中にあった。抽出前に script を捨てていたので見えなかった。
+#
+# JSON の中では `/` が `\/` と書かれることがあるので戻してから探す。
+_JSON_IMAGE = re.compile(
+    r"https?://[^\s\"'<>\\]+\.(?:jpg|jpeg|png|webp)(?:\?[^\s\"'<>\\]*)?",
+    re.IGNORECASE,
+)
+
+
+def _urls_in_scripts(soup: BeautifulSoup) -> list[str]:
+    """`<script>` の中に書かれた画像URLを、出てくる順に返す。
+
+    **script を捨てる前に呼ぶこと。** 順序は原文のままにする。ギャラリーは
+    たいてい掲載順に並んでいるので、そのまま投稿の並びに使える。
+    """
+    found: list[str] = []
+    seen: set[str] = set()
+    for tag in soup.find_all("script"):
+        text = tag.string or tag.get_text() or ""
+        if "http" not in text:
+            continue
+        for match in _JSON_IMAGE.finditer(text.replace("\\/", "/")):
+            url = match.group(0)
+            if url not in seen:
+                seen.add(url)
+                found.append(url)
+    return found
+
+
 def photo_identity(url: str) -> tuple[str, str]:
     """同じ写真なら同じ値になるキー。
 
@@ -113,6 +150,10 @@ def image_urls_from_soup(
     記事）、そのままでは 01.jpg がその合成画像になるため。
     残り1枚しかない場合は落とさない（合成画像でも無いよりはまし）。
     """
+    # **script を捨てる前に**、中のJSONに入っている画像URLを控える。
+    # 遅延読み込みのギャラリーはここにしか無い（_urls_in_scripts）。
+    script_urls = _urls_in_scripts(soup)
+
     for tag in soup(("script", "style", "noscript", "header", "footer", "nav", "aside")):
         tag.decompose()
 
@@ -154,6 +195,11 @@ def image_urls_from_soup(
             if value:
                 _add(urljoin(base_url, value.strip()))
                 break
+
+    # HTMLに出ていたものを優先し、足りない分をJSONから足す。**代表と
+    # 本文の並びを崩さない**ため、この順にしてある。
+    for candidate in script_urls:
+        _add(urljoin(base_url, candidate))
 
     if skip_lead_image and len(urls) > 1:
         return urls[1:]

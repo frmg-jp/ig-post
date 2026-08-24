@@ -134,6 +134,55 @@ def test_extract_keeps_article_order() -> None:
     assert [Path(u).name for u in urls] == ["c.jpg", "a.jpg", "b.jpg"]
 
 
+def test_extract_reads_the_gallery_in_scripts() -> None:
+    """物件サイトのギャラリーは遅延読み込みで、<img> には数枚しか出ない。
+
+    実例（2026-08-24、Coldwell Banker の 209 Java Drive）: 掲載19枚に対し
+    3枚しか取れていなかった。残りは埋め込みJSONの中にあり、抽出前に
+    script を捨てていたので見えていなかった。
+    """
+    html = """
+    <html><head>
+      <meta property="og:image" content="https://cdn.example.com/x_P00.jpg">
+    </head><body>
+      <article><img src="https://cdn.example.com/x_P01.jpg"></article>
+      <script>
+        window.__DATA__ = {"media":[
+          {"indexNum":1,"mediaUrl":"https://cdn.example.com/x_P01.jpg"},
+          {"indexNum":2,"mediaUrl":"https:\\/\\/cdn.example.com\\/x_P02.jpg"},
+          {"indexNum":3,"mediaUrl":"https://cdn.example.com/x_P03.jpg"}]};
+      </script>
+    </body></html>
+    """
+    urls = extract_image_urls(html, "https://example.com/")
+    assert [Path(u).name for u in urls] == [
+        "x_P00.jpg", "x_P01.jpg", "x_P02.jpg", "x_P03.jpg",
+    ]
+
+
+def test_script_gallery_does_not_disturb_the_cover() -> None:
+    """og:image と本文の並びが先。JSON由来は足りない分だけ後ろに足す。"""
+    html = """
+    <html><head><meta property="og:image" content="https://cdn.example.com/cover.jpg"></head>
+    <body><article><img src="https://cdn.example.com/body.jpg"></article>
+    <script>var g=["https://cdn.example.com/extra.jpg"];</script>
+    </body></html>
+    """
+    urls = extract_image_urls(html, "https://example.com/")
+    assert [Path(u).name for u in urls] == ["cover.jpg", "body.jpg", "extra.jpg"]
+
+
+def test_script_gallery_still_drops_logos() -> None:
+    html = """
+    <html><body><article><img src="https://cdn.example.com/a.jpg"></article>
+    <script>var s={"logo":"https://cdn.example.com/logo.png",
+                   "photo":"https://cdn.example.com/b.jpg"};</script>
+    </body></html>
+    """
+    urls = extract_image_urls(html, "https://example.com/")
+    assert [Path(u).name for u in urls] == ["a.jpg", "b.jpg"]
+
+
 # --- 取得 -------------------------------------------------------------
 
 def _pages(**extra) -> dict:
