@@ -30,6 +30,7 @@ on:
           - post-run           # 時間が来た通常投稿を1本出す（**本番のIGに出る**）
           - image-report       # 1件の画像の内訳（枚数が足りない理由。費用なし）
           - refetch-images     # 1件の画像を取り直して足す（費用なし・Driveは触らない）
+          - refetch-images-bulk # ソース単位でまとめて取り直す（「対象の上限」にソースのkey）
       apply:
         description: "本当に実行する（外すと見積もりだけ）"
         type: boolean
@@ -114,6 +115,17 @@ jobs:
             post-compact)
               python -m freming.cli post compact
               python -m freming.cli post show
+              ;;
+            refetch-images-bulk)
+              # 「対象の上限」欄にソースの key を入れる（例: coldwellbanker）。
+              # 空なら全ソースが対象。外すと対象を並べるだけで取りに行かない。
+              SRC=""
+              if [ -n "${{ github.event.inputs.limit }}" ]; then
+                SRC="--source ${{ github.event.inputs.limit }}"
+              else
+                SRC="--all"
+              fi
+              python -m freming.cli refetch-images $SRC $( [ -n "$YES" ] || echo --dry-run )
               ;;
             refetch-images)
               # limit に property_id を入れる（image-report が先頭に出す番号）。

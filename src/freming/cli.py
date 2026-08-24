@@ -612,6 +612,29 @@ def _cmd_remove(args: argparse.Namespace) -> int:
     return 0
 
 
+def _refetch_targets(conn, cfg, source: str | None, limit: int | None):
+    """枚数が上限に届いていない物件を、投稿に近い順に返す。
+
+    納品済みを先に見る。**そこが投稿に回るので、直す価値が一番高い。**
+    """
+    where = ["p.source_url IS NOT NULL"]
+    params: list = [cfg.images.max_per_property]
+    if source:
+        where.append("p.source = ?")
+        params.append(source)
+    sql = (
+        "SELECT p.* FROM properties p "
+        "WHERE (SELECT COUNT(*) FROM images i WHERE i.property_id = p.id) < ? "
+        f"AND {' AND '.join(where)} "
+        "ORDER BY p.status = 'delivered' DESC, p.status = 'approved' DESC, "
+        "p.score DESC, p.id DESC"
+    )
+    if limit:
+        sql += " LIMIT ?"
+        params.append(limit)
+    return conn.execute(sql, tuple(params)).fetchall()
+
+
 def _cmd_refetch_images(args: argparse.Namespace) -> int:
     """掲載ページを読み直して、**足りない画像を足す**。既存は消さない。
 
@@ -624,41 +647,73 @@ def _cmd_refetch_images(args: argparse.Namespace) -> int:
     見て組み立て、手元にファイルが無ければ取得元から取り直すので、
     ここで行が増えればカルーセルの枚数が増える。
 
+    --source を渡すと、そのソースで**上限に届いていない物件**をまとめて
+    直す。1件ずつ、相手サイトへの間隔を守って回る（HttpClient 任せ）。
+
     一度弾いたURLは image_skips に残る限り取りに行かない。基準そのものを
     変えたときは `reset-images --stale-skips` を先に。
     """
     from freming.db.connection import session
     from freming.images.fetch import NoImagesFound, fetch_images
+    from freming.net.client import HttpClient
 
     cfg = load_config(args.config)
     setup_logging(cfg.app.log_dir, cfg.app.log_level)
 
     with session(cfg.app.target()) as conn:
-        row = conn.execute(
-            "SELECT * FROM properties WHERE id = ?", (args.id,)
-        ).fetchone()
-        if row is None:
-            print(f"property {args.id} がありません。", file=sys.stderr)
-            return 1
-        before = conn.execute(
-            "SELECT COUNT(*) AS n FROM images WHERE property_id = ?", (args.id,)
-        ).fetchone()["n"]
-        print(f"{row['display_name'] or row['title']}（いま {before} 枚）")
-        if args.dry_run:
-            print("読み直しません（--dry-run）。実行するには外してください。")
-            return 0
-        try:
-            stats = fetch_images(cfg, conn, row)
-        except NoImagesFound as exc:
-            print(f"取れませんでした: {exc}", file=sys.stderr)
-            return 1
-        after = conn.execute(
-            "SELECT COUNT(*) AS n FROM images WHERE property_id = ?", (args.id,)
-        ).fetchone()["n"]
+        if args.id:
+            rows = conn.execute(
+                "SELECT * FROM properties WHERE id = ?", (args.id,)
+            ).fetchall()
+            if not rows:
+                print(f"property {args.id} がありません。", file=sys.stderr)
+                return 1
+        else:
+            rows = _refetch_targets(conn, cfg, args.source, args.limit)
+            if not rows:
+                print("上限に届いていない物件はありません。")
+                return 0
 
-    print(stats.summary())
-    print(f"{before} 枚 → {after} 枚")
-    if after > before:
+        def _count(property_id: int) -> int:
+            return conn.execute(
+                "SELECT COUNT(*) AS n FROM images WHERE property_id = ?", (property_id,)
+            ).fetchone()["n"]
+
+        print(f"対象 {len(rows)} 件（上限 {cfg.images.max_per_property} 枚）")
+        for row in rows[:40]:
+            print(f"  {row['id']:>5}  {_count(int(row['id'])):>2}枚  "
+                  f"{(row['display_name'] or row['title'] or '')[:48]}")
+        if len(rows) > 40:
+            print(f"  …ほか {len(rows) - 40} 件")
+        if args.dry_run:
+            wait = len(rows) * cfg.http.request_interval_sec
+            print(f"\n読み直しません（--dry-run）。所要 約 {wait / 60:.0f} 分＋画像の枚数分。")
+            return 0
+
+        gained = failed = 0
+        with HttpClient(cfg.http) as client:
+            for row in rows:
+                property_id = int(row["id"])
+                before = _count(property_id)
+                try:
+                    fetch_images(cfg, conn, row, client=client)
+                except NoImagesFound as exc:
+                    log_line = f"  {property_id:>5}  取れず（{exc}）"
+                    print(log_line[:150], file=sys.stderr)
+                    failed += 1
+                    continue
+                except Exception as exc:  # noqa: BLE001 - 1件で全体を止めない
+                    print(f"  {property_id:>5}  失敗（{exc}）"[:150], file=sys.stderr)
+                    failed += 1
+                    continue
+                after = _count(property_id)
+                if after > before:
+                    gained += after - before
+                    print(f"  {property_id:>5}  {before} → {after} 枚")
+
+    print(f"\n{len(rows)} 件を読み直し、{gained} 枚増えました"
+          + (f"（{failed} 件は取れず）" if failed else ""))
+    if gained:
         print("**Drive の納品フォルダは更新していません。** 増えたのは投稿に使う分です。")
     return 0
 
@@ -1807,8 +1862,17 @@ def build_parser() -> argparse.ArgumentParser:
         "refetch-images",
         help="掲載ページを読み直して足りない画像を足す（既存は消さない・Driveは触らない）",
     )
-    p_refetch.add_argument("--id", type=int, required=True, help="property_id")
-    p_refetch.add_argument("--dry-run", action="store_true", help="いまの枚数だけ出す")
+    group_refetch = p_refetch.add_mutually_exclusive_group(required=True)
+    group_refetch.add_argument("--id", type=int, help="property_id（1件だけ）")
+    group_refetch.add_argument(
+        "--source", help="ソースのkey。上限に届いていない物件をまとめて直す",
+    )
+    group_refetch.add_argument(
+        "--all", dest="source", action="store_const", const=None,
+        help="ソースを問わず、上限に届いていない物件をまとめて直す",
+    )
+    p_refetch.add_argument("--limit", type=int, help="対象の上限（件数）")
+    p_refetch.add_argument("--dry-run", action="store_true", help="対象を並べるだけ")
     p_refetch.set_defaults(func=_cmd_refetch_images)
 
     p_ig = sub.add_parser("instagram", help="Instagram のトークン管理（[8] 自動投稿の土台）")
