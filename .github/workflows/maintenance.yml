@@ -21,6 +21,9 @@ on:
           - rescore            # 採点をやり直す（API費用・納品済みは除く）
           - source-report      # ソース別の歩留まり（費用なし）
           - post-show          # 投稿予定の一覧（費用なし）
+          - post-show-all      # 60日先までの予定（窓の外に置いた行を見る。費用なし）
+          - post-skip          # 予定を見送りにする（「対象の上限」に post_id）
+          - post-unskip        # 見送りを予定に戻す（「対象の上限」に post_id）
           - exchange-ig-code   # 受け取った code をトークンに換える（費用なし）
           - check-ig-token     # トークンの疎通とスコープ（費用なし）
           - post-replan        # 未投稿の予定の本文を作り直す（費用なし）
@@ -97,6 +100,18 @@ jobs:
             rescore)          python -m freming.cli rescore $LIMIT $YES ;;
             source-report)    python -m freming.cli source-report ;;
             post-show)        python -m freming.cli post show ;;
+            post-show-all)    python -m freming.cli post show --days 60 ;;
+            post-skip|post-unskip)
+              # 「対象の上限」欄に post_id を入れる（post show の先頭の番号）。
+              # **どちらも予定表を書き換えるだけ**で、IG には触らない。
+              if [ -z "${{ github.event.inputs.limit }}" ]; then
+                echo "「対象の上限」欄に post_id を入れてください。" >&2
+                exit 2
+              fi
+              VERB="${{ github.event.inputs.action }}"
+              python -m freming.cli post "${VERB#post-}" --id ${{ github.event.inputs.limit }}
+              python -m freming.cli post show --days 60
+              ;;
             exchange-ig-code)
               if [ -z "${INSTAGRAM_AUTH_CODE:-}" ] || [ -z "${INSTAGRAM_APP_SECRET:-}" ]; then
                 echo "Secrets の IG_AUTH_CODE と INSTAGRAM_APP_SECRET を先に登録してください。" >&2

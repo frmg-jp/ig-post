@@ -1476,7 +1476,8 @@ def _cmd_post(args: argparse.Namespace) -> int:
 
         if args.post_action == "show":
             zone = ZoneInfo(cfg.instagram.timezone)
-            until = datetime.now(UTC) + timedelta(days=cfg.instagram.plan_days)
+            days = args.days or cfg.instagram.plan_days
+            until = datetime.now(UTC) + timedelta(days=days)
             rows = scheduled_posts(conn, until.isoformat())
             if not rows:
                 print("予定はありません。post plan で作ってください。")
@@ -1501,6 +1502,13 @@ def _cmd_post(args: argparse.Namespace) -> int:
                       f'{row["kind"]:<5} {row["state"]:<10} {shots:<5} {title[:40]}')
             counts = count_posts_by_state(conn)
             print("  " + " / ".join(f"{k} {v}" for k, v in sorted(counts.items())))
+            # **合計はこの一覧の外の行も数えている。** 先の日付に置いた
+            # リールなどが窓の外に落ちると、一覧と合計が食い違って見える。
+            # 黙って隠すと「消えた」と読めるので、件数と出し方を書く。
+            hidden = sum(counts.values()) - len(rows)
+            if hidden > 0:
+                print(f"  この先に、あと {hidden} 件あります（表示は {days} 日先まで）。"
+                      f"すべて見るなら post show --days 60")
             return 0
 
         if not cfg.instagram.public_base_url:
@@ -1950,6 +1958,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_post.add_argument(
         "--now", action="store_true",
         help="requeue で「次の空き枠」ではなく今すぐ出す列に戻す",
+    )
+    p_post.add_argument(
+        "--days", type=int,
+        help="show で何日先まで出すか。既定は config の plan_days",
     )
     p_post.add_argument(
         "--limit", type=int,
