@@ -612,6 +612,57 @@ def _cmd_remove(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_refetch_images(args: argparse.Namespace) -> int:
+    """掲載ページを読み直して、**足りない画像を足す**。既存は消さない。
+
+    抽出を直したあとに使う。`reset-images` は納品済みを対象外にして
+    いる（Drive の中身と食い違うため）が、こちらは足すだけなので
+    納品済みでも通す。
+
+    **Drive の納品フォルダは更新しない。** 増えるのは投稿に使う分だけで、
+    Drive には最初に納品した枚数が残る。Instagram の投稿は images の行を
+    見て組み立て、手元にファイルが無ければ取得元から取り直すので、
+    ここで行が増えればカルーセルの枚数が増える。
+
+    一度弾いたURLは image_skips に残る限り取りに行かない。基準そのものを
+    変えたときは `reset-images --stale-skips` を先に。
+    """
+    from freming.db.connection import session
+    from freming.images.fetch import NoImagesFound, fetch_images
+
+    cfg = load_config(args.config)
+    setup_logging(cfg.app.log_dir, cfg.app.log_level)
+
+    with session(cfg.app.target()) as conn:
+        row = conn.execute(
+            "SELECT * FROM properties WHERE id = ?", (args.id,)
+        ).fetchone()
+        if row is None:
+            print(f"property {args.id} がありません。", file=sys.stderr)
+            return 1
+        before = conn.execute(
+            "SELECT COUNT(*) AS n FROM images WHERE property_id = ?", (args.id,)
+        ).fetchone()["n"]
+        print(f"{row['display_name'] or row['title']}（いま {before} 枚）")
+        if args.dry_run:
+            print("読み直しません（--dry-run）。実行するには外してください。")
+            return 0
+        try:
+            stats = fetch_images(cfg, conn, row)
+        except NoImagesFound as exc:
+            print(f"取れませんでした: {exc}", file=sys.stderr)
+            return 1
+        after = conn.execute(
+            "SELECT COUNT(*) AS n FROM images WHERE property_id = ?", (args.id,)
+        ).fetchone()["n"]
+
+    print(stats.summary())
+    print(f"{before} 枚 → {after} 枚")
+    if after > before:
+        print("**Drive の納品フォルダは更新していません。** 増えたのは投稿に使う分です。")
+    return 0
+
+
 def _cmd_image_report(args: argparse.Namespace) -> int:
     """1物件の画像の内訳を出す。**枚数が足りない理由を目で確かめるため。**
 
@@ -1743,6 +1794,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_img_report.set_defaults(func=_cmd_image_report)
 
+    p_refetch = sub.add_parser(
+        "refetch-images",
+        help="掲載ページを読み直して足りない画像を足す（既存は消さない・Driveは触らない）",
+    )
+    p_refetch.add_argument("--id", type=int, required=True, help="property_id")
+    p_refetch.add_argument("--dry-run", action="store_true", help="いまの枚数だけ出す")
+    p_refetch.set_defaults(func=_cmd_refetch_images)
+
     p_ig = sub.add_parser("instagram", help="Instagram のトークン管理（[8] 自動投稿の土台）")
     p_ig.add_argument(
         "ig_action",
@@ -1883,7 +1942,7 @@ _NEEDS_MIGRATED_DB = frozenset({
     "collect", "score", "serve", "deliver", "learn", "rules",
     "ingest-url", "add-manual", "remove", "reset-images", "status",
     "instagram", "post", "redeliver", "rescore", "source-report",
-    "backfill-captions", "backfill-listings", "image-report",
+    "backfill-captions", "backfill-listings", "image-report", "refetch-images",
 })
 
 

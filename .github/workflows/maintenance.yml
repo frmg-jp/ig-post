@@ -29,6 +29,7 @@ on:
           - post-compact       # 空いた枠のぶん、後ろの予定を前に詰める（費用なし）
           - post-run           # 時間が来た通常投稿を1本出す（**本番のIGに出る**）
           - image-report       # 1件の画像の内訳（枚数が足りない理由。費用なし）
+          - refetch-images     # 1件の画像を取り直して足す（費用なし・Driveは触らない）
       apply:
         description: "本当に実行する（外すと見積もりだけ）"
         type: boolean
@@ -113,6 +114,15 @@ jobs:
             post-compact)
               python -m freming.cli post compact
               python -m freming.cli post show
+              ;;
+            refetch-images)
+              # limit に property_id を入れる（image-report が先頭に出す番号）。
+              if [ -z "${{ github.event.inputs.limit }}" ]; then
+                echo "「対象の上限」欄に property_id を入れてください。" >&2
+                exit 2
+              fi
+              python -m freming.cli refetch-images --id ${{ github.event.inputs.limit }} $( [ -n "$YES" ] || echo --dry-run )
+              python -m freming.cli image-report --id ${{ github.event.inputs.limit }}
               ;;
             image-report)
               # limit に post_id を入れて実行する（枚数の「!」が付いた行の番号）。
