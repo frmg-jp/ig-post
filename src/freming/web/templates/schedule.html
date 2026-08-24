@@ -41,6 +41,8 @@
     font: 11px/1.8 var(--mono); background: var(--bg); color: var(--fg);
     padding: 0 5px;
   }
+  /* 出たあとの1枚。掴めないので手の形を出さない。 */
+  .thumbs.still .thumb { cursor: default; touch-action: auto; }
   .thumb.unused img { opacity: .3; }
   .thumb.dragging { opacity: .35; cursor: grabbing; }
   .thumb.cover::after {
@@ -149,16 +151,21 @@
       </div>
 
       {% if item.images %}
-        <div class="thumbs" data-save="/posts/{{ row['id'] }}/order" data-limit="{{ carousel_max }}">
+        {# 出たあとは表紙の1枚だけ。並べ替えられないので掴めるようにしない。 #}
+        <div class="thumbs{{ '' if item.reorderable else ' still' }}"
+             {% if item.reorderable %}data-save="/posts/{{ row['id'] }}/order"
+             data-limit="{{ carousel_max }}"{% endif %}>
           {% for img in item.images %}
-            <div class="thumb {{ 'cover' if loop.first }} {{ '' if img.used else 'unused' }}"
-                 data-position="{{ img.position }}">
+            <div class="thumb {{ 'cover' if loop.first and item.reorderable }} {{ '' if img.used else 'unused' }}"
+                 {% if item.reorderable %}data-position="{{ img.position }}"{% endif %}>
               <img src="{{ img.url }}" loading="lazy" alt="">
-              <span class="no">{{ loop.index }}</span>
+              {% if item.reorderable %}<span class="no">{{ loop.index }}</span>{% endif %}
             </div>
           {% endfor %}
         </div>
-        <div class="hint">写真を掴んで動かすと並びが変わり、その場で保存されます。</div>
+        {% if item.reorderable %}
+          <div class="hint">写真を掴んで動かすと並びが変わり、その場で保存されます。</div>
+        {% endif %}
       {% endif %}
 
       <div class="ops">

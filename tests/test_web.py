@@ -904,3 +904,62 @@ def test_一覧のフォームが今の並びを持っている(client, conn) ->
     _add(conn)
     body = client.get("/?status=pending&sort=oldest&page=1").text
     assert 'name="back" value="/?status=pending&amp;sort=oldest&amp;page=1"' in body
+
+
+# --- 投稿済みの一覧にも写真を出す（2026-08-24） ------------------------
+def _published_post(conn) -> int:
+    """写真つきの投稿済みの行を1件作る。"""
+    from datetime import UTC, datetime
+
+    from freming.db.repository import create_post, finish_post
+
+    cursor = conn.execute(
+        "INSERT INTO properties (source, source_url, title, summary, score, status, "
+        "collected_at, display_name, caption_body) "
+        "VALUES ('dezeen', 'https://e.com/out', 'Out Article', 's', 80, 'delivered', "
+        "'2026-08-01T00:00:00+00:00', 'Out House', '本文') RETURNING id"
+    )
+    property_id = cursor.fetchone()["id"]
+    for position in (1, 2, 3):
+        conn.execute(
+            "INSERT INTO images (property_id, source_url, position) VALUES (?, ?, ?)",
+            (property_id, f"https://img.example.com/out{position}.jpg", position),
+        )
+    conn.commit()
+    post_id = create_post(conn, "feed", datetime.now(UTC).isoformat(),
+                          property_id=property_id, caption="c")
+    finish_post(conn, post_id, "media-out", "permalink-out")
+    return post_id
+
+
+def test_投稿済みにも写真が出る(config, conn, client):
+    """日時と物件名だけだと文字が並ぶだけで、どれがどれか分からない。"""
+    _published_post(conn)
+    page = client.get("/schedule?view=done").text
+    assert "https://img.example.com/out1.jpg" in page
+
+
+def test_投稿済みは表紙の1枚だけ(config, conn, client):
+    """並べ替えはもうできない。10枚出す意味がない。"""
+    _published_post(conn)
+    page = client.get("/schedule?view=done").text
+    assert "https://img.example.com/out2.jpg" not in page
+    assert "https://img.example.com/out3.jpg" not in page
+
+
+def test_投稿済みの写真は掴めない(config, conn, client):
+    """出たあとの並べ替えを受け付ける口を、画面に出さない。"""
+    post_id = _published_post(conn)
+    page = client.get("/schedule?view=done").text
+    assert f"/posts/{post_id}/order" not in page
+    assert "その場で保存されます" not in page
+
+
+def test_投稿済みの表紙は投稿した並びの1枚目(config, conn, client):
+    """image_order で並べ替えてから出した投稿は、その1枚目が表紙。"""
+    post_id = _published_post(conn)
+    conn.execute("UPDATE posts SET image_order = '3,1,2' WHERE id = ?", (post_id,))
+    conn.commit()
+    page = client.get("/schedule?view=done").text
+    assert "https://img.example.com/out3.jpg" in page
+    assert "https://img.example.com/out1.jpg" not in page

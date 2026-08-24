@@ -507,10 +507,26 @@ def create_app(
             except (KeyError, IndexError):
                 return None
 
+        def _reorderable(row) -> bool:
+            """写真を並べ替えられる行か。**出たあとは動かせない。**"""
+            return (
+                row["kind"] == "feed"
+                and bool(row["property_id"])
+                and row["state"] in ("planned", "failed", "skipped")
+            )
+
         def _images_for(row) -> list[dict]:
+            """一覧に出す写真。
+
+            まだ出していない行は全部出す（並べ替えるため）。**出たあとは
+            表紙の1枚だけ**にする。投稿済みの一覧は「どれがどれか」を
+            見分けるためのもので、日時と物件名だけだと文字が並ぶだけに
+            なる。並べ替えはもうできないので、10枚出す意味がない。
+            """
             if row["kind"] != "feed" or not row["property_id"]:
                 return []
-            if row["state"] not in ("planned", "failed", "skipped"):
+            if row["state"] not in ("planned", "failed", "skipped", "publishing",
+                                    "published"):
                 return []
             conn2 = _conn()
             try:
@@ -526,6 +542,8 @@ def create_app(
                      if p in by_position]
             order += [p for p in sorted(by_position) if p not in order]
             limit = config.instagram.carousel_max
+            if not _reorderable(row):
+                order = order[:1]
             return [
                 {"position": p, "url": by_position[p], "used": index < limit}
                 for index, p in enumerate(order)
@@ -601,6 +619,7 @@ def create_app(
                     "day": moment.strftime("%m/%d (%a)"),
                     "at_input": moment.strftime("%Y-%m-%dT%H:%M"),
                     "images": _images_for(row),
+                    "reorderable": _reorderable(row),
                     "caption_edited": bool(_col(row, "caption_edited_at")),
                     "name": _display_title(row),
                     "listing_url": _col(row, "listing_url") or "",
