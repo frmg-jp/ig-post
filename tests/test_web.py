@@ -1145,3 +1145,29 @@ def test_投稿する画像は上げたものから作る(config, conn, client):
 
     with Image.open(BytesIO(data)) as image:
         assert image.size == tuple(config.process.output_size)
+
+
+def test_マイグレーション前でも投稿は落ちない(config, conn, client):
+    """新コードが本番に出てから 0018 が適用されるまでの隙間。
+
+    ここで落とすと、手で上げた写真とは無関係な投稿まで全部失敗する
+    （0015 のときに /schedule が同じ理由で 500 になった）。
+    """
+    from freming.instagram.media import square_bytes
+
+    _add_manual(client, photos=1)
+    row = conn.execute("SELECT id FROM properties WHERE source='manual'").fetchone()
+    # 実体を別に取っておき、表を落として「未適用」を作る
+    stored = conn.execute(
+        "SELECT content FROM property_media WHERE property_id = ?", (row["id"],)
+    ).fetchone()["content"]
+    conn.execute("DROP TABLE property_media")
+    conn.commit()
+
+    # 取得元URLも手元のファイルも無いので、ここは MediaError で止まる。
+    # **「表が無い」で落ちないこと**が要点（他の物件は自分の経路で出せる）。
+    from freming.instagram.media import MediaError
+
+    with pytest.raises(MediaError):
+        square_bytes(config, conn, int(row["id"]), 1)
+    assert stored

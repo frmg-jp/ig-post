@@ -52,12 +52,22 @@ def _square_from_upload(
     """
     import tempfile
 
+    from freming.db.migrate import is_missing_table
     from freming.images.process import to_square
 
-    row = conn.execute(
-        "SELECT content FROM property_media WHERE property_id = ? AND position = ?",
-        (property_id, position),
-    ).fetchone()
+    try:
+        row = conn.execute(
+            "SELECT content FROM property_media WHERE property_id = ? AND position = ?",
+            (property_id, position),
+        ).fetchone()
+    except Exception as exc:  # noqa: BLE001 - 表が無いだけなら投稿は続ける
+        # **新コードが本番に出てから 0018 が適用されるまでの隙間。**
+        # ここで落とすと、手で上げた写真とは無関係な投稿まで全部失敗する
+        # （0015 のときに /schedule が同じ理由で 500 になった）。
+        if not is_missing_table(exc):
+            raise
+        log.warning("property_media がまだありません。マイグレーションを適用してください")
+        return None
     if row is None:
         return None
     with tempfile.TemporaryDirectory() as tmp:
