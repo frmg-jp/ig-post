@@ -55,6 +55,18 @@ TEMPLATES_DIR = Path(__file__).parent / "templates"
 # pyproject の package-data に web/static/* を入れてあるので配布物にも入る。
 STATIC_DIR = Path(__file__).parent / "static"
 
+# 予定に手で足したときの結果表示。**断られた理由をその場で出す**ため。
+# 黙って一覧に戻すと「押したのに増えない」で終わる。
+_ADD_NOTICES = {
+    "added": "予定に追加しました。",
+    "taken": "その時刻には既に通常投稿の予定があります。**同じ日に2本並ぶ**ので、"
+             "別の時刻を選んでください。",
+    "dup": "この物件は既に予定にあります（見送り・投稿済みも含む）。",
+    "gone": "その物件は投稿できる状態ではありません。一覧を読み直してください。",
+    "time": "時刻を読み取れませんでした。",
+    "past": "過ぎた時刻には追加できません。",
+}
+
 # 並べ替えの選択肢。キーは repository.SORTS と対応する。
 SORT_LABELS: list[tuple[str, str]] = [
     ("score", "スコア順"),
@@ -469,7 +481,7 @@ def create_app(
         return Response(content, media_type=mime, headers={"Cache-Control": "public, max-age=600"})
 
     @app.get("/schedule", response_class=HTMLResponse)
-    def schedule(request: Request, view: str = "todo"):
+    def schedule(request: Request, view: str = "todo", notice: str = ""):
         """投稿予定。承認がそのまま公開にならないよう、人が見て止める場所。
 
         view=todo は予定（これから出るもの・見送り・失敗）、
@@ -600,7 +612,61 @@ def create_app(
                     break
             return title
 
+        def _addable() -> list[dict]:
+            """手で予定に足せる物件。**投稿できる状態のものだけ並べる。**
+
+            条件は自動の plan と同じ（納品済み・表示名と本文がある）。
+            ここを緩めると、見出しが住所のまま・本文が審査用の文章のまま
+            公開される（2026-08-22 に実際に起きた）。**ソースの絞り込み
+            （allowed_sources）だけは掛けない。** 手で選ぶ場面では、
+            自動では回さないソースを1件だけ出したいことがある。
+            """
+            from freming.db.repository import postable_properties
+
+            conn2 = _conn()
+            try:
+                found = list(postable_properties(conn2, 200))
+                counts = {}
+                if found:
+                    marks = ",".join("?" for _ in found)
+                    for count in conn2.execute(
+                        f"SELECT property_id, COUNT(*) AS n FROM images "
+                        f"WHERE property_id IN ({marks}) AND position IS NOT NULL "
+                        f"GROUP BY property_id",
+                        tuple(int(r["id"]) for r in found),
+                    ).fetchall():
+                        counts[int(count["property_id"])] = int(count["n"])
+            finally:
+                conn2.close()
+            cap = config.instagram.carousel_max
+            return [
+                {
+                    "id": int(r["id"]),
+                    "name": _display_title(r),
+                    "source": r["source"],
+                    "score": r["score"],
+                    "shots": min(counts.get(int(r["id"]), 0), cap),
+                }
+                for r in found
+            ]
+
+        def _next_free(posts) -> str:
+            """次の空き枠（JST）。datetime-local の初期値に使う。
+
+            **絞り込む前の全行を渡すこと。** 予定タブだけを見て決めると、
+            投稿済みの枠を空きとみなして同じ日に2本並ぶ。
+            """
+            from freming.instagram.plan import slot_times
+
+            taken = {r["scheduled_at"] for r in posts
+                     if r["kind"] == "feed" and r["state"] != "deleted"}
+            for slot in slot_times(config, now):
+                if slot.isoformat() not in taken:
+                    return slot.astimezone(zone).strftime("%Y-%m-%dT%H:%M")
+            return (now + timedelta(days=1)).astimezone(zone).strftime("%Y-%m-%dT09:00")
+
         view = "done" if view == "done" else "todo"
+        next_free = _next_free(rows)
         rows = [r for r in rows if r["state"] != "deleted"]
         done_count = sum(1 for r in rows if r["state"] == "published")
         todo_count = len(rows) - done_count
@@ -633,6 +699,9 @@ def create_app(
                 "days": days,
                 "days_ahead": config.instagram.plan_days,
                 "carousel_max": config.instagram.carousel_max,
+                "addable": _addable() if view == "todo" else [],
+                "next_free": next_free,
+                "notice": _ADD_NOTICES.get(notice, ""),
                 "view": view,
                 "todo_count": todo_count,
                 "done_count": done_count,
@@ -805,6 +874,79 @@ def create_app(
         finally:
             conn.close()
         return RedirectResponse("/schedule", status_code=303)
+
+    @app.post("/posts/add")
+    def add_post_route(property_id: int = Form(0), at: str = Form("")):
+        """予定に1件、手で足す。
+
+        自動の plan は「スコアの高い順に空き枠を埋める」ので、順番を
+        変えたい・自動では回さないソースを1件だけ出したい、といった
+        場面がある。**足せるのは plan と同じ条件を満たす物件だけ**
+        （納品済み・表示名と本文がある）。本文も plan と同じ組み方で
+        作るので、出来上がる行は自動で作ったものと区別がつかない。
+        """
+        from datetime import UTC, datetime, timedelta
+        from zoneinfo import ZoneInfo
+
+        from freming.db.repository import create_post, postable_properties
+        from freming.instagram.caption import build_caption
+        from freming.instagram.publish import KIND_FEED, KIND_STORY
+
+        def _back(notice: str):
+            return RedirectResponse(f"/schedule?notice={notice}", status_code=303)
+
+        try:
+            local = datetime.fromisoformat(at)
+        except ValueError:
+            return _back("time")
+        if local.tzinfo is None:
+            # datetime-local の値は無タイムゾーン。審査UIの時刻＝JSTで解釈する。
+            local = local.replace(tzinfo=ZoneInfo(config.instagram.timezone))
+        moment = local.astimezone(UTC)
+        if moment <= datetime.now(UTC):
+            return _back("past")
+
+        conn = _conn()
+        try:
+            # **同じ枠に2本置かない。** 見送り・削除は枠を持たないので、
+            # そこだけは空きとして使える。
+            clash = conn.execute(
+                "SELECT id FROM posts WHERE kind = ? AND scheduled_at = ? "
+                "AND state IN ('planned', 'publishing', 'published')",
+                (KIND_FEED, moment.isoformat()),
+            ).fetchone()
+            if clash is not None:
+                return _back("taken")
+
+            # 一覧に出したのと同じ条件で引き直す。**画面が古いまま押されても
+            # 通さない**ため（表示名を消した直後など）。
+            allowed = {int(r["id"]): r for r in postable_properties(conn, 500)}
+            row = allowed.get(property_id)
+            if row is None:
+                return _back("gone")
+
+            src = config.editorial_source(row["source"]) or config.listing_source(
+                row["source"]
+            )
+            caption = build_caption(row, config.caption, src.name if src else None)
+            post_id = create_post(
+                conn, KIND_FEED, moment.isoformat(),
+                property_id=property_id, caption=caption,
+            )
+            if post_id is None:
+                # kind ごとに1物件1行の UNIQUE がある。見送り・投稿済みの
+                # 行が残っていればここに来る。
+                return _back("dup")
+            if config.instagram.post_story:
+                story_at = moment + timedelta(minutes=config.instagram.story_delay_min)
+                create_post(
+                    conn, KIND_STORY, story_at.isoformat(),
+                    property_id=property_id, parent_post_id=post_id,
+                )
+            log.info("予定に手で追加しました: post %s（物件 %s）", post_id, property_id)
+        finally:
+            conn.close()
+        return _back("added")
 
     @app.post("/posts/{post_id}/order")
     def order_post_route(request: Request, post_id: int, order: str = Form("")):

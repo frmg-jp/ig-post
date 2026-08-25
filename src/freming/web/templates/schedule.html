@@ -83,6 +83,34 @@
   .ops form.push-right { margin-left: auto; }
   .ops button.danger:hover { color: var(--ng); border-bottom-color: var(--ng); }
 
+  /* 手で1件足す欄。普段は畳んでおく（毎日使うものではない）。 */
+  details.add-post { margin: 0 0 24px; }
+  details.add-post summary {
+    cursor: pointer; list-style: none;
+    font: 12px var(--mono); color: var(--muted); letter-spacing: var(--track-label);
+  }
+  details.add-post summary::before { content: "＋ "; }
+  details.add-post[open] summary::before { content: "− "; }
+  details.add-post summary:hover { color: var(--fg); }
+  details.add-post form {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px;
+  }
+  details.add-post select {
+    flex: 1; min-width: 260px; max-width: 100%;
+    font: 13px var(--serif); height: 30px; padding: 0 6px;
+    border: 1px solid var(--line); background: var(--surface); color: var(--fg);
+  }
+  details.add-post input[type="datetime-local"] {
+    font: 12px var(--mono); height: 30px; padding: 0 6px;
+    border: 1px solid var(--line); background: var(--surface); color: var(--fg);
+  }
+  details.add-post button.linklike {
+    border: 0; background: none; padding: 0; height: auto; cursor: pointer;
+    font: 12px var(--mono); letter-spacing: var(--track-label);
+    color: var(--muted); border-bottom: 1px solid var(--line);
+  }
+  details.add-post button.linklike:hover { color: var(--hi); border-bottom-color: var(--hi); }
+
   details.body-edit { margin-top: 10px; }
   details.body-edit summary {
     cursor: pointer; list-style: none;
@@ -108,11 +136,46 @@
   <a href="/schedule?view=done" class="{{ 'on' if view == 'done' else '' }}">投稿済み <span class="n">{{ done_count }}</span></a>
 </div>
 
+{% if notice %}<p class="note">{{ notice }}</p>{% endif %}
+
 {% if view == 'todo' %}
 <p class="note">
   これから {{ days_ahead }} 日ぶんの予定です。承認がそのまま公開になるわけではありません。
   出したくないものは「見送る」で外してください。
 </p>
+
+{# 手で1件足す。自動は「スコアの高い順に空き枠を埋める」ので、
+   順番を変えたい・自動では回さないソースを出したいときに使う。 #}
+<details class="add-post">
+  <summary>予定に追加</summary>
+  {% if addable %}
+    <form method="post" action="/posts/add">
+      <select name="property_id" required>
+        {% for item in addable %}
+          <option value="{{ item.id }}">
+            {{ item.name or "（無題）" }}
+            ／{{ item.source }}
+            ／{{ item.shots }}枚{% if item.shots < carousel_max %}（{{ carousel_max }}枚に届きません）{% endif %}
+            {%- if item.score %} ／スコア {{ "%.0f"|format(item.score) }}{% endif %}
+          </option>
+        {% endfor %}
+      </select>
+      <input type="datetime-local" name="at" value="{{ next_free }}" required>
+      <button class="linklike" type="submit">追加</button>
+    </form>
+    <div class="hint">
+      時刻の初期値は<strong>次の空き枠</strong>です。既に予定が入っている時刻は選べません。<br>
+      出てくるのは<strong>投稿できる状態の {{ addable|length }} 件</strong>だけです。
+      納品が済んでいない、表示名か本文が空、既に予定にある物件は出ません
+      （名前と本文は物件ページで付けられます）。
+    </div>
+  {% else %}
+    <div class="hint">
+      いま足せる物件はありません。承認したものが納品を通り、表示名と本文が
+      付くとここに出ます。
+    </div>
+  {% endif %}
+</details>
 {% endif %}
 
 {% if not auto_post %}

@@ -963,3 +963,118 @@ def test_投稿済みの表紙は投稿した並びの1枚目(config, conn, clie
     page = client.get("/schedule?view=done").text
     assert "https://img.example.com/out3.jpg" in page
     assert "https://img.example.com/out1.jpg" not in page
+
+
+# --- 予定に手で足す（2026-08-25） --------------------------------------
+#
+# 自動の plan は「スコアの高い順に空き枠を埋める」。順番を変えたい、
+# 自動では回さないソースを1件だけ出したい、という場面のための経路。
+
+def _postable(conn, url: str, *, name="Hand House", body="本文です。",
+              status="delivered", images=3) -> int:
+    cursor = conn.execute(
+        "INSERT INTO properties (source, source_url, title, summary, score, status, "
+        "collected_at, display_name, caption_body) "
+        "VALUES ('dezeen', ?, 'Hand Article', 's', 80, ?, "
+        "'2026-08-01T00:00:00+00:00', ?, ?) RETURNING id",
+        (url, status, name, body),
+    )
+    property_id = cursor.fetchone()["id"]
+    for position in range(images):
+        conn.execute(
+            "INSERT INTO images (property_id, source_url, position) VALUES (?, ?, ?)",
+            (property_id, f"{url}#{position}", position + 1),
+        )
+    conn.commit()
+    return property_id
+
+
+def _tomorrow(hhmm="09:00") -> str:
+    from datetime import UTC, datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    day = (datetime.now(UTC) + timedelta(days=1)).astimezone(ZoneInfo("Asia/Tokyo"))
+    return f"{day:%Y-%m-%d}T{hhmm}"
+
+
+def test_足せる物件が一覧に出る(config, conn, client):
+    _postable(conn, "https://e.com/hand")
+    page = client.get("/schedule").text
+    assert "予定に追加" in page
+    assert "Hand House" in page
+
+
+def test_手で足すと予定になる(config, conn, client):
+    property_id = _postable(conn, "https://e.com/hand")
+    response = client.post("/posts/add",
+                           data={"property_id": property_id, "at": _tomorrow("11:00")},
+                           follow_redirects=False)
+    assert response.status_code == 303
+    row = conn.execute(
+        "SELECT state, kind, caption FROM posts WHERE property_id = ?", (property_id,)
+    ).fetchone()
+    assert row["state"] == "planned" and row["kind"] == "feed"
+    # 本文は自動と同じ組み方。空のまま作らない（21 Bamboo の再発防止）
+    assert row["caption"] and "本文です。" in row["caption"]
+
+
+def test_同じ枠には足せない(config, conn, client):
+    """**同じ日に2本並ぶ**のを止める。"""
+    first = _postable(conn, "https://e.com/one")
+    second = _postable(conn, "https://e.com/two")
+    when = _tomorrow("11:00")
+    client.post("/posts/add", data={"property_id": first, "at": when})
+    response = client.post("/posts/add", data={"property_id": second, "at": when},
+                           follow_redirects=False)
+    assert "notice=taken" in response.headers["location"]
+    assert conn.execute(
+        "SELECT COUNT(*) AS n FROM posts WHERE property_id = ?", (second,)
+    ).fetchone()["n"] == 0
+
+
+def test_過ぎた時刻には足せない(config, conn, client):
+    property_id = _postable(conn, "https://e.com/past")
+    response = client.post("/posts/add",
+                           data={"property_id": property_id, "at": "2020-01-01T09:00"},
+                           follow_redirects=False)
+    assert "notice=past" in response.headers["location"]
+
+
+def test_本文の無い物件は足せない(config, conn, client):
+    """見出しが住所のまま・本文が審査用の文章のまま公開されるのを防ぐ。
+
+    2026-08-22 に実際に起きたので、手で足す経路にも同じ条件を掛ける。
+    """
+    property_id = _postable(conn, "https://e.com/thin", body=None)
+    page = client.get("/schedule").text
+    assert "Hand House" not in page
+    response = client.post("/posts/add",
+                           data={"property_id": property_id, "at": _tomorrow("11:00")},
+                           follow_redirects=False)
+    assert "notice=gone" in response.headers["location"]
+    assert conn.execute(
+        "SELECT COUNT(*) AS n FROM posts WHERE property_id = ?", (property_id,)
+    ).fetchone()["n"] == 0
+
+
+def test_納品前の物件は足せない(config, conn, client):
+    """納品まで通った＝画像がある、という保証を使っている。"""
+    property_id = _postable(conn, "https://e.com/appr", status="approved")
+    response = client.post("/posts/add",
+                           data={"property_id": property_id, "at": _tomorrow("11:00")},
+                           follow_redirects=False)
+    assert "notice=gone" in response.headers["location"]
+
+
+def test_同じ物件は二度足せない(config, conn, client):
+    property_id = _postable(conn, "https://e.com/dup")
+    client.post("/posts/add", data={"property_id": property_id, "at": _tomorrow("11:00")})
+    response = client.post("/posts/add",
+                           data={"property_id": property_id, "at": _tomorrow("13:00")},
+                           follow_redirects=False)
+    # 既に予定にあるので一覧から消えており、引き直しで弾かれる
+    assert "notice=" in response.headers["location"]
+    assert conn.execute(
+        "SELECT COUNT(*) AS n FROM posts WHERE property_id = ? AND kind = 'feed'",
+        (property_id,),
+    ).fetchone()["n"] == 1
