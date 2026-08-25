@@ -1494,6 +1494,21 @@ def _cmd_post(args: argparse.Namespace) -> int:
             # （carousel_max）に届かない行は目印を付ける。
             from freming.instagram import media as _media
 
+            def _actual(row, slot) -> str:
+                """実際に出た時刻と、枠からの遅れ。
+
+                **「定刻に出たか」は published を見ても分からない。**
+                published_at は持っているのに出していなかったので、
+                毎朝の確認のたびに「何分遅れたか」が答えられなかった。
+                """
+                stamp = row["published_at"]
+                if not stamp:
+                    return ""
+                when = datetime.fromisoformat(stamp).astimezone(zone)
+                late = round((when - slot).total_seconds() / 60)
+                mark = f"+{late}分" if late > 0 else "定刻"
+                return f"{when:%H:%M} {mark}"
+
             cap = cfg.instagram.carousel_max
             for row in rows:
                 at = datetime.fromisoformat(row["scheduled_at"]).astimezone(zone)
@@ -1504,7 +1519,8 @@ def _cmd_post(args: argparse.Namespace) -> int:
                     count = min(count, cap)
                     shots = f'{count:>2}枚{"!" if count < cap else " "}'
                 print(f'  {row["id"]:>4}  {at:%m/%d %H:%M}  '
-                      f'{row["kind"]:<5} {row["state"]:<10} {shots:<5} {title[:40]}')
+                      f'{row["kind"]:<5} {row["state"]:<10} {shots:<5} '
+                      f'{_actual(row, at):<12} {title[:40]}')
             counts = count_posts_by_state(conn)
             print("  " + " / ".join(f"{k} {v}" for k, v in sorted(counts.items())))
             # **合計はこの一覧の外の行も数えている。** 先の日付に置いた

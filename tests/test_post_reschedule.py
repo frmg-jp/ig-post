@@ -264,3 +264,54 @@ def test_同じ日に2本並ばない(monkeypatch, tmp_path) -> None:
         ).fetchall()
     ]
     assert len(days) == len(set(days)), f"同じ日に複数の予定がある: {days}"
+
+
+# --- 出た時刻を出す（2026-08-25） --------------------------------------
+#
+# 「定刻に出たか」は state が published というだけでは分からない。
+# published_at は持っているのに一覧に出していなかったので、毎朝の確認で
+# 「何分遅れたか」を答えられなかった。
+
+def test_出た時刻と遅れを出す(tmp_path, capsys):
+    config = _config(tmp_path, ["09:00"])
+    conn = _db(tmp_path)
+    slot = _at(0, "09:00")
+    post_id = _post(conn, slot, "Late House")
+    finish_post(conn, post_id, "media-1", "c1")
+    conn.execute(
+        "UPDATE posts SET published_at = ? WHERE id = ?",
+        ((slot + timedelta(minutes=7)).isoformat(), post_id),
+    )
+    conn.commit()
+    conn.close()
+
+    main(["--config", config, "post", "show"])
+    out = capsys.readouterr().out
+    assert "09:07 +7分" in out
+
+
+def test_定刻に出たものは定刻と出す(tmp_path, capsys):
+    config = _config(tmp_path, ["09:00"])
+    conn = _db(tmp_path)
+    slot = _at(0, "09:00")
+    post_id = _post(conn, slot, "On Time House")
+    finish_post(conn, post_id, "media-2", "c2")
+    conn.execute("UPDATE posts SET published_at = ? WHERE id = ?",
+                 (slot.isoformat(), post_id))
+    conn.commit()
+    conn.close()
+
+    main(["--config", config, "post", "show"])
+    assert "09:00 定刻" in capsys.readouterr().out
+
+
+def test_まだ出ていない予定には時刻を出さない(tmp_path, capsys):
+    config = _config(tmp_path, ["09:00"])
+    conn = _db(tmp_path)
+    _post(conn, _at(1, "09:00"), "Future House")
+    conn.close()
+
+    main(["--config", config, "post", "show"])
+    out = capsys.readouterr().out
+    assert "Future House" in out
+    assert "定刻" not in out and "分" not in out.split("Future House")[0].split("planned")[1]
