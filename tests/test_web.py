@@ -965,31 +965,24 @@ def test_投稿済みの表紙は投稿した並びの1枚目(config, conn, clie
     assert "https://img.example.com/out1.jpg" not in page
 
 
-# --- 予定に手で足す（2026-08-25） --------------------------------------
+
+# --- 写真と本文を手で入れて予定を作る（2026-08-25） --------------------
 #
-# 自動の plan は「スコアの高い順に空き枠を埋める」。順番を変えたい、
-# 自動では回さないソースを1件だけ出したい、という場面のための経路。
+# 自動収集に載らないもの（人づてに来た物件、こちらで撮った写真、
+# robots.txt で断られているサイトの物件）を出すための経路。
+# **出来上がる行は自動で作ったものと同じ形**であること。
 
-def _postable(conn, url: str, *, name="Hand House", body="本文です。",
-              status="delivered", images=3) -> int:
-    cursor = conn.execute(
-        "INSERT INTO properties (source, source_url, title, summary, score, status, "
-        "collected_at, display_name, caption_body) "
-        "VALUES ('dezeen', ?, 'Hand Article', 's', 80, ?, "
-        "'2026-08-01T00:00:00+00:00', ?, ?) RETURNING id",
-        (url, status, name, body),
-    )
-    property_id = cursor.fetchone()["id"]
-    for position in range(images):
-        conn.execute(
-            "INSERT INTO images (property_id, source_url, position) VALUES (?, ?, ?)",
-            (property_id, f"{url}#{position}", position + 1),
-        )
-    conn.commit()
-    return property_id
+def _jpeg(width=1600, height=1200) -> bytes:
+    from io import BytesIO
+
+    from PIL import Image
+
+    buffer = BytesIO()
+    Image.new("RGB", (width, height), (120, 110, 100)).save(buffer, "JPEG")
+    return buffer.getvalue()
 
 
-def _tomorrow(hhmm="09:00") -> str:
+def _future(hhmm="11:00") -> str:
     from datetime import UTC, datetime, timedelta
     from zoneinfo import ZoneInfo
 
@@ -997,84 +990,158 @@ def _tomorrow(hhmm="09:00") -> str:
     return f"{day:%Y-%m-%d}T{hhmm}"
 
 
-def test_足せる物件が一覧に出る(config, conn, client):
-    _postable(conn, "https://e.com/hand")
-    page = client.get("/schedule").text
-    assert "予定に追加" in page
-    assert "Hand House" in page
+def _add_manual(client, *, photos=2, **overrides):
+    fields = {
+        "display_name": "Duckpond House",
+        "caption_body": "静かな池のほとりに建つ家です。",
+        "at": _future(),
+    }
+    fields.update({k: v for k, v in overrides.items() if v is not None})
+    files = [("photos", (f"{i}.jpg", _jpeg(), "image/jpeg")) for i in range(photos)]
+    return client.post("/posts/add", data=fields, files=files, follow_redirects=False)
 
 
-def test_手で足すと予定になる(config, conn, client):
-    property_id = _postable(conn, "https://e.com/hand")
-    response = client.post("/posts/add",
-                           data={"property_id": property_id, "at": _tomorrow("11:00")},
-                           follow_redirects=False)
+def test_手で作ると予定と物件と写真が揃う(config, conn, client):
+    response = _add_manual(client, photos=3)
     assert response.status_code == 303
+    assert "notice=added" in response.headers["location"]
+
     row = conn.execute(
-        "SELECT state, kind, caption FROM posts WHERE property_id = ?", (property_id,)
+        "SELECT * FROM properties WHERE source = 'manual'"
     ).fetchone()
-    assert row["state"] == "planned" and row["kind"] == "feed"
-    # 本文は自動と同じ組み方。空のまま作らない（21 Bamboo の再発防止）
-    assert row["caption"] and "本文です。" in row["caption"]
-
-
-def test_同じ枠には足せない(config, conn, client):
-    """**同じ日に2本並ぶ**のを止める。"""
-    first = _postable(conn, "https://e.com/one")
-    second = _postable(conn, "https://e.com/two")
-    when = _tomorrow("11:00")
-    client.post("/posts/add", data={"property_id": first, "at": when})
-    response = client.post("/posts/add", data={"property_id": second, "at": when},
-                           follow_redirects=False)
-    assert "notice=taken" in response.headers["location"]
+    assert row["display_name"] == "Duckpond House"
+    assert row["status"] == "delivered"
+    # 写真は実体と並びの両方。**実体はDBに置く**（Render のディスクは消える）
     assert conn.execute(
-        "SELECT COUNT(*) AS n FROM posts WHERE property_id = ?", (second,)
-    ).fetchone()["n"] == 0
+        "SELECT COUNT(*) AS n FROM property_media WHERE property_id = ?", (row["id"],)
+    ).fetchone()["n"] == 3
+    positions = [
+        r["position"] for r in conn.execute(
+            "SELECT position FROM images WHERE property_id = ? ORDER BY position",
+            (row["id"],),
+        ).fetchall()
+    ]
+    assert positions == [1, 2, 3]
+
+    post = conn.execute(
+        "SELECT * FROM posts WHERE property_id = ? AND kind = 'feed'", (row["id"],)
+    ).fetchone()
+    assert post["state"] == "planned"
+    # 本文は自動と同じ組み方。見出しと説明文が入っていること
+    assert "【 Duckpond House 】" in post["caption"]
+    assert "静かな池のほとりに建つ家です。" in post["caption"]
 
 
-def test_過ぎた時刻には足せない(config, conn, client):
-    property_id = _postable(conn, "https://e.com/past")
-    response = client.post("/posts/add",
-                           data={"property_id": property_id, "at": "2020-01-01T09:00"},
-                           follow_redirects=False)
+def test_仕様欄は入れたものだけ出る(config, conn, client):
+    """空欄は行ごと落ちる。「Architect: 不明」とは書かない。"""
+    _add_manual(client, location_city="Pasadena", location_region="California",
+         location_country="USA", architect="Richard Neutra", year_built="1955")
+    post = conn.execute("SELECT caption FROM posts WHERE kind = 'feed'").fetchone()
+    assert "Location: Pasadena, California, USA" in post["caption"]
+    assert "Architect: Richard Neutra" in post["caption"]
+    assert "Built in: 1955" in post["caption"]
+    assert "Usage:" not in post["caption"]
+    assert "Site Area:" not in post["caption"]
+
+
+def test_写真クレジットが本文に入る(config, conn, client):
+    _add_manual(client, photo_credit="Photography by Taro")
+    post = conn.execute("SELECT caption FROM posts WHERE kind = 'feed'").fetchone()
+    assert "Photography by Taro" in post["caption"]
+
+
+def test_販売ページを持たせられる(config, conn, client):
+    _add_manual(client, listing_url="https://example.com/listing/1")
+    row = conn.execute("SELECT listing_url FROM properties WHERE source='manual'").fetchone()
+    assert row["listing_url"] == "https://example.com/listing/1"
+
+
+def test_本文が空なら作らない(config, conn, client):
+    """空のまま出すと、審査用の文章が公開される道に戻ってしまう。"""
+    response = _add_manual(client, caption_body="   ")
+    assert "notice=body" in response.headers["location"]
+    assert conn.execute("SELECT COUNT(*) AS n FROM posts").fetchone()["n"] == 0
+
+
+def test_名前が空なら作らない(config, conn, client):
+    response = _add_manual(client, display_name="")
+    assert "notice=name" in response.headers["location"]
+    assert conn.execute("SELECT COUNT(*) AS n FROM properties").fetchone()["n"] == 0
+
+
+def test_写真が無ければ作らない(config, conn, client):
+    response = _add_manual(client, photos=0)
+    assert "notice=photo" in response.headers["location"]
+    assert conn.execute("SELECT COUNT(*) AS n FROM properties").fetchone()["n"] == 0
+
+
+def test_画像でないファイルは断る(config, conn, client):
+    """拡張子だけ見て通すと、投稿の直前の加工で落ちる。そこでは直せない。"""
+    response = client.post(
+        "/posts/add",
+        data={"display_name": "X", "caption_body": "本文", "at": _future()},
+        files=[("photos", ("a.jpg", b"not an image at all", "image/jpeg"))],
+        follow_redirects=False,
+    )
+    assert "notice=bad" in response.headers["location"]
+    assert conn.execute("SELECT COUNT(*) AS n FROM properties").fetchone()["n"] == 0
+
+
+def test_過ぎた時刻には作らない(config, conn, client):
+    response = _add_manual(client, at="2020-01-01T09:00")
     assert "notice=past" in response.headers["location"]
 
 
-def test_本文の無い物件は足せない(config, conn, client):
-    """見出しが住所のまま・本文が審査用の文章のまま公開されるのを防ぐ。
-
-    2026-08-22 に実際に起きたので、手で足す経路にも同じ条件を掛ける。
-    """
-    property_id = _postable(conn, "https://e.com/thin", body=None)
-    page = client.get("/schedule").text
-    assert "Hand House" not in page
-    response = client.post("/posts/add",
-                           data={"property_id": property_id, "at": _tomorrow("11:00")},
-                           follow_redirects=False)
-    assert "notice=gone" in response.headers["location"]
+def test_同じ枠には作らない(config, conn, client):
+    """**同じ日に2本並ぶ**のを止める。"""
+    _add_manual(client, display_name="First")
+    response = _add_manual(client, display_name="Second")
+    assert "notice=taken" in response.headers["location"]
     assert conn.execute(
-        "SELECT COUNT(*) AS n FROM posts WHERE property_id = ?", (property_id,)
-    ).fetchone()["n"] == 0
-
-
-def test_納品前の物件は足せない(config, conn, client):
-    """納品まで通った＝画像がある、という保証を使っている。"""
-    property_id = _postable(conn, "https://e.com/appr", status="approved")
-    response = client.post("/posts/add",
-                           data={"property_id": property_id, "at": _tomorrow("11:00")},
-                           follow_redirects=False)
-    assert "notice=gone" in response.headers["location"]
-
-
-def test_同じ物件は二度足せない(config, conn, client):
-    property_id = _postable(conn, "https://e.com/dup")
-    client.post("/posts/add", data={"property_id": property_id, "at": _tomorrow("11:00")})
-    response = client.post("/posts/add",
-                           data={"property_id": property_id, "at": _tomorrow("13:00")},
-                           follow_redirects=False)
-    # 既に予定にあるので一覧から消えており、引き直しで弾かれる
-    assert "notice=" in response.headers["location"]
-    assert conn.execute(
-        "SELECT COUNT(*) AS n FROM posts WHERE property_id = ? AND kind = 'feed'",
-        (property_id,),
+        "SELECT COUNT(*) AS n FROM properties WHERE source='manual'"
     ).fetchone()["n"] == 1
+
+
+def test_上限より多い写真は切る(config, conn, client):
+    _add_manual(client, photos=config.images.max_per_property + 4)
+    row = conn.execute("SELECT id FROM properties WHERE source='manual'").fetchone()
+    assert conn.execute(
+        "SELECT COUNT(*) AS n FROM property_media WHERE property_id = ?", (row["id"],)
+    ).fetchone()["n"] == config.images.max_per_property
+
+
+def test_上げた写真が一覧に出る(config, conn, client):
+    """取得元URLが無いので、こちらのサーバーから配る経路を指すこと。"""
+    _add_manual(client, photos=2)
+    row = conn.execute("SELECT id FROM properties WHERE source='manual'").fetchone()
+    page = client.get("/schedule").text
+    assert f"/uploads/{row['id']}/1" in page
+    assert "upload:" not in page
+
+
+def test_上げた写真を配る(config, conn, client):
+    _add_manual(client, photos=1)
+    row = conn.execute("SELECT id FROM properties WHERE source='manual'").fetchone()
+    response = client.get(f"/uploads/{row['id']}/1")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/")
+    assert response.content[:2] == b"\xff\xd8"       # JPEG
+
+
+def test_無い写真は404(config, conn, client):
+    assert client.get("/uploads/999/1").status_code == 404
+
+
+def test_投稿する画像は上げたものから作る(config, conn, client):
+    """**取り直せないのは手で上げたものだけ。** 先に見ること。"""
+    from freming.instagram.media import square_bytes
+
+    _add_manual(client, photos=1)
+    row = conn.execute("SELECT id FROM properties WHERE source='manual'").fetchone()
+    data = square_bytes(config, conn, int(row["id"]), 1)
+    from io import BytesIO
+
+    from PIL import Image
+
+    with Image.open(BytesIO(data)) as image:
+        assert image.size == tuple(config.process.output_size)

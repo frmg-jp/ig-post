@@ -622,7 +622,11 @@ def _refetch_targets(conn, cfg, source: str | None, limit: int | None):
     それを混ぜると、出す予定の無い候補のために相手サイトを何百回も
     叩くことになる（実測で 384 件が並び、うち大半が0枚だった）。
     """
-    where = ["p.source_url IS NOT NULL", "p.status IN ('approved', 'delivered')"]
+    # 手で作った物件（source_url が manual: の印）は読み直す先が無い。
+    where = [
+        "p.source_url LIKE 'http%'",
+        "p.status IN ('approved', 'delivered')",
+    ]
     params: list = [cfg.images.max_per_property]
     if source:
         where.append("p.source = ?")

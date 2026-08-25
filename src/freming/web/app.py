@@ -14,6 +14,7 @@ Basic 認証をかける（web/auth.py）。認証なしで外向けに待ち受
 from __future__ import annotations
 
 import json
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlencode
@@ -55,16 +56,28 @@ TEMPLATES_DIR = Path(__file__).parent / "templates"
 # pyproject の package-data に web/static/* を入れてあるので配布物にも入る。
 STATIC_DIR = Path(__file__).parent / "static"
 
+# 手で上げた画像の取得元URL。**実体はDBにあり、取りに行く先は無い。**
+# images.source_url は NOT NULL なので、空にはできず印を入れてある。
+UPLOAD_SCHEME = "upload:"
+
+
+def is_fetchable(url: str | None) -> bool:
+    """取得元から取り直せるURLか。手で上げた画像の印は除く。"""
+    return bool(url) and str(url).startswith(("http://", "https://"))
+
+
 # 予定に手で足したときの結果表示。**断られた理由をその場で出す**ため。
 # 黙って一覧に戻すと「押したのに増えない」で終わる。
 _ADD_NOTICES = {
-    "added": "予定に追加しました。",
-    "taken": "その時刻には既に通常投稿の予定があります。**同じ日に2本並ぶ**ので、"
+    "added": "予定に追加しました。写真の並びは下の一覧で入れ替えられます。",
+    "taken": "その時刻には既に通常投稿の予定があります。同じ日に2本並ぶので、"
              "別の時刻を選んでください。",
-    "dup": "この物件は既に予定にあります（見送り・投稿済みも含む）。",
-    "gone": "その物件は投稿できる状態ではありません。一覧を読み直してください。",
     "time": "時刻を読み取れませんでした。",
     "past": "過ぎた時刻には追加できません。",
+    "name": "物件名を入れてください。投稿の見出し【 】になります。",
+    "body": "本文を入れてください。ここが空のまま出すことはできません。",
+    "photo": "写真を1枚以上選んでください。",
+    "bad": "画像として読めないファイルが混ざっていました。追加していません。",
 }
 
 # 並べ替えの選択肢。キーは repository.SORTS と対応する。
@@ -549,7 +562,15 @@ def create_app(
                 ).fetchall()
             finally:
                 conn2.close()
-            by_position = {int(r["position"]): r["source_url"] for r in found}
+            # 手で上げた画像は取得元URLを持たない（実体がDBにある）ので、
+            # こちらのサーバーから配る経路を指す。
+            by_position = {
+                int(r["position"]): (
+                    r["source_url"] if is_fetchable(r["source_url"])
+                    else f"/uploads/{row['property_id']}/{int(r['position'])}"
+                )
+                for r in found
+            }
             order = [p for p in _parse_image_order(_col(row, "image_order"))
                      if p in by_position]
             order += [p for p in sorted(by_position) if p not in order]
@@ -612,44 +633,6 @@ def create_app(
                     break
             return title
 
-        def _addable() -> list[dict]:
-            """手で予定に足せる物件。**投稿できる状態のものだけ並べる。**
-
-            条件は自動の plan と同じ（納品済み・表示名と本文がある）。
-            ここを緩めると、見出しが住所のまま・本文が審査用の文章のまま
-            公開される（2026-08-22 に実際に起きた）。**ソースの絞り込み
-            （allowed_sources）だけは掛けない。** 手で選ぶ場面では、
-            自動では回さないソースを1件だけ出したいことがある。
-            """
-            from freming.db.repository import postable_properties
-
-            conn2 = _conn()
-            try:
-                found = list(postable_properties(conn2, 200))
-                counts = {}
-                if found:
-                    marks = ",".join("?" for _ in found)
-                    for count in conn2.execute(
-                        f"SELECT property_id, COUNT(*) AS n FROM images "
-                        f"WHERE property_id IN ({marks}) AND position IS NOT NULL "
-                        f"GROUP BY property_id",
-                        tuple(int(r["id"]) for r in found),
-                    ).fetchall():
-                        counts[int(count["property_id"])] = int(count["n"])
-            finally:
-                conn2.close()
-            cap = config.instagram.carousel_max
-            return [
-                {
-                    "id": int(r["id"]),
-                    "name": _display_title(r),
-                    "source": r["source"],
-                    "score": r["score"],
-                    "shots": min(counts.get(int(r["id"]), 0), cap),
-                }
-                for r in found
-            ]
-
         def _next_free(posts) -> str:
             """次の空き枠（JST）。datetime-local の初期値に使う。
 
@@ -699,7 +682,6 @@ def create_app(
                 "days": days,
                 "days_ahead": config.instagram.plan_days,
                 "carousel_max": config.instagram.carousel_max,
-                "addable": _addable() if view == "todo" else [],
                 "next_free": next_free,
                 "notice": _ADD_NOTICES.get(notice, ""),
                 "view": view,
@@ -875,28 +857,76 @@ def create_app(
             conn.close()
         return RedirectResponse("/schedule", status_code=303)
 
-    @app.post("/posts/add")
-    def add_post_route(property_id: int = Form(0), at: str = Form("")):
-        """予定に1件、手で足す。
+    @app.get("/uploads/{property_id}/{position}")
+    def upload_image_route(property_id: int, position: int):
+        """手で上げた画像を配る。審査UIのサムネイル用。
 
-        自動の plan は「スコアの高い順に空き枠を埋める」ので、順番を
-        変えたい・自動では回さないソースを1件だけ出したい、といった
-        場面がある。**足せるのは plan と同じ条件を満たす物件だけ**
-        （納品済み・表示名と本文がある）。本文も plan と同じ組み方で
-        作るので、出来上がる行は自動で作ったものと区別がつかない。
+        **取得元URLが無い**（手元のファイルを上げたもの）ので、実体を
+        DBから出す。認証は全体と同じ（この経路だけ開けない）。
+        投稿のときに Meta が取りに来るのは /m/<token> のほうで、こちらは
+        画面に出すためだけのもの。
+        """
+        from fastapi.responses import Response
+
+        conn = _conn()
+        try:
+            row = conn.execute(
+                "SELECT mime, content FROM property_media "
+                "WHERE property_id = ? AND position = ?",
+                (property_id, position),
+            ).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            return Response(status_code=404)
+        return Response(
+            bytes(row["content"]),
+            media_type=row["mime"],
+            headers={"Cache-Control": "private, max-age=3600"},
+        )
+
+    @app.post("/posts/add")
+    async def add_post_route(request: Request):
+        """写真と本文を手で入れて、予定を1件作る。
+
+        自動収集に載らないもの（人づてに来た物件、こちらで撮った写真、
+        robots.txt で断られているサイトの物件）を出すための経路。
+
+        **出来上がる行は自動で作ったものと同じ形にする。** 物件の行を
+        作り、写真を position 付きで並べ、本文は同じ build_caption で
+        組む。以後の並べ替え・本文編集・見送り・投稿は、自動のものと
+        まったく同じ経路を通る。
+
+        写真は取り直せないので実体をDBに置く（property_media）。審査UIの
+        ディスクは再起動で消えるため、ファイルとして置くと翌朝の投稿で
+        「画像が無い」になる。
         """
         from datetime import UTC, datetime, timedelta
         from zoneinfo import ZoneInfo
 
-        from freming.db.repository import create_post, postable_properties
+        from freming.db.repository import create_post
         from freming.instagram.caption import build_caption
         from freming.instagram.publish import KIND_FEED, KIND_STORY
 
         def _back(notice: str):
             return RedirectResponse(f"/schedule?notice={notice}", status_code=303)
 
+        form = await request.form()
+
+        def _text(key: str) -> str:
+            return str(form.get(key) or "").strip()
+
+        name = _text("display_name")
+        body = _text("caption_body").replace("\r\n", "\n")
+        if not name:
+            return _back("name")
+        if not body:
+            # **本文が空のまま出さない。** 空だと caption_body の無い行と
+            # 同じ扱いになり、審査用の文章が公開される道に戻ってしまう。
+            return _back("body")
+
         try:
-            local = datetime.fromisoformat(at)
+            local = datetime.fromisoformat(_text("at"))
         except ValueError:
             return _back("time")
         if local.tzinfo is None:
@@ -906,6 +936,35 @@ def create_app(
         if moment <= datetime.now(UTC):
             return _back("past")
 
+        # 選ばれた順に読む。**この順がそのままカルーセルの並びになる。**
+        uploads = [f for f in form.getlist("photos") if getattr(f, "filename", "")]
+        if not uploads:
+            return _back("photo")
+
+        from io import BytesIO
+
+        from PIL import Image, UnidentifiedImageError
+
+        shots: list[tuple[bytes, str, int, int]] = []
+        for upload in uploads[: config.images.max_per_property]:
+            content = await upload.read()
+            if not content:
+                continue
+            try:
+                # **中身を確かめてから入れる。** 拡張子だけ見て通すと、
+                # 投稿の直前に加工で落ちる（そこでは直しようがない）。
+                with Image.open(BytesIO(content)) as image:
+                    image.verify()
+                with Image.open(BytesIO(content)) as image:
+                    width, height = image.size
+                    mime = Image.MIME.get(image.format or "", "image/jpeg")
+            except (UnidentifiedImageError, OSError):
+                return _back("bad")
+            shots.append((content, mime, width, height))
+        if not shots:
+            return _back("photo")
+
+        now = datetime.now(UTC).isoformat()
         conn = _conn()
         try:
             # **同じ枠に2本置かない。** 見送り・削除は枠を持たないので、
@@ -918,32 +977,73 @@ def create_app(
             if clash is not None:
                 return _back("taken")
 
-            # 一覧に出したのと同じ条件で引き直す。**画面が古いまま押されても
-            # 通さない**ため（表示名を消した直後など）。
-            allowed = {int(r["id"]): r for r in postable_properties(conn, 500)}
-            row = allowed.get(property_id)
-            if row is None:
-                return _back("gone")
-
-            src = config.editorial_source(row["source"]) or config.listing_source(
-                row["source"]
+            # 物件の行。source_url は UNIQUE NOT NULL なので、重ならない
+            # 印を入れる（取りに行く先ではない）。
+            marker = f"manual:{secrets.token_urlsafe(12)}"
+            cursor = conn.execute(
+                """
+                INSERT INTO properties (
+                    source, source_rank, source_url, title, display_name,
+                    caption_body, listing_url, photo_credit,
+                    location_city, location_region, location_country,
+                    usage_type, architect, building_area, site_area, year_built,
+                    status, is_for_sale, collected_at, reviewed_at
+                ) VALUES (?, 'A', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                          'delivered', 1, ?, ?)
+                RETURNING id
+                """,
+                (
+                    "manual", marker, name, name, body,
+                    _text("listing_url") or None, _text("photo_credit") or None,
+                    _text("location_city") or None,
+                    _text("location_region") or None,
+                    _text("location_country") or None,
+                    _text("usage_type") or None, _text("architect") or None,
+                    _text("building_area") or None, _text("site_area") or None,
+                    _text("year_built") or None,
+                    now, now,
+                ),
             )
-            caption = build_caption(row, config.caption, src.name if src else None)
+            property_id = int(cursor.fetchone()["id"])
+
+            for index, (content, mime, width, height) in enumerate(shots, start=1):
+                conn.execute(
+                    "INSERT INTO property_media "
+                    "(property_id, position, mime, content, created_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (property_id, index, mime, content, now),
+                )
+                # 並べ替え・枚数の数え上げは images の行を見ている。
+                # 自動収集と同じ形で置いて、以後の経路を分けない。
+                conn.execute(
+                    "INSERT INTO images (property_id, source_url, position, "
+                    "width, height, fetched_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    (property_id, f"{UPLOAD_SCHEME}{index}", index, width, height, now),
+                )
+            conn.execute(
+                "UPDATE properties SET thumbnail_url = ? WHERE id = ?",
+                (f"/uploads/{property_id}/1", property_id),
+            )
+            conn.commit()
+
+            row = conn.execute(
+                "SELECT * FROM properties WHERE id = ?", (property_id,)
+            ).fetchone()
             post_id = create_post(
                 conn, KIND_FEED, moment.isoformat(),
-                property_id=property_id, caption=caption,
+                property_id=property_id,
+                caption=build_caption(row, config.caption),
             )
-            if post_id is None:
-                # kind ごとに1物件1行の UNIQUE がある。見送り・投稿済みの
-                # 行が残っていればここに来る。
-                return _back("dup")
-            if config.instagram.post_story:
+            if config.instagram.post_story and post_id is not None:
                 story_at = moment + timedelta(minutes=config.instagram.story_delay_min)
                 create_post(
                     conn, KIND_STORY, story_at.isoformat(),
                     property_id=property_id, parent_post_id=post_id,
                 )
-            log.info("予定に手で追加しました: post %s（物件 %s）", post_id, property_id)
+            log.info(
+                "予定を手で作りました: post %s（物件 %s・写真 %d枚）",
+                post_id, property_id, len(shots),
+            )
         finally:
             conn.close()
         return _back("added")

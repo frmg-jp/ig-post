@@ -41,6 +41,34 @@ def new_token() -> str:
     return secrets.token_urlsafe(TOKEN_BYTES)
 
 
+def _square_from_upload(
+    config: Config, conn: DbConnection, property_id: int, position: int
+) -> bytes | None:
+    """審査UIから上げた画像を、納品と同じ 1080×1080 にして返す。
+
+    **手で上げたものは取り直せない**（取得元URLが無い）ので、実体を
+    DBに持っている（property_media）。加工はここで毎回かける。自動収集の
+    写真とまったく同じ経路を通す。
+    """
+    import tempfile
+
+    from freming.images.process import to_square
+
+    row = conn.execute(
+        "SELECT content FROM property_media WHERE property_id = ? AND position = ?",
+        (property_id, position),
+    ).fetchone()
+    if row is None:
+        return None
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "src"
+        dst = Path(tmp) / "out.jpg"
+        # psycopg は bytea を memoryview で返す
+        src.write_bytes(bytes(row["content"]))
+        to_square(src, dst, config.process)
+        return dst.read_bytes()
+
+
 def _square_from_disk(conn: DbConnection, property_id: int, position: int) -> bytes | None:
     row = conn.execute(
         "SELECT output_path FROM images WHERE property_id = ? AND position = ?",
@@ -68,7 +96,8 @@ def _square_from_source(
         "SELECT source_url FROM images WHERE property_id = ? AND position = ?",
         (property_id, position),
     ).fetchone()
-    if row is None:
+    if row is None or not row["source_url"]:
+        # 手で上げた画像の行は取得元URLを持たない。取りに行く先が無い。
         return None
 
     import tempfile
@@ -90,8 +119,15 @@ def _square_from_source(
 def square_bytes(
     config: Config, conn: DbConnection, property_id: int, position: int = 1
 ) -> bytes:
-    """物件の N 枚目を 1080×1080 の JPEG として返す。"""
-    data = _square_from_disk(conn, property_id, position)
+    """物件の N 枚目を 1080×1080 の JPEG として返す。
+
+    探す順は「手で上げたもの → 手元のファイル → 取得元から取り直す」。
+    **手で上げたものを先に見る。** 取り直せないのはこれだけなので、
+    ほかの経路に落ちる前に拾う。
+    """
+    data = _square_from_upload(config, conn, property_id, position)
+    if data is None:
+        data = _square_from_disk(conn, property_id, position)
     if data is None:
         data = _square_from_source(config, conn, property_id, position)
     if not data:
