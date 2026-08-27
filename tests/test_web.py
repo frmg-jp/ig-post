@@ -1171,3 +1171,102 @@ def test_マイグレーション前でも投稿は落ちない(config, conn, cl
     with pytest.raises(MediaError):
         square_bytes(config, conn, int(row["id"]), 1)
     assert stored
+
+
+# --- 見送りを画面から戻す（2026-08-26） --------------------------------
+#
+# 戻す口が画面に無く、GitHub の手動メンテナンスかターミナルからしか
+# 戻せなかった。見送りの行に出ていたのは「見送る」で、押しても何も
+# 起きない（skip_post は planned / failed にしか効かない）。
+
+def test_見送りの行には予定に戻すが出る(config, conn, client):
+    from freming.db.repository import skip_post
+
+    post_id = _planned_post(conn)
+    skip_post(conn, post_id)
+    page = client.get("/schedule").text
+    assert f"/posts/{post_id}/retry" in page
+    assert f"/posts/{post_id}/skip" not in page
+
+
+def test_予定の行には見送るが出る(config, conn, client):
+    post_id = _planned_post(conn)
+    page = client.get("/schedule").text
+    assert f"/posts/{post_id}/skip" in page
+    assert f"/posts/{post_id}/retry" not in page
+
+
+def test_見送りを戻すと予定になる(config, conn, client):
+    from freming.db.repository import skip_post
+
+    post_id = _planned_post(conn)
+    skip_post(conn, post_id)
+    response = client.post(f"/posts/{post_id}/retry", follow_redirects=False)
+    assert response.status_code == 303
+    row = conn.execute("SELECT state FROM posts WHERE id=?", (post_id,)).fetchone()
+    assert row["state"] == "planned"
+
+
+def test_時刻が過ぎていれば次の空き枠へ送る(config, conn, client):
+    """**そのまま戻すと1分以内に出てしまう。** 戻した瞬間の公開を防ぐ。"""
+    from datetime import UTC, datetime, timedelta
+
+    from freming.db.repository import skip_post
+
+    post_id = _planned_post(conn)
+    past = (datetime.now(UTC) - timedelta(days=2)).isoformat()
+    conn.execute("UPDATE posts SET scheduled_at = ? WHERE id = ?", (past, post_id))
+    conn.commit()
+    skip_post(conn, post_id)
+
+    response = client.post(f"/posts/{post_id}/retry", follow_redirects=False)
+    assert "notice=back_moved" in response.headers["location"]
+    row = conn.execute(
+        "SELECT state, scheduled_at FROM posts WHERE id=?", (post_id,)
+    ).fetchone()
+    assert row["state"] == "planned"
+    assert row["scheduled_at"] > datetime.now(UTC).isoformat()
+
+
+def test_戻す先が埋まっていれば別の枠へ送る(config, conn, client):
+    """同じ枠に2本並ばせない。"""
+    from datetime import UTC, datetime, timedelta
+
+    from freming.db.repository import create_post, skip_post
+
+    post_id = _planned_post(conn)
+    when = conn.execute(
+        "SELECT scheduled_at FROM posts WHERE id=?", (post_id,)
+    ).fetchone()["scheduled_at"]
+    skip_post(conn, post_id)
+
+    cursor = conn.execute(
+        "INSERT INTO properties (source, source_url, title, summary, score, status, "
+        "collected_at, display_name, caption_body) "
+        "VALUES ('dezeen', 'https://e.com/other', 'Other', 's', 70, 'delivered', "
+        "'2026-08-01T00:00:00+00:00', 'Other House', '本文') RETURNING id"
+    )
+    other = cursor.fetchone()["id"]
+    conn.commit()
+    create_post(conn, "feed", when, property_id=other, caption="c")
+
+    response = client.post(f"/posts/{post_id}/retry", follow_redirects=False)
+    assert "notice=back_moved" in response.headers["location"]
+    row = conn.execute(
+        "SELECT scheduled_at FROM posts WHERE id=?", (post_id,)
+    ).fetchone()
+    assert row["scheduled_at"] != when
+    assert datetime.now(UTC) + timedelta(days=40) > datetime.fromisoformat(
+        row["scheduled_at"]
+    )
+
+
+def test_投稿済みは戻せない(config, conn, client):
+    from freming.db.repository import finish_post
+
+    post_id = _planned_post(conn)
+    finish_post(conn, post_id, "m1", "c1")
+    response = client.post(f"/posts/{post_id}/retry", follow_redirects=False)
+    assert "notice=back_no" in response.headers["location"]
+    row = conn.execute("SELECT state FROM posts WHERE id=?", (post_id,)).fetchone()
+    assert row["state"] == "published"

@@ -78,6 +78,12 @@ _ADD_NOTICES = {
     "body": "本文を入れてください。ここが空のまま出すことはできません。",
     "photo": "写真を1枚以上選んでください。",
     "bad": "画像として読めないファイルが混ざっていました。追加していません。",
+    "back": "予定に戻しました。",
+    "back_moved": "予定に戻し、次の空き枠へ動かしました"
+                  "（元の時刻は過ぎていたか、別の投稿が入っていました）。",
+    "back_full": "予定に戻しましたが、**時刻が過ぎたままです。**"
+                 "空き枠が無いので、時刻を直してください。",
+    "back_no": "その投稿は戻せません（見送り・失敗の状態のみ）。",
 }
 
 # 並べ替えの選択肢。キーは repository.SORTS と対応する。
@@ -784,14 +790,53 @@ def create_app(
 
     @app.post("/posts/{post_id}/retry")
     def retry_post_route(post_id: int):
-        from freming.db.repository import retry_post
+        """見送り・失敗を予定に戻す。
+
+        **時刻が過ぎていたら次の空き枠へ送る。** そのまま planned に
+        戻すと、投稿ワーカーが1分以内に拾って出てしまう（見送りを解いた
+        瞬間に公開される）。以前この経路を画面から外していたのは
+        そのためだが、外すのではなく安全にする。
+        """
+        from datetime import UTC, datetime
+
+        from freming.db.repository import (
+            retry_post,
+            scheduled_posts,
+            set_scheduled_at,
+        )
+        from freming.instagram.plan import slot_times
 
         conn = _conn()
         try:
-            retry_post(conn, post_id)
+            if not retry_post(conn, post_id):
+                return RedirectResponse("/schedule?notice=back_no", status_code=303)
+            row = conn.execute(
+                "SELECT kind, scheduled_at FROM posts WHERE id = ?", (post_id,)
+            ).fetchone()
+            now = datetime.now(UTC)
+            notice = "back"
+            if row and row["kind"] == "feed":
+                slots = slot_times(config, now)
+                taken = {
+                    r["scheduled_at"] for r in scheduled_posts(
+                        conn, (slots[-1] if slots else now).isoformat()
+                    )
+                    if r["kind"] == "feed"
+                    and r["state"] in ("planned", "publishing", "published")
+                    and r["id"] != post_id
+                }
+                stale = row["scheduled_at"] <= now.isoformat()
+                clash = row["scheduled_at"] in taken
+                if stale or clash:
+                    free = [s for s in slots if s.isoformat() not in taken]
+                    if free:
+                        set_scheduled_at(conn, post_id, free[0].isoformat())
+                        notice = "back_moved"
+                    else:
+                        notice = "back_full"
         finally:
             conn.close()
-        return RedirectResponse("/schedule", status_code=303)
+        return RedirectResponse(f"/schedule?notice={notice}", status_code=303)
 
     # ------------------------------------------------------------------
     # 投稿予定の編集（写真の並び・時刻・本文）。出す前に人が直す場所。

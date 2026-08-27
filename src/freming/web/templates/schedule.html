@@ -311,7 +311,14 @@
         {% if row["reach"] is not none %}<span class="quiet">リーチ {{ row["reach"] }}</span>{% endif %}
 
         {# 押し間違いやすい操作は右端に離す。削除は確認を挟む #}
-        {% if row["state"] in ("planned", "failed", "skipped") %}
+        {% if row["state"] in ("skipped", "failed") %}
+          {# **見送りを戻す口。** 以前は無く、GitHub の手動メンテナンスか
+             ターミナルからしか戻せなかった。時刻が過ぎていれば次の空き枠へ
+             送るので、戻した瞬間に出てしまうことはない。 #}
+          <form method="post" action="/posts/{{ row['id'] }}/retry" class="push-right">
+            <button class="linklike" type="submit">予定に戻す</button>
+          </form>
+        {% elif row["state"] == "planned" %}
           <form method="post" action="/posts/{{ row['id'] }}/skip" class="push-right">
             <button class="linklike" type="submit">見送る</button>
           </form>
