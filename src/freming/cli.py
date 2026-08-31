@@ -1670,13 +1670,26 @@ def _cmd_reel_preview(cfg, args: argparse.Namespace) -> int:
               "**どの投稿が入るかは変わりえます。**")
     label = "日ごとのリーチ1位" if built.picked_by == "reach" else "直近の投稿で代用"
     print(f"\n使った投稿 {len(built.winners)} 件（{label}・古い順）")
+    # **物件名を出す。** posts の行だけでは何の写真か分からない
+    # （posts に title は無い）。1枚目にどの家が来るかは、いちばん
+    # 見たいところ。
+    with session(cfg.app.target()) as conn:
+        names = {}
+        for row in built.winners:
+            found = conn.execute(
+                "SELECT display_name, title FROM properties WHERE id = ?",
+                (row["property_id"],),
+            ).fetchone()
+            if found is not None:
+                names[row["id"]] = found["display_name"] or found["title"] or ""
+
     for index, row in enumerate(built.winners, start=1):
         when = datetime.fromisoformat(row["published_at"]).astimezone(zone)
         reach = row["reach"]
-        name = row["title"] if "title" in row.keys() else ""
-        print(f"  {index}枚目  {when:%m/%d}  "
+        head = "（表紙）" if index == 1 else "　　　　"
+        print(f"  {index}枚目{head}{when:%m/%d}  "
               f"リーチ {reach if reach is not None else '不明':>5}  "
-              f"post {row['id']}  {(name or '')[:40]}")
+              f"post {row['id']:>3}  {names.get(row['id'], '')[:40]}")
 
     print("\n--- 本文 ---")
     print(built.caption)

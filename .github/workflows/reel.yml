@@ -94,6 +94,9 @@ jobs:
             out/.reel-preview-frames/
           retention-days: 7
           if-no-files-found: error
+          # コマの置き場が「.」で始まるので、既定では**動画しか入らない**。
+          # 実際に 2026-08-31 の1本目がそれで、動画1ファイルだけになった。
+          include-hidden-files: true
 
       # **リールだけを扱う。** 通常投稿とストーリーズは審査UI側の担当で、
       # ここで拾うと二重に出る（状態遷移で防いではいるが、担当を分けるのが前提）。
