@@ -1621,6 +1621,63 @@ def _publish_prebuilt_reel(cfg, args, result, track) -> int:
     return 0
 
 
+def _cmd_reel_preview(cfg, args: argparse.Namespace) -> int:
+    """今週の自動リールを、出さずに1本組んで中身を並べる。
+
+    **出す処理とまったく同じ経路**（worker.build_weekly_reel）を通る。
+    別に書くと、試写で見たものと出るものが食い違う。
+
+    Meta へ送るものは無い。リーチの読み取りだけ API を叩く
+    （権限が無ければ直近の投稿で代用する。実際に出るときと同じ挙動）。
+    """
+    from datetime import UTC, datetime
+    from pathlib import Path
+    from zoneinfo import ZoneInfo
+
+    from freming.db.connection import session
+    from freming.instagram.tokens import load_token
+    from freming.instagram.worker import PostingError, build_weekly_reel
+    from freming.reel.build import ReelError
+
+    zone = ZoneInfo(cfg.instagram.timezone)
+    out = Path(args.out if args.out != "reel.mp4" else "reel-preview.mp4")
+    with session(cfg.app.target()) as conn:
+        record = load_token(conn)
+        if record is None:
+            print("Instagram のトークンが未設定です。", file=sys.stderr)
+            return 1
+        try:
+            built = build_weekly_reel(cfg, conn, record.value, out)
+        except (PostingError, ReelError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+
+    print(f"試写用に組みました: {built.video}（**投稿していません**）")
+    print(f"  {built.result.image_count}枚 / {built.result.seconds:.1f}秒"
+          f"（1枚 {built.result.per_image_sec:.2f}秒）")
+    print(f"  音源: {built.track.title} — {built.track.artist}"
+          f"（{built.track.license}）")
+    line = built.track.caption_line()
+    print(f"  クレジット: {line}" if line else "  クレジット表記は不要な曲です。")
+
+    print(f"\n使った投稿 {len(built.winners)} 件（日ごとのリーチ1位・古い順）")
+    for index, row in enumerate(built.winners, start=1):
+        when = datetime.fromisoformat(row["published_at"]).astimezone(zone)
+        reach = row["reach"]
+        name = row["title"] if "title" in row.keys() else ""
+        print(f"  {index}枚目  {when:%m/%d}  "
+              f"リーチ {reach if reach is not None else '不明':>5}  "
+              f"post {row['id']}  {(name or '')[:40]}")
+
+    print("\n--- 本文 ---")
+    print(built.caption)
+    print(f"\n（{len(built.caption)} 字 / 上限 2200）")
+    print(f"組んだコマ: {out.parent / f'.{out.stem}-frames'}")
+    print(f"いま {datetime.now(UTC).astimezone(zone):%m/%d %H:%M} 時点の並びです。"
+          "**出すときにもう一度選び直す**ので、それまでに投稿が増えれば変わります。")
+    return 0
+
+
 def _cmd_reel(args: argparse.Namespace) -> int:
     """[9] 正方形の画像を並べて縦動画を1本作る。
 
@@ -1645,6 +1702,9 @@ def _cmd_reel(args: argparse.Namespace) -> int:
             print(f"  {index + 1}週目  {track.title} — {track.artist}"
                   f"  [{track.license} / クレジット{mark}]")
         return 0
+
+    if args.reel_action == "preview":
+        return _cmd_reel_preview(cfg, args)
 
     squares = [Path(p) for p in args.images]
     missing = [p for p in squares if not p.exists()]
@@ -1941,8 +2001,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_reel = sub.add_parser("reel", help="正方形の画像から週次リールを作る（[9]）")
     p_reel.add_argument(
-        "reel_action", choices=["build", "publish", "tracks"],
-        help=("build: 動画を作る / publish: 作って**そのまま出す** / "
+        "reel_action", choices=["build", "preview", "publish", "tracks"],
+        help=("build: 渡した画像で動画を作る / "
+              "preview: **今週の自動リールを、出さずに1本組む** / "
+              "publish: 作って**そのまま出す** / "
               "tracks: 週ごとの音源の並びを表示"),
     )
     p_reel.add_argument("images", nargs="*", help="正方形画像のパス（投稿順）")
@@ -2053,6 +2115,8 @@ _NEEDS_MIGRATED_DB = frozenset({
     "ingest-url", "add-manual", "remove", "reset-images", "status",
     "instagram", "post", "redeliver", "rescore", "source-report",
     "backfill-captions", "backfill-listings", "image-report", "refetch-images",
+    # reel は入れない。**build と tracks はDBを見ない**（渡した画像と
+    # assets だけで動く）ので、DBの無い環境でも使えるようにしておく。
 })
 
 

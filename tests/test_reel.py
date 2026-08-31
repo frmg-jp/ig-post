@@ -162,3 +162,139 @@ def test_音声が必ず入る(tmp_path, square):
 def test_画像が無ければ作らない(tmp_path):
     with pytest.raises(ReelError, match="画像が1枚も"):
         build_reel([], audio_for_week(0), tmp_path / "out.mp4", CONFIG.reel)
+
+
+# ----------------------------------------------------------------------
+# 週次リールの選定と組み立て（2026-08-31）
+#
+# 出す処理と試写が**同じ関数**を通ることが要点。別々に書くと、試写で
+# 見たものと出るものが食い違う。食い違う試写は無いより悪い。
+# ----------------------------------------------------------------------
+
+def _reel_db(tmp_path, days: int, reaches=None):
+    """日ごとに1本ずつ公開済みの投稿を並べたDBを作る。"""
+    from datetime import UTC, datetime, timedelta
+    from io import BytesIO
+
+    from freming.db.connection import connect
+    from freming.db.migrate import migrate
+    from freming.db.repository import create_post, finish_post, record_reach
+
+    cfg = load_config("config.yaml").model_copy(deep=True)
+    cfg.app.db_path = tmp_path / "reel.db"
+    migrate(cfg.app.db_path)
+    conn = connect(cfg.app.db_path)
+
+    def jpeg(shade: int) -> bytes:
+        buffer = BytesIO()
+        Image.new("RGB", (1600, 1200), (shade, 90, 140)).save(buffer, "JPEG")
+        return buffer.getvalue()
+
+    now = datetime.now(UTC)
+    made = []
+    for offset in range(1, days + 1):
+        cursor = conn.execute(
+            "INSERT INTO properties (source, source_url, title, summary, score, "
+            "status, collected_at, display_name, caption_body) "
+            "VALUES ('dezeen', ?, ?, 's', 80, 'delivered', "
+            "'2026-08-01T00:00:00+00:00', ?, '本文') RETURNING id",
+            (f"manual:r{offset}", f"House {offset}", f"House {offset}"),
+        )
+        property_id = cursor.fetchone()["id"]
+        conn.execute(
+            "INSERT INTO property_media (property_id, position, mime, content, "
+            "created_at) VALUES (?, 1, 'image/jpeg', ?, ?)",
+            (property_id, jpeg(30 * offset), now.isoformat()),
+        )
+        conn.execute(
+            "INSERT INTO images (property_id, source_url, position, fetched_at) "
+            "VALUES (?, 'upload:1', 1, ?)",
+            (property_id, now.isoformat()),
+        )
+        conn.commit()
+        at = (now - timedelta(days=offset)).isoformat()
+        post_id = create_post(conn, "feed", at, property_id=property_id, caption="c")
+        finish_post(conn, post_id, f"m{offset}", f"c{offset}")
+        conn.execute("UPDATE posts SET published_at = ? WHERE id = ?", (at, post_id))
+        record_reach(conn, post_id, (reaches or {}).get(offset, 100 * offset))
+        made.append(post_id)
+    conn.commit()
+    return cfg, conn, made
+
+
+@needs_ffmpeg
+def test_週次リールは日ごとに1枚ずつ古い順に並ぶ(tmp_path):
+    """日をまたいでリーチを比べない。同じ日の中でだけ1位を選ぶ。"""
+    from freming.instagram.worker import build_weekly_reel
+
+    cfg, conn, made = _reel_db(tmp_path, days=4)
+    built = build_weekly_reel(cfg, conn, "token", tmp_path / "reel.mp4")
+    conn.close()
+
+    assert built.video.exists() and built.video.stat().st_size > 0
+    assert built.result.image_count == 4
+    # made は「1日前, 2日前, …」の順に作ってあるので、古い順は逆順
+    assert [r["id"] for r in built.winners] == list(reversed(made))
+
+
+@needs_ffmpeg
+def test_同じ日なら高いほうを採る(tmp_path):
+    from datetime import UTC, datetime, timedelta
+
+    from freming.db.repository import create_post, finish_post, record_reach
+    from freming.instagram.worker import build_weekly_reel
+
+    cfg, conn, made = _reel_db(tmp_path, days=2)
+    # 1日前の枠にもう1本、リーチの高いものを足す
+    now = datetime.now(UTC)
+    at = (now - timedelta(days=1)).isoformat()
+    cursor = conn.execute(
+        "INSERT INTO properties (source, source_url, title, summary, score, status, "
+        "collected_at, display_name, caption_body) "
+        "VALUES ('dezeen', 'manual:top', 'Top House', 's', 90, 'delivered', "
+        "'2026-08-01T00:00:00+00:00', 'Top House', '本文') RETURNING id"
+    )
+    top_property = cursor.fetchone()["id"]
+    conn.execute(
+        "INSERT INTO property_media (property_id, position, mime, content, created_at) "
+        "SELECT ?, 1, mime, content, created_at FROM property_media LIMIT 1",
+        (top_property,),
+    )
+    conn.execute(
+        "INSERT INTO images (property_id, source_url, position, fetched_at) "
+        "VALUES (?, 'upload:1', 1, ?)", (top_property, now.isoformat()),
+    )
+    conn.commit()
+    top = create_post(conn, "feed", at, property_id=top_property, caption="c")
+    finish_post(conn, top, "mtop", "ctop")
+    conn.execute("UPDATE posts SET published_at = ? WHERE id = ?", (at, top))
+    record_reach(conn, top, 9999)
+    conn.commit()
+
+    built = build_weekly_reel(cfg, conn, "token", tmp_path / "reel.mp4")
+    conn.close()
+    assert top in [r["id"] for r in built.winners]
+    assert made[0] not in [r["id"] for r in built.winners]
+
+
+def test_1件しか無ければ組まない(tmp_path):
+    """**1枚のリールは出さない。** 先週の投稿が揃ってから作り直す。"""
+    from freming.instagram.worker import PostingError, build_weekly_reel
+
+    cfg, conn, _ = _reel_db(tmp_path, days=1)
+    with pytest.raises(PostingError, match="1 件しかありません"):
+        build_weekly_reel(cfg, conn, "token", tmp_path / "reel.mp4")
+    conn.close()
+
+
+@needs_ffmpeg
+def test_本文にクレジットが要る週は必ず入る(tmp_path):
+    """CC BY は表記が要件。落とすとライセンス違反になる。"""
+    from freming.instagram.worker import build_weekly_reel
+
+    cfg, conn, _ = _reel_db(tmp_path, days=3)
+    built = build_weekly_reel(cfg, conn, "token", tmp_path / "reel.mp4")
+    conn.close()
+    line = built.track.caption_line()
+    if line:
+        assert line in built.caption

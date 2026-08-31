@@ -26,8 +26,16 @@ on:
   # ------------------------------------------------------------------
   workflow_dispatch:
     inputs:
+      mode:
+        description: "何をするか"
+        type: choice
+        required: true
+        default: preview
+        options:
+          - preview   # 出さずに1本組んで、動画をダウンロードできるようにする
+          - publish   # **本番の @frmg.jpn に出る**
       dry_run:
-        description: "投稿せず中身だけ見る"
+        description: "publish のとき、投稿せず中身だけ見る"
         type: boolean
         default: true
 
@@ -65,9 +73,29 @@ jobs:
       - name: マイグレーション適用
         run: python -m freming.cli db migrate
 
+      # 出す前に中身を見るための経路。**出す処理と同じコードで組む**ので、
+      # ここで見た動画がそのまま出るものになる（build_weekly_reel）。
+      - name: リールを試写用に組む
+        if: ${{ github.event.inputs.mode == 'preview' }}
+        run: python -m freming.cli reel preview --out out/reel-preview.mp4
+
+      - name: 試写用の動画を置いていく
+        if: ${{ github.event.inputs.mode == 'preview' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: reel-preview
+          # コマも一緒に置く。**仕上がりが変なときは動画より先にここを見る**と
+          # 原因が早く分かる（どの写真が悪いのかが1枚ずつ見える）。
+          path: |
+            out/reel-preview.mp4
+            out/.reel-preview-frames/
+          retention-days: 7
+          if-no-files-found: error
+
       # **リールだけを扱う。** 通常投稿とストーリーズは審査UI側の担当で、
       # ここで拾うと二重に出る（状態遷移で防いではいるが、担当を分けるのが前提）。
       - name: リールを投稿
+        if: ${{ github.event.inputs.mode == 'publish' }}
         run: |
           python -m freming.cli post run --kind reel \
             ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}

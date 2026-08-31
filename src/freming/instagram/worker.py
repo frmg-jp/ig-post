@@ -23,6 +23,7 @@ from __future__ import annotations
 import tempfile
 import threading
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -188,10 +189,33 @@ def daily_winners(
     return winners
 
 
-def _publish_reel(config: Config, conn: DbConnection, post: Row, token: str, ig_id: str):
+@dataclass
+class WeeklyReel:
+    """組み上がった週次リール1本。"""
+
+    video: Path
+    winners: list[Row]
+    track: object            # reel.build.Track
+    caption: str
+    result: object           # reel.build.ReelResult
+
+
+def build_weekly_reel(
+    config: Config,
+    conn: DbConnection,
+    token: str,
+    video: Path,
+    now: datetime | None = None,
+    work_dir: Path | None = None,
+) -> WeeklyReel:
+    """週次リールを1本組む。**投稿はしない。**
+
+    出す処理と試写の両方がここを通る。**別々に書くと、試写で見たものと
+    出るものが食い違う。** 食い違う試写は無いより悪い。
+    """
     from freming.reel.build import audio_for_week, build_reel
 
-    now = datetime.now(UTC)
+    now = now or datetime.now(UTC)
     try:
         winners = daily_winners(config, conn, token, now)
     except MissingInsightsScope:
@@ -210,21 +234,30 @@ def _publish_reel(config: Config, conn: DbConnection, post: Row, token: str, ig_
     track = audio_for_week(int(now.strftime("%V")))
     caption = build_reel_caption(len(winners), config.caption, track.caption_line())
 
+    video.parent.mkdir(parents=True, exist_ok=True)
+    frames = work_dir or video.parent / f".{video.stem}-frames"
+    squares = []
+    for index, row in enumerate(winners, start=1):
+        path = frames / f"src-{index:02d}.jpg"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(media.square_bytes(config, conn, row["property_id"], 1))
+        squares.append(path)
+    result = build_reel(squares, track, video, config.reel, work_dir=frames)
+    return WeeklyReel(video, winners, track, caption, result)
+
+
+def _publish_reel(config: Config, conn: DbConnection, post: Row, token: str, ig_id: str):
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
-        squares = []
-        for index, row in enumerate(winners, start=1):
-            path = work / f"{index:02d}.jpg"
-            path.write_bytes(media.square_bytes(config, conn, row["property_id"], 1))
-            squares.append(path)
-        video = work / "reel.mp4"
-        build_reel(squares, track, video, config.reel, work_dir=work / "frames")
+        built = build_weekly_reel(
+            config, conn, token, work / "reel.mp4", work_dir=work / "frames"
+        )
         conn.execute(
             "UPDATE posts SET caption = ?, credit = ? WHERE id = ?",
-            (caption, track.caption_line() or None, post["id"]),
+            (built.caption, built.track.caption_line() or None, post["id"]),
         )
         conn.commit()
-        return publish_reel(token, ig_id, video, caption)
+        return publish_reel(token, ig_id, built.video, built.caption)
 
 
 _HANDLERS = {
