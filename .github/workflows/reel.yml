@@ -75,9 +75,12 @@ jobs:
 
       # 出す前に中身を見るための経路。**出す処理と同じコードで組む**ので、
       # ここで見た動画がそのまま出るものになる（build_weekly_reel）。
+      # --fallback を付けてあるのは、いまのトークンにインサイトの権限が
+      # 無いため（2026-08-31 実測）。**試写だけの措置**で、本番の
+      # reel_fallback_recent は false のまま。どちらで選んだかは出力に出る。
       - name: リールを試写用に組む
         if: ${{ github.event.inputs.mode == 'preview' }}
-        run: python -m freming.cli reel preview --out out/reel-preview.mp4
+        run: python -m freming.cli reel preview --out out/reel-preview.mp4 --fallback
 
       - name: 試写用の動画を置いていく
         if: ${{ github.event.inputs.mode == 'preview' }}

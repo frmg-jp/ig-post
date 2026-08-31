@@ -198,6 +198,7 @@ class WeeklyReel:
     track: object            # reel.build.Track
     caption: str
     result: object           # reel.build.ReelResult
+    picked_by: str = "reach"  # reach = 日ごとのリーチ1位 / recent = 直近で代用
 
 
 def build_weekly_reel(
@@ -207,23 +208,32 @@ def build_weekly_reel(
     video: Path,
     now: datetime | None = None,
     work_dir: Path | None = None,
+    allow_fallback: bool | None = None,
 ) -> WeeklyReel:
     """週次リールを1本組む。**投稿はしない。**
 
     出す処理と試写の両方がここを通る。**別々に書くと、試写で見たものと
     出るものが食い違う。** 食い違う試写は無いより悪い。
+
+    allow_fallback は「リーチが読めないとき直近の投稿で代用してよいか」。
+    既定（None）は config に従う。試写だけ True にして、権限が無い状態でも
+    仕上がりを見られるようにする。**どちらで選んだかは picked_by に残す。**
     """
     from freming.reel.build import audio_for_week, build_reel
 
     now = now or datetime.now(UTC)
+    if allow_fallback is None:
+        allow_fallback = config.instagram.reel_fallback_recent
+    picked_by = "reach"
     try:
         winners = daily_winners(config, conn, token, now)
     except MissingInsightsScope:
-        if not config.instagram.reel_fallback_recent:
+        if not allow_fallback:
             raise
         log.warning("リーチが読めないので、直近の投稿で代用します")
         since = (now - timedelta(days=8)).isoformat()
         winners = list(published_posts_between(conn, since, now.isoformat()))[-7:]
+        picked_by = "recent"
 
     if len(winners) < 2:
         raise PostingError(
@@ -243,7 +253,7 @@ def build_weekly_reel(
         path.write_bytes(media.square_bytes(config, conn, row["property_id"], 1))
         squares.append(path)
     result = build_reel(squares, track, video, config.reel, work_dir=frames)
-    return WeeklyReel(video, winners, track, caption, result)
+    return WeeklyReel(video, winners, track, caption, result, picked_by)
 
 
 def _publish_reel(config: Config, conn: DbConnection, post: Row, token: str, ig_id: str):

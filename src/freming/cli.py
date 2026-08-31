@@ -1647,7 +1647,10 @@ def _cmd_reel_preview(cfg, args: argparse.Namespace) -> int:
             print("Instagram のトークンが未設定です。", file=sys.stderr)
             return 1
         try:
-            built = build_weekly_reel(cfg, conn, record.value, out)
+            built = build_weekly_reel(
+                cfg, conn, record.value, out,
+                allow_fallback=True if args.fallback else None,
+            )
         except (PostingError, ReelError) as exc:
             print(str(exc), file=sys.stderr)
             return 1
@@ -1660,7 +1663,13 @@ def _cmd_reel_preview(cfg, args: argparse.Namespace) -> int:
     line = built.track.caption_line()
     print(f"  クレジット: {line}" if line else "  クレジット表記は不要な曲です。")
 
-    print(f"\n使った投稿 {len(built.winners)} 件（日ごとのリーチ1位・古い順）")
+    if built.picked_by == "recent":
+        print("\n**選び方が本来と違います。** リーチを読む権限が無いので、"
+              "日ごとの1位ではなく直近の投稿で代用しました。"
+              "\n仕上がり（絵・尺・音・本文）は本番と同じですが、"
+              "**どの投稿が入るかは変わりえます。**")
+    label = "日ごとのリーチ1位" if built.picked_by == "reach" else "直近の投稿で代用"
+    print(f"\n使った投稿 {len(built.winners)} 件（{label}・古い順）")
     for index, row in enumerate(built.winners, start=1):
         when = datetime.fromisoformat(row["published_at"]).astimezone(zone)
         reach = row["reach"]
@@ -2021,6 +2030,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_reel.add_argument(
         "--dry-run", action="store_true",
         help="publish で、動画と本文だけ作って投稿しない",
+    )
+    p_reel.add_argument(
+        "--fallback", action="store_true",
+        help="preview で、リーチが読めないときに直近の投稿で代用する"
+             "（**本番の選び方とは変わる。** 仕上がりを見るためだけに使う）",
     )
     p_reel.set_defaults(func=_cmd_reel)
 
