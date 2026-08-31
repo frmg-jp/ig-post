@@ -816,6 +816,25 @@ caption:
   # 撮影者が分からないとき、媒体名で代えるか。
   photo_credit_fallback_source: true
 
+  # 週次リールの本文。通常投稿とは別に持つ（仕様欄も説明文も無いので、
+  # 何も足さないと「今週の7件」の1行だけになる）。
+  #
+  # **リードが2つあるのは、7件の選び方が2通りあるため。** リーチの1位で
+  # 選べたときと、権限が無くて直近で代用したときとで、書けることが違う。
+  # 「いちばん見られた」は前者でしか言えない。後者で書くと嘘になる。
+  reel:
+    lead_reach:
+      - "今週、いちばん見られた7軒。"
+      - "The seven most-watched homes of the week."
+    lead_recent:
+      - "今週ご紹介した7軒を、まとめて。"
+      - "This week's seven homes, all in one place."
+    # 動画の並びと対応させる。「3番目のあれ」を後から探せる
+    numbered: true
+    outro:
+      - "気になる1軒は、プロフィールから過去の投稿へ。"
+      - "Tap the profile for the full story of each home."
+
   signature:
     - "Sampling × Renovation"
     - "CURATED BY FREMING"

@@ -279,21 +279,46 @@ def build_caption(
 
 
 def build_reel_caption(
-    count: int, config: CaptionConfig, credit: str | None = None
+    count: int,
+    config: CaptionConfig,
+    credit: str | None = None,
+    names: list[str] | None = None,
+    picked_by: str = "reach",
 ) -> str:
     """週次リールの本文。
 
-    物件1件の紹介ではないので仕様欄は無い。リード・締め・タグは揃える。
+    物件1件の紹介ではないので仕様欄は無い。締め・タグは揃える。
     credit は CC BY の音源を使ったときの表記で、**必ず入る**ように
     上限で切るのは本文側だけにしてある。
+
+    **入っている物件名を並べる。** 名前が無いと「今週の7件」の1行だけに
+    なり、何が映るのか読む側に伝わらない。
+
+    リードは選び方で変える。「いちばん見られた」はリーチで選べたときしか
+    言えない（直近で代用したときに書くと嘘になる）。
     """
     blocks: list[str] = []
     # 通常投稿と同じ型: 1行目に「・」、リードは2行目から。
+    lead = config.reel.lead_reach if picked_by == "reach" else config.reel.lead_recent
     head = [config.opener] if config.opener else []
-    head.extend(config.lead)
+    head.extend(lead or config.lead)
     if head:
         blocks.append("\n".join(head))
-    blocks.append(f"【 今週の{count}件 】")
+
+    clean = [n.strip() for n in (names or []) if n and n.strip()]
+    if clean:
+        if config.reel.numbered:
+            # 番号は動画の並びと対応させる。「3枚目のあれ」を探せるように。
+            blocks.append("\n".join(
+                f"{i}  {name}" for i, name in enumerate(clean, start=1)
+            ))
+        else:
+            blocks.append("\n".join(clean))
+        if config.reel.outro:
+            blocks.append("\n".join(config.reel.outro))
+    else:
+        # 名前が1つも取れなかったときの逃げ道。**件数だけは出す。**
+        blocks.append(f"【 今週の{count}件 】")
     # details（ストーリーズ案内と※成約済み）は物件1件の投稿の文言なので
     # 週のまとめには入れない。
     if config.signature:

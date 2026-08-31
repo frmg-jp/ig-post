@@ -409,6 +409,28 @@ class HashtagRule(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
+class ReelCaptionConfig(BaseModel):
+    """[9] 週次リールの本文。通常投稿とは別に持つ。
+
+    通常投稿は物件1件の紹介だが、リールは1週間のまとめ。仕様欄も説明文も
+    無いので、**何も足さないと「今週の7件」の1行だけ**になる。それでは
+    中身が伝わらないので、入っている物件名を並べる。
+
+    リードを2つ持つのは、**7件の選び方が2通りある**ため。リーチで選んだ
+    ときと、権限が無くて直近で代用したときとで、書けることが違う。
+    「いちばん見られた7軒」は前者でしか言えない（後者で書くと嘘になる）。
+    """
+
+    # リーチの1位で選べたときのリード（日英）。
+    lead_reach: list[str] = Field(default_factory=list)
+    # 直近の投稿で代用したときのリード。「見られた」とは書かない。
+    lead_recent: list[str] = Field(default_factory=list)
+    # 物件名の並びに番号を振るか。動画の順と対応させるため既定は true。
+    numbered: bool = True
+    # 名前の並びのあとに置く一言（日英）。
+    outro: list[str] = Field(default_factory=list)
+
+
 class CaptionConfig(BaseModel):
     """[9] 投稿の本文。実際の @frmg.jpn の投稿から起こした型（2026-08-07）。
 
@@ -436,6 +458,7 @@ class CaptionConfig(BaseModel):
     hashtags: list[str] = Field(default_factory=list)
     hashtag_rules: list[HashtagRule] = Field(default_factory=list)
     hashtags_tail: list[str] = Field(default_factory=list)
+    reel: ReelCaptionConfig = Field(default_factory=lambda: ReelCaptionConfig())
 
 
 class ReelConfig(BaseModel):

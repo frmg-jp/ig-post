@@ -242,7 +242,20 @@ def build_weekly_reel(
         )
 
     track = audio_for_week(int(now.strftime("%V")))
-    caption = build_reel_caption(len(winners), config.caption, track.caption_line())
+    # 本文に並べる物件名。**動画の並びと同じ順**にする。
+    names = []
+    for row in winners:
+        found = conn.execute(
+            "SELECT display_name, title FROM properties WHERE id = ?",
+            (row["property_id"],),
+        ).fetchone()
+        names.append(
+            (found["display_name"] or found["title"] or "") if found else ""
+        )
+    caption = build_reel_caption(
+        len(winners), config.caption, track.caption_line(),
+        names=names, picked_by=picked_by,
+    )
 
     video.parent.mkdir(parents=True, exist_ok=True)
     frames = work_dir or video.parent / f".{video.stem}-frames"

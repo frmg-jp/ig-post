@@ -794,10 +794,12 @@ def test_一行目は中黒でリードは2行目から(db):
 
 
 def test_リールも一行目は中黒でリードは2行目から():
+    """リードは通常投稿と別。**リールは1週間のまとめ**なので文言が違う。"""
     caption = build_reel_caption(7, CONFIG.caption)
     head = caption.split("\n")
     assert head[0] == "・"
-    assert head[1].startswith("世界で今、")
+    assert head[1] == CONFIG.caption.reel.lead_reach[0]
+    # 名前を渡さなかったときの逃げ道。件数だけは出す
     assert "【 今週の7件 】" in caption
 
 
@@ -878,3 +880,51 @@ def test_クレジットは仕様欄の最終行に入る(db):
     caption = build_caption(_rich(db), CONFIG.caption, "Dezeen")
     assert "Built in: 1961\nPhoto: Darren Bradley" in caption
     assert "\n\nPhoto:" not in caption
+
+
+# --- リールの本文に物件名を並べる（2026-08-31） ------------------------
+#
+# 名前が無いと「今週の7件」の1行だけで、何が映るのか読む側に伝わらない。
+
+_REEL_NAMES = ["Kip House", "Java 209, Est. 1965", "The Hangover House"]
+
+
+def test_リールの本文に物件名が並ぶ():
+    caption = build_reel_caption(3, CONFIG.caption, names=_REEL_NAMES)
+    for name in _REEL_NAMES:
+        assert name in caption
+    # 番号は動画の並びと対応させる
+    assert "1  Kip House" in caption
+    assert "3  The Hangover House" in caption
+
+
+def test_名前が並ぶときは件数の行を出さない():
+    caption = build_reel_caption(3, CONFIG.caption, names=_REEL_NAMES)
+    assert "【 今週の3件 】" not in caption
+
+
+def test_名前が空なら件数の行に戻る():
+    """1つも取れなかったときの逃げ道。**件数だけは出す。**"""
+    caption = build_reel_caption(3, CONFIG.caption, names=["", "  ", None])
+    assert "【 今週の3件 】" in caption
+
+
+def test_リーチで選べたときだけ見られたと書く():
+    """**直近で代用したときに「いちばん見られた」と書くと嘘になる。**"""
+    by_reach = build_reel_caption(3, CONFIG.caption, names=_REEL_NAMES,
+                                  picked_by="reach")
+    by_recent = build_reel_caption(3, CONFIG.caption, names=_REEL_NAMES,
+                                   picked_by="recent")
+    assert "見られた" in by_reach
+    assert "見られた" not in by_recent
+    assert by_recent.split("\n")[1] == CONFIG.caption.reel.lead_recent[0]
+
+
+def test_名前が並んでもクレジットは末尾に残る():
+    """CC BY は表記が要件。長くなっても落とさない。"""
+    caption = build_reel_caption(
+        7, CONFIG.caption, "familiar by AvapXia — CC BY 4.0",
+        names=["あ" * 300] * 7,
+    )
+    assert caption.endswith("familiar by AvapXia — CC BY 4.0")
+    assert len(caption) <= 2200
