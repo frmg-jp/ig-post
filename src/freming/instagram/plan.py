@@ -19,12 +19,13 @@ DBに現地時刻を混ぜると、環境によってずれる。
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from freming.config import Config
-from freming.db.connection import DbConnection
+from freming.db.connection import DbConnection, Row
 from freming.db.repository import (
     create_post,
     postable_properties,
@@ -91,9 +92,49 @@ def next_reel_time(config: Config, now: datetime) -> datetime:
     return moment.astimezone(UTC)
 
 
-def _taken_slots(conn: DbConnection, until: datetime) -> set[str]:
-    rows = scheduled_posts(conn, until.isoformat())
-    return {row["scheduled_at"] for row in rows if row["kind"] == KIND_FEED}
+# 枠を持っている状態。**見送りと削除は枠を持たない**（出さないと決めた
+# ものが枠を塞ぐと、その日の投稿が無くなる）。失敗は再試行するので持つ。
+SLOT_HOLDING = ("planned", "publishing", "published", "failed")
+
+
+def holding_slots(conn: DbConnection, until: datetime) -> list[Row]:
+    """その枠を実際に使う通常投稿の行。"""
+    return [
+        row for row in scheduled_posts(conn, until.isoformat())
+        if row["kind"] == KIND_FEED and row["state"] in SLOT_HOLDING
+    ]
+
+
+def open_slots(config: Config, slots: list[datetime], occupied: list[Row]) -> list[datetime]:
+    """空いている枠を返す。
+
+    **時刻の完全一致では判定しない。** 手で時刻を直した行はどの枠にも
+    一致しないので、その日が空きに見えて2本目が入る。
+
+    実際にそうなった（2026-08-31）: post 5 が 08:59、post 21 が 09:00 で
+    同じ朝に2本公開された。08:59 は枠 09:00 と文字列が違うため、
+    予定を作る側は「08/31 は空いている」と判断していた。
+
+    1日に入れてよい本数は post_times の数。**日ごとに数える。**
+    """
+    zone = _zone(config)
+    per_day = len(config.instagram.post_times) or 1
+    used: dict[object, int] = defaultdict(int)
+    exact: set[str] = set()
+    for row in occupied:
+        moment = datetime.fromisoformat(row["scheduled_at"]).astimezone(zone)
+        used[moment.date()] += 1
+        exact.add(row["scheduled_at"])
+
+    out: list[datetime] = []
+    for slot in slots:
+        day = slot.astimezone(zone).date()
+        if slot.isoformat() in exact or used[day] >= per_day:
+            continue
+        # この枠を使う前提で数えておく。同じ日の2つ目を配らないため。
+        used[day] += 1
+        out.append(slot)
+    return out
 
 
 def plan(config: Config, conn: DbConnection, now: datetime | None = None) -> PlanStats:
@@ -105,8 +146,8 @@ def plan(config: Config, conn: DbConnection, now: datetime | None = None) -> Pla
     slots = slot_times(config, now)
     if not slots:
         return stats
-    taken = _taken_slots(conn, slots[-1] + timedelta(minutes=1))
-    empty = [s for s in slots if s.isoformat() not in taken]
+    occupied = holding_slots(conn, slots[-1] + timedelta(minutes=1))
+    empty = open_slots(config, slots, occupied)
     if not empty:
         return stats
 
@@ -180,12 +221,11 @@ def compact(config: Config, conn: DbConnection, now: datetime | None = None) -> 
     ]
 
     # **既に出たもの・出している最中のものが居る枠は使わない。**
-    # ここを見落とすと、その日に2本並ぶ。
-    taken = {
-        row["scheduled_at"] for row in upcoming
-        if row["state"] in ("published", "publishing")
-    }
-    free = [s for s in slots if s.isoformat() not in taken]
+    # ここを見落とすと、その日に2本並ぶ。時刻がずれた行も日で数える
+    # （open_slots）。
+    free = open_slots(config, slots, [
+        row for row in upcoming if row["state"] in ("published", "publishing")
+    ])
 
     rows = sorted(
         (row for row in upcoming if row["state"] == "planned"),
@@ -216,4 +256,7 @@ def compact(config: Config, conn: DbConnection, now: datetime | None = None) -> 
     return moved
 
 
-__all__ = ["PlanStats", "compact", "next_reel_time", "plan", "slot_times"]
+__all__ = [
+    "PlanStats", "compact", "holding_slots", "next_reel_time",
+    "open_slots", "plan", "slot_times",
+]

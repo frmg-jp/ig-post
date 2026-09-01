@@ -334,3 +334,98 @@ def test_まだ出ていない予定には時刻を出さない(tmp_path, capsys
     out = capsys.readouterr().out
     assert "Future House" in out
     assert "定刻" not in out and "分" not in out.split("Future House")[0].split("planned")[1]
+
+
+# --- 時刻がずれた行があっても同じ日に2本入れない（2026-08-31） --------
+#
+# **実際に出てしまった。** post 5 が 08:59、post 21 が 09:00 で、同じ朝に
+# 2本公開された。空き判定が時刻の完全一致だったため、08:59 の行があっても
+# 枠 09:00 は「空いている」と見えていた。時刻は画面から手で直せるので、
+# ずれた行はいつでも生まれる。
+
+def _off_grid_post(conn, when: datetime, title: str) -> int:
+    """枠からずれた時刻の予定を1件。"""
+    return _post(conn, when, title)
+
+
+def test_1分ずれた行があってもその日には入れない(monkeypatch, tmp_path) -> None:
+    from datetime import timedelta
+
+    from freming.config import load_config
+    from freming.instagram.plan import holding_slots, open_slots, slot_times
+
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    config = _config(tmp_path, ["09:00"])
+    cfg = load_config(config)
+    now = datetime.now(UTC)
+    slots = slot_times(cfg, now)
+    conn = _db(tmp_path)
+    # 先頭の枠の1分前に1本置く（画面で時刻を直したときに起きる形）
+    _off_grid_post(conn, slots[0] - timedelta(minutes=1), "Off grid")
+    occupied = holding_slots(conn, slots[-1] + timedelta(minutes=1))
+    free = open_slots(cfg, slots, occupied)
+    conn.close()
+
+    assert slots[0] not in free, "1分ずれた行がある日を空きにしてはいけない"
+    assert slots[1] in free
+
+
+def test_見送りは枠を持たない(monkeypatch, tmp_path) -> None:
+    """出さないと決めたものが枠を塞ぐと、その日の投稿が無くなる。"""
+    from freming.config import load_config
+    from freming.db.repository import skip_post
+    from freming.instagram.plan import holding_slots, open_slots, slot_times
+
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    config = _config(tmp_path, ["09:00"])
+    cfg = load_config(config)
+    slots = slot_times(cfg, datetime.now(UTC))
+    conn = _db(tmp_path)
+    post_id = _post(conn, slots[0], "Skipped")
+    skip_post(conn, post_id)
+    occupied = holding_slots(conn, slots[-1] + timedelta(minutes=1))
+    free = open_slots(cfg, slots, occupied)
+    conn.close()
+
+    assert slots[0] in free
+
+
+def test_予定を作るときも1日1本を超えない(monkeypatch, tmp_path) -> None:
+    """post plan が2本目を入れないこと。**08-31 に起きたのはこれ。**"""
+    from datetime import timedelta
+
+    from freming.config import load_config
+    from freming.instagram.plan import slot_times
+
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    config = _config(tmp_path, ["09:00"])
+    cfg = load_config(config)
+    slots = slot_times(cfg, datetime.now(UTC))
+    conn = _db(tmp_path)
+    _off_grid_post(conn, slots[0] - timedelta(minutes=1), "Off grid")
+    # 在庫を積んでおく（plan が埋めようとする材料）
+    for n in range(3):
+        cursor = conn.execute(
+            "INSERT INTO properties (source, source_url, title, location_city, "
+            "location_country, summary, score, status, collected_at, display_name, "
+            "caption_body) VALUES ('dezeen', ?, ?, 'Porto', 'Portugal', 's', 70, "
+            "'delivered', ?, ?, '本文') RETURNING id",
+            (f"https://example.com/stock{n}", f"Stock {n}",
+             datetime.now(UTC).isoformat(), f"Stock {n}"),
+        )
+        cursor.fetchone()
+    conn.commit()
+    conn.close()
+
+    assert main(["--config", config, "post", "plan"]) == 0
+
+    conn = connect(tmp_path / "test.db")
+    first_day = slots[0].astimezone(JST).date()
+    same_day = [
+        r for r in conn.execute(
+            "SELECT scheduled_at FROM posts WHERE kind = 'feed'"
+        ).fetchall()
+        if datetime.fromisoformat(r["scheduled_at"]).astimezone(JST).date() == first_day
+    ]
+    conn.close()
+    assert len(same_day) == 1, f"同じ日に {len(same_day)} 本入った"
