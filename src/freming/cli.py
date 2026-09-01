@@ -1708,6 +1708,34 @@ def _cmd_reel_preview(cfg, args: argparse.Namespace) -> int:
     print("\n--- 本文 ---")
     print(built.caption)
     print(f"\n（{len(built.caption)} 字 / 上限 2200）")
+    if args.stash:
+        # **スマホから見られるようにする。** アーティファクトのZIPは
+        # 携帯では開けない。動画を審査UIの配り先（/m/<token>）に置いて、
+        # リンクで見てもらう。画像を Meta に配っているのと同じ経路で、
+        # **投稿はしない。**
+        #
+        # 置いた行は投稿が済むと purge_media が消す。出さないと決めた
+        # ときは reel preview --clear-stash で消せる。
+        from freming.db.connection import session as _session
+        from freming.instagram.media import purge_media, store_media
+
+        with _session(cfg.app.target()) as conn:
+            row = conn.execute(
+                "SELECT id FROM posts WHERE kind = 'reel' AND state = 'planned' "
+                "ORDER BY scheduled_at LIMIT 1"
+            ).fetchone()
+            if row is None:
+                print("\n置き場にする予定のリールがありません（--stash は使えません）。",
+                      file=sys.stderr)
+            else:
+                purge_media(conn, row["id"])   # 前回の試写を残さない
+                token = store_media(
+                    conn, row["id"], out.read_bytes(),
+                    mime="video/mp4", position=99,
+                )
+                print(f"\nスマホで見る: {cfg.instagram.public_media_url(token)}")
+                print("**投稿していません。** このURLは出したときに消えます。")
+
     print(f"組んだコマ: {out.parent / f'.{out.stem}-frames'}")
     print(f"いま {datetime.now(UTC).astimezone(zone):%m/%d %H:%M} 時点の並びです。"
           "**出すときにもう一度選び直す**ので、それまでに投稿が増えれば変わります。")
@@ -2057,6 +2085,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_reel.add_argument(
         "--dry-run", action="store_true",
         help="publish で、動画と本文だけ作って投稿しない",
+    )
+    p_reel.add_argument(
+        "--stash", action="store_true",
+        help="組んだ動画を審査UIから配る（スマホで見るため。**投稿はしない**）",
     )
     p_reel.add_argument(
         "--fallback", action="store_true",

@@ -6,9 +6,11 @@ name: 週次リール
 # 2倍サイズに広げてから落とすので数百MBのメモリが要り、ffmpeg も入って
 # いない。ここなら ffmpeg を入れられて、メモリも十分ある。
 #
-# **公開URLが要らないのがこの分割の肝。** リールの動画は
-# rupload.facebook.com へ直接送るので、Meta がこちらへ取りに来ない。
-# 画像を配れない場所でも投稿できる。
+# **動画も公開URLで渡す。** ローカルのファイルを rupload.facebook.com へ
+# 直接送る経路は Facebook Login for Business のアプリ専用で、こちらの
+# Instagram Login のトークンでは使えない（2026-09-01 に 400 で判明）。
+# 組んだ動画は post_media に置き、審査UI（Render）が /m/<token> で配る。
+# 作る場所と配る場所が分かれていても、DBが同じなので届く。
 #
 # 収集（collect.yml）とは分ける。収集は毎朝で、リールは週1。
 # 同じジョブに入れると、収集が落ちたときにリールも巻き添えになる。
@@ -79,13 +81,14 @@ jobs:
 
       # 出す前に中身を見るための経路。**出す処理と同じコードで組む**ので、
       # ここで見た動画がそのまま出るものになる（build_weekly_reel）。
-      # --fallback を付けてあるのは、いまのトークンにインサイトの権限が
-      # 無いため（2026-08-31 実測）。2026-09-01 から本番の
-      # reel_fallback_recent も true なので、ここと同じ選び方で出る。
-      # どちらで選んだかは出力に出る（picked_by）。
+      # 材料はアカウントの実物（/me/media）。どちらで選んだかは出力に出る
+      # （picked_by）。1日1本ずつの週は選抜が起きないので recent になる。
       - name: リールを試写用に組む
         if: ${{ github.event.inputs.mode == 'preview' }}
-        run: python -m freming.cli reel preview --out out/reel-preview.mp4 --fallback
+        # --stash: 組んだ動画を審査UIの /m/<token> に置く。**スマホから
+        # 見てもらうため。** アーティファクトのZIPは携帯では開けない。
+        # 投稿はしない。置いた行は出したときに消える。
+        run: python -m freming.cli reel preview --out out/reel-preview.mp4 --stash
 
       - name: 試写用の動画を置いていく
         if: ${{ github.event.inputs.mode == 'preview' }}
