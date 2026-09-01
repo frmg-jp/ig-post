@@ -374,9 +374,15 @@ def build_weekly_reel(
 def _publish_reel(config: Config, conn: DbConnection, post: Row, token: str, ig_id: str):
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
+        # **枠の時刻を基準にする。壁時計ではない。**
+        # リールは「その枠の前の週」をまとめるもの。実際に走った時刻で
+        # 数えると、GitHub が遅れた回と定刻の回で中身が変わりうるうえ、
+        # 前日に試写したものと出るものが別の週になる（日曜に試写すると
+        # 「先週」は1つ前の週を指してしまう）。
+        slot = datetime.fromisoformat(post["scheduled_at"])
         built = build_weekly_reel(
             config, conn, token, work / "reel.mp4", work_dir=work / "frames",
-            ig_id=ig_id,
+            now=slot, ig_id=ig_id,
         )
         conn.execute(
             "UPDATE posts SET caption = ?, credit = ? WHERE id = ?",

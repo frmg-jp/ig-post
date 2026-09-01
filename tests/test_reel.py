@@ -506,3 +506,37 @@ def test_型に沿わない本文でもリード文は名前にしない(tmp_pat
     conn.close()
 
     assert next(p for p in picks if p.media_id == "manual-2").name == "古い納屋を住居に"
+
+
+# --- 週は「枠」に紐づく（2026-09-01）----------------------------------
+#
+# 前日に試写して、翌日に出す。**同じものが出なければ試写の意味がない。**
+# 壁時計で「先週」を数えると、日曜に試写したときの先週は1つ前の週になり、
+# 月曜に出るものと別の週をまとめてしまう。
+
+
+def test_日曜に試写しても月曜の枠と同じ週になる(tmp_path, monkeypatch):
+    from freming.instagram.worker import weekly_picks
+
+    _fake_account(monkeypatch, WEEK)
+    cfg, conn = _cfg(tmp_path)
+
+    slot = REEL_NOW                                  # 09/07(月) 19:00 JST の枠
+    sunday = datetime(2026, 9, 6, 0, 30, tzinfo=UTC)  # 09/06(日) 09:30 JST
+
+    by_slot, _ = weekly_picks(cfg, conn, "tok", "ig-1", slot)
+    by_clock, _ = weekly_picks(cfg, conn, "tok", "ig-1", sunday)
+    conn.close()
+
+    # 枠を基準にすれば 08/31〜09/06 の7件
+    assert [p.media_id for p in by_slot] == ["m0", "m1", "m2", "m3", "m4", "m5", "m6"]
+    # **壁時計だと1つ前の週を指す。** だから枠を渡す必要がある
+    assert [p.media_id for p in by_clock] == []
+
+
+def test_遅れて走っても枠の週をまとめる(tmp_path, monkeypatch):
+    """GitHub が遅れて火曜に走っても、枠が月曜ならその週をまとめる。"""
+    from freming.instagram.worker import last_week
+
+    slot = REEL_NOW
+    assert last_week(CONFIG, slot) == last_week(CONFIG, slot + timedelta(hours=10))

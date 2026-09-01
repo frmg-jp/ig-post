@@ -1673,9 +1673,20 @@ def _cmd_reel_preview(cfg, args: argparse.Namespace) -> int:
         if record is None:
             print("Instagram のトークンが未設定です。", file=sys.stderr)
             return 1
+        # **次に出るリールの枠を基準に組む。** 壁時計で組むと、日曜に
+        # 試写したときの「先週」が1つ前の週になり、月曜に出るものと
+        # 別の週になる。枠に合わせておけば、いつ試写しても同じ。
+        slot = conn.execute(
+            "SELECT scheduled_at FROM posts WHERE kind = 'reel' AND state = 'planned' "
+            "ORDER BY scheduled_at LIMIT 1"
+        ).fetchone()
+        anchor = datetime.fromisoformat(slot["scheduled_at"]) if slot else None
+        if anchor is not None:
+            print(f"対象: {anchor.astimezone(zone):%m/%d %H:%M} の枠"
+                  f"（その前の週の月〜日をまとめます）")
         try:
             built = build_weekly_reel(
-                cfg, conn, record.value, out,
+                cfg, conn, record.value, out, now=anchor,
                 allow_fallback=True if args.fallback else None,
             )
         except (PostingError, ReelError) as exc:
