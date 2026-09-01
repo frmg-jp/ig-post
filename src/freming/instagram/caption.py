@@ -300,8 +300,13 @@ def build_reel_caption(
     blocks: list[str] = []
     # 通常投稿と同じ型: 1行目に「・」、リードは2行目から。
     lead = config.reel.lead_reach if picked_by == "reach" else config.reel.lead_recent
+    # 件数は本文に埋め込む。**固定で「7軒」と書かない。** 先週が6日ぶんしか
+    # 無い週（枠を見送った週・在庫が足りなかった週）に、本文だけ7と言って
+    # しまう。format ではなく replace なのは、本文に入りうる他の波かっこで
+    # 落ちないようにするため。
+    lead = [line.replace("{count}", str(count)) for line in (lead or config.lead)]
     head = [config.opener] if config.opener else []
-    head.extend(lead or config.lead)
+    head.extend(lead)
     if head:
         blocks.append("\n".join(head))
 
@@ -318,7 +323,7 @@ def build_reel_caption(
             blocks.append("\n".join(config.reel.outro))
     else:
         # 名前が1つも取れなかったときの逃げ道。**件数だけは出す。**
-        blocks.append(f"【 今週の{count}件 】")
+        blocks.append(f"【 先週の{count}件 】")
     # details（ストーリーズ案内と※成約済み）は物件1件の投稿の文言なので
     # 週のまとめには入れない。
     if config.signature:

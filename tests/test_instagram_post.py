@@ -264,7 +264,7 @@ def test_音源のクレジットは上限を超えても残る():
 
 def test_リールのキャプションに件数とクレジットが入る():
     caption = build_reel_caption(7, CONFIG.caption, "familiar by AvapXia — CC BY 4.0")
-    assert "今週の7件" in caption
+    assert "先週の7件" in caption
     assert caption.endswith("familiar by AvapXia — CC BY 4.0")
 
 
@@ -798,9 +798,9 @@ def test_リールも一行目は中黒でリードは2行目から():
     caption = build_reel_caption(7, CONFIG.caption)
     head = caption.split("\n")
     assert head[0] == "・"
-    assert head[1] == CONFIG.caption.reel.lead_reach[0]
+    assert head[1] == CONFIG.caption.reel.lead_reach[0].replace("{count}", "7")
     # 名前を渡さなかったときの逃げ道。件数だけは出す
-    assert "【 今週の7件 】" in caption
+    assert "【 先週の7件 】" in caption
 
 
 def test_Locationに州が入りUSAに縮める(db):
@@ -884,7 +884,7 @@ def test_クレジットは仕様欄の最終行に入る(db):
 
 # --- リールの本文に物件名を並べる（2026-08-31） ------------------------
 #
-# 名前が無いと「今週の7件」の1行だけで、何が映るのか読む側に伝わらない。
+# 名前が無いと「先週の7件」の1行だけで、何が映るのか読む側に伝わらない。
 
 _REEL_NAMES = ["Kip House", "Java 209, Est. 1965", "The Hangover House"]
 
@@ -900,13 +900,13 @@ def test_リールの本文に物件名が並ぶ():
 
 def test_名前が並ぶときは件数の行を出さない():
     caption = build_reel_caption(3, CONFIG.caption, names=_REEL_NAMES)
-    assert "【 今週の3件 】" not in caption
+    assert "【 先週の3件 】" not in caption
 
 
 def test_名前が空なら件数の行に戻る():
     """1つも取れなかったときの逃げ道。**件数だけは出す。**"""
     caption = build_reel_caption(3, CONFIG.caption, names=["", "  ", None])
-    assert "【 今週の3件 】" in caption
+    assert "【 先週の3件 】" in caption
 
 
 def test_リーチで選べたときだけ見られたと書く():
@@ -917,7 +917,9 @@ def test_リーチで選べたときだけ見られたと書く():
                                    picked_by="recent")
     assert "見られた" in by_reach
     assert "見られた" not in by_recent
-    assert by_recent.split("\n")[1] == CONFIG.caption.reel.lead_recent[0]
+    assert by_recent.split("\n")[1] == CONFIG.caption.reel.lead_recent[0].replace(
+        "{count}", "3"
+    )
 
 
 def test_名前が並んでもクレジットは末尾に残る():

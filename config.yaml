@@ -831,12 +831,14 @@ caption:
   # 選べたときと、権限が無くて直近で代用したときとで、書けることが違う。
   # 「いちばん見られた」は前者でしか言えない。後者で書くと嘘になる。
   reel:
+    # {count} は実際に入った件数に置き換わる。**固定の数字を書かないこと。**
+    # 先週が6日ぶんしか無い週に、本文だけ「7軒」と言ってしまう。
     lead_reach:
-      - "今週、いちばん見られた7軒。"
-      - "The seven most-watched homes of the week."
+      - "先週、いちばん見られた{count}軒。"
+      - "The {count} most-watched homes of last week."
     lead_recent:
-      - "今週ご紹介した7軒を、まとめて。"
-      - "This week's seven homes, all in one place."
+      - "先週ご紹介した{count}軒を、まとめて。"
+      - "Last week's {count} homes, all in one place."
     # 動画の並びと対応させる。「3番目のあれ」を後から探せる
     numbered: true
     outro:

@@ -24,7 +24,7 @@ import tempfile
 import threading
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -151,17 +151,36 @@ def _publish_story(config: Config, conn: DbConnection, post: Row, token: str, ig
     return publish_image(token, ig_id, url, None, story=True)
 
 
+def last_week(config: Config, now: datetime) -> tuple[datetime, datetime]:
+    """先週の月曜0時から、今週の月曜0時まで。現地時刻で切って UTC で返す。
+
+    **移動窓（now から8日）にしない。** GitHub の定期実行は3〜10時間ずれる
+    ので、移動窓だと同じ月曜の枠でも走った時刻で入る日が変わる。月曜19:00
+    に走っても、遅れて火曜05:00 に走っても、同じ「先週」を指すようにする。
+
+    月曜に出すリールが指すのは、前日の日曜で終わった週。火曜にずれ込んでも
+    同じ週を指す（weekday() は月曜が0なので、月曜も火曜も同じ「今週の月曜」
+    を基点に持つ）。
+    """
+    zone = ZoneInfo(config.instagram.timezone)
+    local = now.astimezone(zone)
+    monday = datetime.combine(
+        local.date() - timedelta(days=local.weekday()), time.min, tzinfo=zone
+    )
+    return (monday - timedelta(days=7)).astimezone(UTC), monday.astimezone(UTC)
+
+
 def daily_winners(
     config: Config, conn: DbConnection, token: str, now: datetime
 ) -> list[Row]:
-    """直近7日の各日で、いちばんリーチした投稿を集める。
+    """先週（月〜日）の各日で、いちばんリーチした投稿を集める。
 
     日をまたいで比べないのは、リーチが時間とともに伸びるため。
     同じ日の3本同士なら成熟度が揃う。
     """
     zone = ZoneInfo(config.instagram.timezone)
-    since = now - timedelta(days=8)
-    rows = published_posts_between(conn, since.isoformat(), now.isoformat())
+    start, end = last_week(config, now)
+    rows = published_posts_between(conn, start.isoformat(), end.isoformat())
 
     by_day: dict[str, list[tuple[int, Row]]] = defaultdict(list)
     for row in rows:
@@ -183,7 +202,8 @@ def daily_winners(
         by_day[published.date().isoformat()].append((reach or 0, row))
 
     winners = []
-    for day in sorted(by_day)[-7:]:
+    # 窓が既にちょうど1週間なので、ここで後ろから7日を取り直さない。
+    for day in sorted(by_day):
         best = max(by_day[day], key=lambda pair: pair[0])
         winners.append(best[1])
     return winners
@@ -230,15 +250,17 @@ def build_weekly_reel(
     except MissingInsightsScope:
         if not allow_fallback:
             raise
-        log.warning("リーチが読めないので、直近の投稿で代用します")
-        since = (now - timedelta(days=8)).isoformat()
-        winners = list(published_posts_between(conn, since, now.isoformat()))[-7:]
+        log.warning("リーチが読めないので、先週ご紹介した分で代用します")
+        # **リーチで選ぶときと同じ週を見る。** 窓が違うと、選び方を切り替えた
+        # だけで対象の週まで変わってしまう。
+        start, end = last_week(config, now)
+        winners = list(published_posts_between(conn, start.isoformat(), end.isoformat()))
         picked_by = "recent"
 
     if len(winners) < 2:
         raise PostingError(
             f"リールに使える投稿が {len(winners)} 件しかありません。"
-            "先週の投稿が揃ってから作り直してください。"
+            "先週（月〜日）に公開した通常投稿から選びます。"
         )
 
     track = audio_for_week(int(now.strftime("%V")))
