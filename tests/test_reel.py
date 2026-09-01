@@ -172,9 +172,15 @@ def test_画像が無ければ作らない(tmp_path):
 
 
 # ----------------------------------------------------------------------
-# 週次リールの選定と組み立て（2026-08-31）
+# 週次リールの選定と組み立て
 #
-# 出す処理と試写が**同じ関数**を通ることが要点。別々に書くと、試写で
+# 材料は**アカウントに実際に出ている投稿**（/me/media）。予定表からは
+# 組まない。予定表だけを見ると、手で出した投稿が丸ごと抜けるうえ、写真も
+# 「物件の1枚目」になり、審査UIで並べ替えた投稿とは別のカットになる。
+# 2026-09-01 の初回で両方が起きた（7軒あるところを6軒で出し、表紙も
+# 投稿と違うものが並んだ）。
+#
+# 出す処理と試写が**同じ関数**を通ることも要点。別々に書くと、試写で
 # 見たものと出るものが食い違う。食い違う試写は無いより悪い。
 # ----------------------------------------------------------------------
 
@@ -184,236 +190,268 @@ def test_画像が無ければ作らない(tmp_path):
 REEL_NOW = datetime(2026, 9, 7, 10, 0, tzinfo=UTC)
 
 
-def _reel_db(tmp_path, days: int, reaches=None):
-    """先週の日ごとに1本ずつ、公開済みの投稿を並べたDBを作る。
+def _item(media_id: str, when: str, caption: str = "・\nHouse", children: int = 10):
+    """/me/media が返す1件。when は UTC の 'YYYY-MM-DD HH:MM'。"""
+    from freming.instagram.mymedia import MediaItem
 
-    offset 1 が 09/06（日）で、offset 7 が 08/31（月）。days=7 でちょうど
-    先週1週間ぶんになる。
+    return MediaItem(
+        id=media_id,
+        media_type="CAROUSEL_ALBUM" if children else "IMAGE",
+        permalink=f"https://instagram.test/{media_id}",
+        timestamp=when.replace(" ", "T") + ":00+0000",
+        caption=caption,
+        image_url=f"https://cdn.test/{media_id}.jpg",
+        child_count=children,
+    )
+
+
+def _fake_account(monkeypatch, items, reach=None, shades=None):
+    """アカウント側（/me/media・リーチ・画像取得）を差し替える。
+
+    **Meta へは一度も出ない。** 画像は media_id ごとに色を変えて作るので、
+    どのコマがどの投稿から来たかを色で追える。
     """
-    from io import BytesIO
+    from freming.instagram import mymedia
+    from freming.instagram import worker as worker_mod
 
+    monkeypatch.setattr(mymedia, "recent_media", lambda *a, **k: list(items))
+    monkeypatch.setattr(worker_mod, "account_id", lambda token: "ig-1")
+
+    if reach is None:
+        def _no_scope(token, media_id):
+            from freming.instagram.insights import MissingInsightsScope
+
+            raise MissingInsightsScope("権限なし")
+        monkeypatch.setattr(worker_mod, "media_reach", _no_scope)
+    else:
+        monkeypatch.setattr(worker_mod, "media_reach", lambda t, mid: reach.get(mid, 0))
+
+    def fake_download(url, dest):
+        shade = (shades or {}).get(url.rsplit("/", 1)[-1][:-4], 120)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (1600, 1200), (shade, 90, 140)).save(dest, "JPEG")
+        return dest
+
+    monkeypatch.setattr(mymedia, "download_image", fake_download)
+
+
+def _cfg(tmp_path):
     from freming.db.connection import connect
     from freming.db.migrate import migrate
-    from freming.db.repository import create_post, finish_post, record_reach
 
     cfg = load_config("config.yaml").model_copy(deep=True)
     cfg.app.db_path = tmp_path / "reel.db"
     migrate(cfg.app.db_path)
-    conn = connect(cfg.app.db_path)
+    return cfg, connect(cfg.app.db_path)
 
-    def jpeg(shade: int) -> bytes:
-        buffer = BytesIO()
-        Image.new("RGB", (1600, 1200), (shade, 90, 140)).save(buffer, "JPEG")
-        return buffer.getvalue()
 
-    now = REEL_NOW
-    made = []
-    for offset in range(1, days + 1):
-        cursor = conn.execute(
-            "INSERT INTO properties (source, source_url, title, summary, score, "
-            "status, collected_at, display_name, caption_body) "
-            "VALUES ('dezeen', ?, ?, 's', 80, 'delivered', "
-            "'2026-08-01T00:00:00+00:00', ?, '本文') RETURNING id",
-            (f"manual:r{offset}", f"House {offset}", f"House {offset}"),
-        )
-        property_id = cursor.fetchone()["id"]
-        conn.execute(
-            "INSERT INTO property_media (property_id, position, mime, content, "
-            "created_at) VALUES (?, 1, 'image/jpeg', ?, ?)",
-            (property_id, jpeg(30 * offset), now.isoformat()),
-        )
-        conn.execute(
-            "INSERT INTO images (property_id, source_url, position, fetched_at) "
-            "VALUES (?, 'upload:1', 1, ?)",
-            (property_id, now.isoformat()),
-        )
-        conn.commit()
-        at = (now - timedelta(days=offset)).isoformat()
-        post_id = create_post(conn, "feed", at, property_id=property_id, caption="c")
-        finish_post(conn, post_id, f"m{offset}", f"c{offset}")
-        conn.execute("UPDATE posts SET published_at = ? WHERE id = ?", (at, post_id))
-        record_reach(conn, post_id, (reaches or {}).get(offset, 100 * offset))
-        made.append(post_id)
-    conn.commit()
-    return cfg, conn, made
+# 先週（08/31 月〜09/06 日）に1日1本ずつ。UTC 00:04 = JST 09:04。
+WEEK = [
+    _item("m6", "2026-09-06 00:04"),
+    _item("m5", "2026-09-05 00:04"),
+    _item("m4", "2026-09-04 00:04"),
+    _item("m3", "2026-09-03 00:04"),
+    _item("m2", "2026-09-02 00:04"),
+    _item("m1", "2026-09-01 00:04"),
+    _item("m0", "2026-08-31 00:04"),
+]
+
+
+def test_先週の投稿が古い順に並ぶ(tmp_path, monkeypatch):
+    from freming.instagram.worker import weekly_picks
+
+    _fake_account(monkeypatch, WEEK)
+    cfg, conn = _cfg(tmp_path)
+    picks, picked_by = weekly_picks(cfg, conn, "tok", "ig-1", REEL_NOW)
+    conn.close()
+
+    assert [p.media_id for p in picks] == ["m0", "m1", "m2", "m3", "m4", "m5", "m6"]
+    assert picked_by == "recent"
+
+
+def test_手で出した投稿も入る(tmp_path, monkeypatch):
+    """**これが 2026-09-01 に落ちた分。** 予定表に無い投稿を拾えること。"""
+    from freming.instagram.worker import weekly_picks
+
+    # 08/27 相当の位置（先週の水曜 09/02）に、手で出した1本を足す
+    manual = _item("manual-1", "2026-09-02 04:10", caption="・\n手で出した家")
+    items = [i for i in WEEK if i.id != "m2"] + [manual]
+    _fake_account(monkeypatch, items)
+    cfg, conn = _cfg(tmp_path)
+    picks, _ = weekly_picks(cfg, conn, "tok", "ig-1", REEL_NOW)
+    conn.close()
+
+    assert "manual-1" in [p.media_id for p in picks]
+    assert len(picks) == 7, "手で出した日が抜けている"
+    manual_pick = next(p for p in picks if p.media_id == "manual-1")
+    assert manual_pick.name == "手で出した家"
+
+
+def test_動画は材料にしない(tmp_path, monkeypatch):
+    """リール自身が翌週の材料になると、入れ子になっていく。"""
+    from freming.instagram.worker import weekly_picks
+
+    reel = _item("reel-1", "2026-09-06 10:00", children=0)
+    reel.media_type = "VIDEO"
+    _fake_account(monkeypatch, [*WEEK, reel])
+    cfg, conn = _cfg(tmp_path)
+    picks, _ = weekly_picks(cfg, conn, "tok", "ig-1", REEL_NOW)
+    conn.close()
+
+    assert "reel-1" not in [p.media_id for p in picks]
+    assert len(picks) == 7
+
+
+def test_先週より前と今週は入らない(tmp_path, monkeypatch):
+    """1日ずれるだけで別の週。前後どちらも混ぜない。"""
+    from freming.instagram.worker import weekly_picks
+
+    before = _item("before", "2026-08-30 00:04")   # 先々週の日曜
+    after = _item("after", "2026-09-07 00:04")     # 今週の月曜
+    _fake_account(monkeypatch, [after, *WEEK, before])
+    cfg, conn = _cfg(tmp_path)
+    picks, _ = weekly_picks(cfg, conn, "tok", "ig-1", REEL_NOW)
+    conn.close()
+
+    got = [p.media_id for p in picks]
+    assert "before" not in got and "after" not in got
+    assert got == ["m0", "m1", "m2", "m3", "m4", "m5", "m6"]
+
+
+def test_遅れて走っても同じ週を指す(tmp_path, monkeypatch):
+    """**GitHub は3〜10時間遅れる。** 火曜未明に走っても中身が変わらない。"""
+    from freming.instagram.worker import weekly_picks
+
+    after = _item("after", "2026-09-07 00:04")  # 今週の月曜朝の通常投稿
+    _fake_account(monkeypatch, [after, *WEEK])
+    cfg, conn = _cfg(tmp_path)
+    late = REEL_NOW + timedelta(hours=10)
+    picks, _ = weekly_picks(cfg, conn, "tok", "ig-1", late)
+    conn.close()
+
+    got = [p.media_id for p in picks]
+    assert "after" not in got, "今週の投稿が混ざった"
+    assert got == ["m0", "m1", "m2", "m3", "m4", "m5", "m6"]
+
+
+def test_同じ日に2本ならリーチの高い方(tmp_path, monkeypatch):
+    from freming.instagram.worker import weekly_picks
+
+    extra = _item("m2b", "2026-09-02 10:00")
+    reach = {i.id: 100 for i in WEEK}
+    reach["m2b"] = 9999
+    _fake_account(monkeypatch, [*WEEK, extra], reach=reach)
+    cfg, conn = _cfg(tmp_path)
+    picks, picked_by = weekly_picks(cfg, conn, "tok", "ig-1", REEL_NOW)
+    conn.close()
+
+    assert picked_by == "reach"
+    assert len(picks) == 7, "1日1本になっていない"
+    assert "m2b" in [p.media_id for p in picks]
+    assert "m2" not in [p.media_id for p in picks]
+
+
+def test_1日1本の週はいちばん見られたと名乗らない(tmp_path, monkeypatch):
+    """選抜が起きていない週に「いちばん見られた」と書かない。"""
+    from freming.instagram.worker import weekly_picks
+
+    _fake_account(monkeypatch, WEEK, reach={i.id: 100 for i in WEEK})
+    cfg, conn = _cfg(tmp_path)
+    _, picked_by = weekly_picks(cfg, conn, "tok", "ig-1", REEL_NOW)
+    conn.close()
+    assert picked_by == "recent"
+
+
+def test_リーチが読めなければ先に出た方(tmp_path, monkeypatch):
+    from freming.instagram.worker import weekly_picks
+
+    extra = _item("m2b", "2026-09-02 10:00")     # 同じ日の2本目（あと）
+    _fake_account(monkeypatch, [*WEEK, extra])   # reach なし＝権限なし
+    cfg, conn = _cfg(tmp_path)
+    picks, picked_by = weekly_picks(
+        cfg, conn, "tok", "ig-1", REEL_NOW, use_reach=False
+    )
+    conn.close()
+
+    assert picked_by == "recent"
+    assert "m2" in [p.media_id for p in picks], "先に出た方を採っていない"
+    assert "m2b" not in [p.media_id for p in picks]
 
 
 @needs_ffmpeg
-def test_週次リールは日ごとに1枚ずつ古い順に並ぶ(tmp_path):
-    """日をまたいでリーチを比べない。同じ日の中でだけ1位を選ぶ。"""
+def test_組んだ動画は投稿と同じ表紙になる(tmp_path, monkeypatch):
+    """**リールのコマ＝投稿の表紙。** 別のカットにならないこと。
+
+    以前は物件の「1枚目」を使っており、審査UIで並べ替えた投稿とは違う
+    写真が並んだ。いまは /me/media が返す表紙をそのまま使う。
+    """
     from freming.instagram.worker import build_weekly_reel
 
-    cfg, conn, made = _reel_db(tmp_path, days=4)
-    built = build_weekly_reel(cfg, conn, "token", tmp_path / "reel.mp4", now=REEL_NOW)
+    shades = {f"m{i}": 20 + 30 * i for i in range(7)}
+    _fake_account(monkeypatch, WEEK, shades=shades)
+    cfg, conn = _cfg(tmp_path)
+    built = build_weekly_reel(
+        cfg, conn, "tok", tmp_path / "reel.mp4", now=REEL_NOW, ig_id="ig-1"
+    )
     conn.close()
 
-    assert built.video.exists() and built.video.stat().st_size > 0
-    assert built.result.image_count == 4
-    # made は「1日前, 2日前, …」の順に作ってあるので、古い順は逆順
-    assert [r["id"] for r in built.winners] == list(reversed(made))
+    assert built.result.image_count == 7
+    frames = sorted((tmp_path / ".reel-frames").glob("src-*.jpg"))
+    assert len(frames) == 7
+    # 1枚目は m0（先週の月曜）の表紙。色で確かめる。
+    with Image.open(frames[0]) as first:
+        assert first.size == tuple(cfg.process.output_size)
+        assert first.getpixel((540, 540))[0] == pytest.approx(shades["m0"], abs=12)
 
 
 @needs_ffmpeg
-def test_同じ日なら高いほうを採る(tmp_path):
-    from freming.db.repository import create_post, finish_post, record_reach
+def test_本文には入った件数と名前が並ぶ(tmp_path, monkeypatch):
     from freming.instagram.worker import build_weekly_reel
 
-    cfg, conn, made = _reel_db(tmp_path, days=2)
-    # 1日前の枠にもう1本、リーチの高いものを足す
-    now = REEL_NOW
-    at = (now - timedelta(days=1)).isoformat()
-    cursor = conn.execute(
-        "INSERT INTO properties (source, source_url, title, summary, score, status, "
-        "collected_at, display_name, caption_body) "
-        "VALUES ('dezeen', 'manual:top', 'Top House', 's', 90, 'delivered', "
-        "'2026-08-01T00:00:00+00:00', 'Top House', '本文') RETURNING id"
+    items = [_item(i.id, i.timestamp[:16].replace("T", " "),
+                   caption=f"・\nHouse {i.id}") for i in WEEK]
+    _fake_account(monkeypatch, items)
+    cfg, conn = _cfg(tmp_path)
+    built = build_weekly_reel(
+        cfg, conn, "tok", tmp_path / "reel.mp4", now=REEL_NOW, ig_id="ig-1"
     )
-    top_property = cursor.fetchone()["id"]
-    conn.execute(
-        "INSERT INTO property_media (property_id, position, mime, content, created_at) "
-        "SELECT ?, 1, mime, content, created_at FROM property_media LIMIT 1",
-        (top_property,),
-    )
-    conn.execute(
-        "INSERT INTO images (property_id, source_url, position, fetched_at) "
-        "VALUES (?, 'upload:1', 1, ?)", (top_property, now.isoformat()),
-    )
-    conn.commit()
-    top = create_post(conn, "feed", at, property_id=top_property, caption="c")
-    finish_post(conn, top, "mtop", "ctop")
-    conn.execute("UPDATE posts SET published_at = ? WHERE id = ?", (at, top))
-    record_reach(conn, top, 9999)
-    conn.commit()
-
-    built = build_weekly_reel(cfg, conn, "token", tmp_path / "reel.mp4", now=REEL_NOW)
     conn.close()
-    assert top in [r["id"] for r in built.winners]
-    assert made[0] not in [r["id"] for r in built.winners]
+
+    assert "先週ご紹介した7軒" in built.caption
+    assert "いちばん見られた" not in built.caption
+    for item in WEEK:
+        assert f"House {item.id}" in built.caption
 
 
-def test_1件しか無ければ組まない(tmp_path):
-    """**1枚のリールは出さない。** 先週の投稿が揃ってから作り直す。"""
+def test_2件に満たなければ組まない(tmp_path, monkeypatch):
+    """**1枚のリールは出さない。**"""
     from freming.instagram.worker import PostingError, build_weekly_reel
 
-    cfg, conn, _ = _reel_db(tmp_path, days=1)
+    _fake_account(monkeypatch, WEEK[:1])
+    cfg, conn = _cfg(tmp_path)
     with pytest.raises(PostingError, match="1 件しかありません"):
-        build_weekly_reel(cfg, conn, "token", tmp_path / "reel.mp4", now=REEL_NOW)
+        build_weekly_reel(
+            cfg, conn, "tok", tmp_path / "reel.mp4", now=REEL_NOW, ig_id="ig-1"
+        )
     conn.close()
 
 
-@needs_ffmpeg
-def test_本文にクレジットが要る週は必ず入る(tmp_path):
-    """CC BY は表記が要件。落とすとライセンス違反になる。"""
-    from freming.instagram.worker import build_weekly_reel
-
-    cfg, conn, _ = _reel_db(tmp_path, days=3)
-    built = build_weekly_reel(cfg, conn, "token", tmp_path / "reel.mp4", now=REEL_NOW)
-    conn.close()
-    line = built.track.caption_line()
-    if line:
-        assert line in built.caption
-
-
-# ----------------------------------------------------------------------
-# 選抜の窓（2026-09-01）
-#
-# 「直近8日」の移動窓をやめ、暦の週（先週の月〜日）で切る。
-# GitHub の定期実行は実測で3〜10時間ずれるので、移動窓だと同じ月曜の枠でも
-# 走った時刻で入る日が変わる。
-# ----------------------------------------------------------------------
 def test_選抜の窓は先週の月曜から日曜():
     from freming.instagram.worker import last_week
 
-    start, end = last_week(CONFIG, REEL_NOW)  # 月曜 19:00 JST に走った場合
+    start, end = last_week(CONFIG, REEL_NOW)
     zone = ZoneInfo(CONFIG.instagram.timezone)
     assert start.astimezone(zone).isoformat() == "2026-08-31T00:00:00+09:00"
     assert end.astimezone(zone).isoformat() == "2026-09-07T00:00:00+09:00"
-    assert start.astimezone(zone).weekday() == 0  # 月曜はじまり
+    assert start.astimezone(zone).weekday() == 0
 
 
 def test_定期実行が遅れて翌日になっても同じ週を指す():
-    """**GitHub は3〜10時間遅れる。** 月曜19:00 の枠が火曜未明に走っても、
-    指す週が変わってはいけない（変わると先週の月曜が丸ごと抜ける）。"""
     from freming.instagram.worker import last_week
 
-    on_time = last_week(CONFIG, REEL_NOW)
-    late = last_week(CONFIG, REEL_NOW + timedelta(hours=10))  # 火曜 05:00 JST
-    assert late == on_time
-
-
-def _extra_post(conn, published_at: str, reach: int) -> int:
-    """既にあるDBに、公開済みの通常投稿を1本足す。
-
-    **物件は必ず新しく作る。** create_post は (property_id, kind) が
-    衝突すると None を返すので、既存の物件を使い回すと1本も足されず、
-    テストが素通りする（実際にそれで空振りした）。
-    """
-    from freming.db.repository import create_post, finish_post, record_reach
-
-    cursor = conn.execute(
-        "INSERT INTO properties (source, source_url, title, summary, score, "
-        "status, collected_at, display_name, caption_body) "
-        "VALUES ('dezeen', ?, ?, 's', 80, 'delivered', "
-        "'2026-08-01T00:00:00+00:00', ?, '本文') RETURNING id",
-        (f"manual:x{published_at}", f"Extra {published_at}", f"Extra {published_at}"),
+    assert last_week(CONFIG, REEL_NOW + timedelta(hours=10)) == last_week(
+        CONFIG, REEL_NOW
     )
-    property_id = cursor.fetchone()["id"]
-    conn.execute(
-        "INSERT INTO property_media (property_id, position, mime, content, created_at) "
-        "SELECT ?, 1, mime, content, created_at FROM property_media LIMIT 1",
-        (property_id,),
-    )
-    conn.execute(
-        "INSERT INTO images (property_id, source_url, position, fetched_at) "
-        "VALUES (?, 'upload:1', 1, ?)", (property_id, published_at),
-    )
-    conn.commit()
-    post_id = create_post(conn, "feed", published_at, property_id=property_id, caption="c")
-    assert post_id is not None, "投稿が作られていない。テストが空振りする"
-    finish_post(conn, post_id, f"m{post_id}", f"c{post_id}")
-    conn.execute(
-        "UPDATE posts SET published_at = ? WHERE id = ?", (published_at, post_id)
-    )
-    record_reach(conn, post_id, reach)
-    conn.commit()
-    return post_id
-
-
-def test_先週より前の投稿は入らない(tmp_path):
-    """先々週の日曜（08/30）が混ざらないこと。1日ずれるだけで別の週になる。"""
-    from freming.instagram.worker import daily_winners
-
-    cfg, conn, made = _reel_db(tmp_path, days=7)  # 08/31(月)〜09/06(日)
-    # リーチは最高。**それでも先週の外なので入らない。**
-    old = _extra_post(conn, "2026-08-30T10:00:00+00:00", 99999)
-
-    winners = daily_winners(cfg, conn, "token", REEL_NOW)
-    conn.close()
-    assert old not in [row["id"] for row in winners]
-    assert [row["id"] for row in winners] == list(reversed(made))
-
-
-def test_遅れて走っても今週の投稿を巻き込まない(tmp_path):
-    """**これが移動窓の実害。**
-
-    月曜19:00 の枠が遅れて火曜未明に走ると、移動窓は今週の月曜朝に出た
-    通常投稿まで拾い、そのぶん先週の月曜が押し出されて落ちる。
-    「先週のまとめ」に今週の1本が混ざり、先週の1日が消える。
-    """
-    from freming.instagram.worker import daily_winners
-
-    cfg, conn, made = _reel_db(tmp_path, days=7)  # 08/31(月)〜09/06(日)
-    # 今週の月曜 09:00 JST に出た通常投稿（リールより前に出ている）
-    today = _extra_post(conn, "2026-09-07T00:00:00+00:00", 50000)
-
-    late = REEL_NOW + timedelta(hours=10)  # 火曜 05:00 JST に起動
-    winners = daily_winners(cfg, conn, "token", late)
-    conn.close()
-
-    ids = [row["id"] for row in winners]
-    assert today not in ids, "今週の投稿が先週のまとめに混ざった"
-    assert made[-1] in ids, "先週の月曜が押し出されて落ちた"
-    assert ids == list(reversed(made))
 
 
 def test_本文の件数は実際に入った数になる():
@@ -427,105 +465,3 @@ def test_本文の件数は実際に入った数になる():
     assert "先週ご紹介した6軒" in caption
     assert "7軒" not in caption
     assert "{count}" not in caption
-
-
-def test_代用でも1日1本にする(tmp_path, monkeypatch):
-    """同じ日に2本出ている日がある（2026-08-31 に実際に起きた）。
-
-    リーチで選ぶ側は日ごとに1位を採るので必ず1日1本。代用側だけ全部
-    入れると、その日だけ2枚続いてリールが8枚になる。**形を揃える。**
-    """
-    from freming.instagram.worker import build_weekly_reel
-
-    from freming.instagram import worker as worker_mod
-    from freming.instagram.insights import MissingInsightsScope
-
-    cfg, conn, made = _reel_db(tmp_path, days=7)  # 08/31(月)〜09/06(日)
-    # 09/03 にもう1本。先に出たのは 08:00 の方（既存は 19:00）。
-    extra = _extra_post(conn, "2026-09-02T23:00:00+00:00", 10)  # 09/03 08:00 JST
-
-    # 仕込みでリーチを入れてあるので、そのままだとリーチ側が成功する。
-    # **権限が無い状態を作る**のがこのテストの前提。
-    def no_scope(*args, **kwargs):
-        raise MissingInsightsScope("権限なし")
-
-    monkeypatch.setattr(worker_mod, "daily_winners", no_scope)
-
-    built = build_weekly_reel(
-        cfg, conn, "token", tmp_path / "reel.mp4", now=REEL_NOW,
-        allow_fallback=True,
-    )
-    conn.close()
-
-    assert built.picked_by == "recent"
-    assert len(built.winners) == 7, "1日1本になっていない"
-    ids = [row["id"] for row in built.winners]
-    assert extra in ids, "同じ日なら先に出た方を採る"
-
-
-# --- 「いちばん見られた」と名乗ってよい条件（2026-09-01）-----------------
-#
-# 1日1本しか出していない週は、日ごとの1位＝その日の唯一の1本。選抜は
-# 起きていない。それでも初回は「先週、いちばん見られた6軒。」で公開された。
-
-
-def test_1日1本の週はいちばん見られたと書かない(tmp_path):
-    """候補と選ばれた数が同じ＝選んでいない。実際に公開してしまった形。"""
-    from freming.instagram.worker import build_weekly_reel
-
-    cfg, conn, _ = _reel_db(tmp_path, days=6)  # 各日1本ずつ
-    built = build_weekly_reel(
-        cfg, conn, "token", tmp_path / "reel.mp4", now=REEL_NOW
-    )
-    conn.close()
-
-    assert built.picked_by == "recent"
-    assert "いちばん見られた" not in built.caption
-    assert "先週ご紹介した6軒" in built.caption
-
-
-def test_同じ日に複数あればいちばん見られたと書ける(tmp_path):
-    """1日に2本出した週は、実際に選抜が起きているので名乗ってよい。"""
-    from freming.instagram.worker import build_weekly_reel
-
-    cfg, conn, _ = _reel_db(tmp_path, days=6)
-    # 09/03 にもう1本足す（リーチは低い＝負ける側）
-    _extra_post(conn, "2026-09-02T23:00:00+00:00", 1)
-
-    built = build_weekly_reel(
-        cfg, conn, "token", tmp_path / "reel.mp4", now=REEL_NOW
-    )
-    conn.close()
-
-    assert built.picked_by == "reach"
-    assert "いちばん見られた" in built.caption
-
-
-def test_既定では上下の余白が等しい(tmp_path):
-    """**下だけ長い状態に戻さないための固定。**
-
-    2026-09-01 の初回リールは上360 / 下480 で公開され、下の余白が
-    間延びして見えると指摘を受けた。中央合わせを既定にする。
-    """
-    # **一様な白を使う。** square フィクスチャは上下で色が違い、暗い下半分が
-    # 背景と区別できない。
-    plain = tmp_path / "plain.jpg"
-    Image.new("RGB", (1080, 1080), "#ffffff").save(plain, "JPEG", quality=95)
-
-    dest = tmp_path / "frame.jpg"
-    compose_frame(plain, dest, CONFIG.reel)
-
-    with Image.open(dest) as frame:
-        width, height = frame.size
-        column = [sum(frame.getpixel((width // 2, y))) for y in range(height)]
-
-    # **閾値は決め打ちにしない。** 固定値にすると背景まで前景と判定されて
-    # 全面が「写真」になり、どんな設定でも通るテストになる（実際にそれで
-    # 一度素通りさせた）。実測の最小と最大の中間で切る。
-    threshold = (min(column) + max(column)) / 2
-    assert max(column) - min(column) > 100, "前景と背景を見分けられていない"
-
-    rows = [y for y, value in enumerate(column) if value > threshold]
-    above, below = rows[0], height - 1 - rows[-1]
-    assert rows[-1] - rows[0] + 1 == 1080, "正方形の高さが取れていない"
-    assert abs(above - below) <= 2, f"上 {above}px / 下 {below}px で揃っていない"

@@ -343,33 +343,6 @@ def test_リーチはあとから書き込める(db):
     assert [r["reach"] for r in rows] == [1234]
 
 
-def test_各日の1位が選ばれる(db):
-    """日をまたいで比べない。リーチは時間とともに伸びるため。"""
-    from freming.instagram.worker import daily_winners
-
-    for day, (title, reach) in enumerate(
-        [("d1-low", 10), ("d1-high", 90), ("d2-low", 5), ("d2-high", 50)]
-    ):
-        property_id = _property(db, title)
-        post_id = create_post(db, "feed", NOW.isoformat(), property_id=property_id)
-        finish_post(db, post_id, f"media-{day}", "c")
-        published = NOW - timedelta(days=1 if day < 2 else 2)
-        db.execute(
-            "UPDATE posts SET published_at = ?, reach = ? WHERE id = ?",
-            (published.isoformat(), reach, post_id),
-        )
-        db.commit()
-
-    winners = daily_winners(CONFIG, db, "token", NOW)
-    titles = []
-    for row in winners:
-        found = db.execute(
-            "SELECT title FROM properties WHERE id = ?", (row["property_id"],)
-        ).fetchone()
-        titles.append(found["title"])
-    assert sorted(titles) == ["d1-high", "d2-high"]
-
-
 # --- ストーリーズは手で上げる ------------------------------------------
 #
 # **API は「投稿をストーリーズに追加」を開けていない。** リンク・メンション・

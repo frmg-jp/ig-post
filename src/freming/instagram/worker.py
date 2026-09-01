@@ -13,9 +13,11 @@
     2箇所でワーカーが動いても同じ行を取れない
   - 失敗は attempts に数え、上限で止める。取れない投稿を延々と
     投げ続けない。復帰は審査UIの「予定に戻す」から
-  - **リーチが取れないときリールを作らない。** 代わりの7枚で黙って
-    出すと、狙いと違うものが出たことに誰も気づけない
-    （instagram.reel_fallback_recent を true にしたときだけ代用する）
+  - **週次リールの材料はアカウントの実物**（/me/media）。予定表からは
+    組まない。予定表だけを見ると手で出した投稿が抜け、写真も投稿の表紙と
+    違うカットになる（2026-09-01 に両方起きた）
+  - リーチが読めないときは「先に出た方」で代用する
+    （instagram.reel_fallback_recent を true にしたときだけ）
 """
 
 from __future__ import annotations
@@ -170,43 +172,98 @@ def last_week(config: Config, now: datetime) -> tuple[datetime, datetime]:
     return (monday - timedelta(days=7)).astimezone(UTC), monday.astimezone(UTC)
 
 
-def daily_winners(
-    config: Config, conn: DbConnection, token: str, now: datetime
-) -> list[Row]:
-    """先週（月〜日）の各日で、いちばんリーチした投稿を集める。
+@dataclass
+class WeekPick:
+    """リールに入れる1本。**アカウントに実際に出ているもの。**"""
 
-    日をまたいで比べないのは、リーチが時間とともに伸びるため。
-    同じ日の3本同士なら成熟度が揃う。
+    media_id: str
+    published: datetime      # 現地時刻
+    image_url: str
+    name: str                # 本文に並べる見出し
+    reach: int | None = None
+
+
+def weekly_picks(
+    config: Config, conn: DbConnection, token: str, ig_id: str, now: datetime,
+    *, use_reach: bool = True,
+) -> tuple[list[WeekPick], str]:
+    """先週アカウントに出た投稿から、1日1本ずつ選ぶ。
+
+    **予定表（posts）ではなくアカウントの実物を見る。** 予定表だけを見ると、
+    手で出した投稿が丸ごと抜ける。2026-09-01 の初回がそれで、08/27 に手で
+    出した1本を落とし、7軒あるところを6軒として出した。
+
+    見出しは予定表から引く（ig_media_id が一致する行の物件名）。手で出した
+    投稿は予定表に無いので、本文の1行目から取る。
+
+    戻り値は (選んだ順, 選び方)。選び方は reach か recent。
     """
+    from freming.instagram.mymedia import recent_media
+
     zone = ZoneInfo(config.instagram.timezone)
     start, end = last_week(config, now)
-    rows = published_posts_between(conn, start.isoformat(), end.isoformat())
 
-    by_day: dict[str, list[tuple[int, Row]]] = defaultdict(list)
-    for row in rows:
-        published = datetime.fromisoformat(row["published_at"]).astimezone(zone)
-        reach = row["reach"]
-        if reach is None and row["ig_media_id"]:
-            try:
-                reach = media_reach(token, row["ig_media_id"])
-            except MissingInsightsScope:
-                raise  # 権限が無いのは全件同じ。呼び出し側が案内を出す
-            except InstagramError as exc:
-                # アプリ側で削除された投稿など、その1件だけ読めない場合。
-                # リーチ0として扱う（消した投稿が1位になることはない）。
-                log.warning("リーチを読めませんでした（media_id=%s）: %s",
-                            row["ig_media_id"], exc)
-                reach = 0
-            else:
-                record_reach(conn, row["id"], reach)
-        by_day[published.date().isoformat()].append((reach or 0, row))
+    by_day: dict[object, list[WeekPick]] = defaultdict(list)
+    for item in recent_media(token, ig_id, limit=50):
+        if not item.timestamp or not item.image_url:
+            continue
+        # **動画は入れない。** リール自身が翌週の材料になってしまう。
+        if item.media_type in ("VIDEO", "REELS"):
+            continue
+        moment = datetime.fromisoformat(item.timestamp.replace("+0000", "+00:00"))
+        if not (start <= moment < end):
+            continue
+        local = moment.astimezone(zone)
+        by_day[local.date()].append(
+            WeekPick(item.id, local, item.image_url, _pick_name(conn, item))
+        )
 
-    winners = []
-    # 窓が既にちょうど1週間なので、ここで後ろから7日を取り直さない。
+    picked_by = "recent"
+    if use_reach:
+        try:
+            for picks in by_day.values():
+                for pick in picks:
+                    pick.reach = media_reach(token, pick.media_id)
+            picked_by = "reach"
+        except MissingInsightsScope:
+            if not (
+                config.instagram.reel_fallback_recent if use_reach else True
+            ):
+                raise
+            log.warning("リーチが読めないので、先に出た方を採ります")
+            picked_by = "recent"
+
+    out: list[WeekPick] = []
     for day in sorted(by_day):
-        best = max(by_day[day], key=lambda pair: pair[0])
-        winners.append(best[1])
-    return winners
+        same_day = by_day[day]
+        if picked_by == "reach":
+            out.append(max(same_day, key=lambda p: p.reach or 0))
+        else:
+            # どちらが良かったかは分からない。**先に出た方**を採る。
+            out.append(min(same_day, key=lambda p: p.published))
+
+    # **選抜が起きていない週は「いちばん見られた」と名乗らない。**
+    # 1日1本しか出していなければ、日ごとの1位＝その日の唯一の1本。
+    if picked_by == "reach" and all(len(v) == 1 for v in by_day.values()):
+        picked_by = "recent"
+    return out, picked_by
+
+
+def _pick_name(conn: DbConnection, item) -> str:
+    """本文に並べる見出し。予定表にあれば物件名、無ければ本文の1行目。"""
+    row = conn.execute(
+        "SELECT p.display_name, p.title FROM posts AS o "
+        "JOIN properties AS p ON p.id = o.property_id "
+        "WHERE o.ig_media_id = ?",
+        (item.id,),
+    ).fetchone()
+    if row is not None:
+        name = row["display_name"] or row["title"] or ""
+        if name.strip():
+            return name.strip()
+    # 手で出した投稿。本文の1行目（「・」は飛ばす）をそのまま使う。
+    head = item.head(80)
+    return "" if head == "（本文なし）" else head
 
 
 @dataclass
@@ -214,7 +271,7 @@ class WeeklyReel:
     """組み上がった週次リール1本。"""
 
     video: Path
-    winners: list[Row]
+    winners: list["WeekPick"]
     track: object            # reel.build.Track
     caption: str
     result: object           # reel.build.ReelResult
@@ -229,99 +286,75 @@ def build_weekly_reel(
     now: datetime | None = None,
     work_dir: Path | None = None,
     allow_fallback: bool | None = None,
+    ig_id: str | None = None,
 ) -> WeeklyReel:
     """週次リールを1本組む。**投稿はしない。**
 
     出す処理と試写の両方がここを通る。**別々に書くと、試写で見たものと
     出るものが食い違う。** 食い違う試写は無いより悪い。
 
-    allow_fallback は「リーチが読めないとき直近の投稿で代用してよいか」。
-    既定（None）は config に従う。試写だけ True にして、権限が無い状態でも
-    仕上がりを見られるようにする。**どちらで選んだかは picked_by に残す。**
+    材料は**アカウントに実際に出ている投稿**（weekly_picks）。予定表から
+    組むのはやめた。予定表だけを見ると、手で出した投稿が丸ごと抜けるうえ、
+    写真も「物件の1枚目」になり、審査UIで並べ替えた投稿とは別のカットに
+    なる。2026-09-01 の初回で両方が起きた（7軒あるところを6軒で出し、
+    表紙も投稿と違うものが並んだ）。
+
+    allow_fallback は「リーチが読めないとき先に出た方で代用してよいか」。
+    既定（None）は config に従う。**どちらで選んだかは picked_by に残す。**
     """
+    from freming.images.process import to_square
+    from freming.instagram.mymedia import download_image
     from freming.reel.build import audio_for_week, build_reel
 
     now = now or datetime.now(UTC)
     if allow_fallback is None:
         allow_fallback = config.instagram.reel_fallback_recent
-    picked_by = "reach"
+    if ig_id is None:
+        ig_id = account_id(token)
+
     try:
-        winners = daily_winners(config, conn, token, now)
-        # **「いちばん見られた」と名乗ってよいのは、実際に選んだときだけ。**
-        # 1日1本しか出していない週は、日ごとの1位＝その日の唯一の1本で、
-        # 選抜は起きていない。それでもリーチ経路が成功しさえすれば
-        # 「いちばん見られた」と書いてしまう作りだった。
-        #
-        # 2026-09-01 の初回がそれで、6日ぶん各1本なのに
-        # 「先週、いちばん見られた6軒。」で公開された。
-        #
-        # 候補の数と選ばれた数が同じなら、選んでいない。文言を落とす。
-        start, end = last_week(config, now)
-        pool = published_posts_between(conn, start.isoformat(), end.isoformat())
-        if len(pool) <= len(winners):
-            log.info("どの日も候補が1本なので、リーチの言い回しは使いません")
-            picked_by = "recent"
+        picks, picked_by = weekly_picks(config, conn, token, ig_id, now)
     except MissingInsightsScope:
         if not allow_fallback:
             raise
-        log.warning("リーチが読めないので、先週ご紹介した分で代用します")
-        # **リーチで選ぶときと同じ週・同じ「1日1本」で拾う。** 窓や本数が
-        # 違うと、選び方を切り替えただけで中身の形まで変わる。
-        #
-        # 同じ日に2本出ている日が実際にある（2026-08-31。枠の空き判定の
-        # 不具合で2本公開された）。日でまとめずに全部入れると、その日だけ
-        # 2枚続き、リールが8枚になる。リーチが読めない以上どちらが良かった
-        # かは分からないので、**先に出た方**を採る。
-        start, end = last_week(config, now)
-        rows = published_posts_between(conn, start.isoformat(), end.isoformat())
-        first_of_day: dict[object, Row] = {}
-        for row in rows:  # published_at の昇順で返る
-            day = datetime.fromisoformat(row["published_at"]).astimezone(
-                ZoneInfo(config.instagram.timezone)
-            ).date()
-            first_of_day.setdefault(day, row)
-        winners = [first_of_day[day] for day in sorted(first_of_day)]
-        picked_by = "recent"
+        log.warning("リーチが読めないので、先に出た方を採ります")
+        picks, picked_by = weekly_picks(
+            config, conn, token, ig_id, now, use_reach=False
+        )
 
-    if len(winners) < 2:
+    if len(picks) < 2:
         raise PostingError(
-            f"リールに使える投稿が {len(winners)} 件しかありません。"
-            "先週（月〜日）に公開した通常投稿から選びます。"
+            f"リールに使える投稿が {len(picks)} 件しかありません。"
+            "先週（月〜日）にアカウントへ出た投稿から選びます。"
         )
 
     track = audio_for_week(int(now.strftime("%V")))
-    # 本文に並べる物件名。**動画の並びと同じ順**にする。
-    names = []
-    for row in winners:
-        found = conn.execute(
-            "SELECT display_name, title FROM properties WHERE id = ?",
-            (row["property_id"],),
-        ).fetchone()
-        names.append(
-            (found["display_name"] or found["title"] or "") if found else ""
-        )
     caption = build_reel_caption(
-        len(winners), config.caption, track.caption_line(),
-        names=names, picked_by=picked_by,
+        len(picks), config.caption, track.caption_line(),
+        names=[pick.name for pick in picks], picked_by=picked_by,
     )
 
     video.parent.mkdir(parents=True, exist_ok=True)
     frames = work_dir or video.parent / f".{video.stem}-frames"
     squares = []
-    for index, row in enumerate(winners, start=1):
+    for index, pick in enumerate(picks, start=1):
+        raw = frames / f"raw-{index:02d}.jpg"
         path = frames / f"src-{index:02d}.jpg"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(media.square_bytes(config, conn, row["property_id"], 1))
+        download_image(pick.image_url, raw)
+        # 手で出した投稿は正方形とは限らない。**必ず揃える。**
+        to_square(raw, path, config.process)
         squares.append(path)
     result = build_reel(squares, track, video, config.reel, work_dir=frames)
-    return WeeklyReel(video, winners, track, caption, result, picked_by)
+    return WeeklyReel(video, picks, track, caption, result, picked_by)
 
 
 def _publish_reel(config: Config, conn: DbConnection, post: Row, token: str, ig_id: str):
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
         built = build_weekly_reel(
-            config, conn, token, work / "reel.mp4", work_dir=work / "frames"
+            config, conn, token, work / "reel.mp4", work_dir=work / "frames",
+            ig_id=ig_id,
         )
         conn.execute(
             "UPDATE posts SET caption = ?, credit = ? WHERE id = ?",
@@ -543,7 +576,11 @@ class PostingWorker:
 __all__ = [
     "PostingError",
     "PostingWorker",
-    "daily_winners",
+    "WeekPick",
+    "WeeklyReel",
+    "build_weekly_reel",
+    "last_week",
+    "weekly_picks",
     "describe_error",
     "preview",
     "publish_one",

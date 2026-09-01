@@ -1691,32 +1691,19 @@ def _cmd_reel_preview(cfg, args: argparse.Namespace) -> int:
     print(f"  クレジット: {line}" if line else "  クレジット表記は不要な曲です。")
 
     if built.picked_by == "recent":
-        print("\n**選び方が本来と違います。** リーチを読む権限が無いので、"
-              "日ごとの1位ではなく直近の投稿で代用しました。"
+        print("\n**日ごとのリーチ1位では選んでいません。** 権限が無いか、"
+              "どの日も候補が1本しか無い週です（選抜が起きていない）。"
               "\n仕上がり（絵・尺・音・本文）は本番と同じですが、"
               "**どの投稿が入るかは変わりえます。**")
-    label = "日ごとのリーチ1位" if built.picked_by == "reach" else "直近の投稿で代用"
+    label = "日ごとのリーチ1位" if built.picked_by == "reach" else "先に出た方"
     print(f"\n使った投稿 {len(built.winners)} 件（{label}・古い順）")
-    # **物件名を出す。** posts の行だけでは何の写真か分からない
-    # （posts に title は無い）。1枚目にどの家が来るかは、いちばん
-    # 見たいところ。
-    with session(cfg.app.target()) as conn:
-        names = {}
-        for row in built.winners:
-            found = conn.execute(
-                "SELECT display_name, title FROM properties WHERE id = ?",
-                (row["property_id"],),
-            ).fetchone()
-            if found is not None:
-                names[row["id"]] = found["display_name"] or found["title"] or ""
-
-    for index, row in enumerate(built.winners, start=1):
-        when = datetime.fromisoformat(row["published_at"]).astimezone(zone)
-        reach = row["reach"]
+    # **アカウントに実際に出ているものを並べる。** 予定表ではないので、
+    # 手で出した投稿もここに出る。名前は予定表から引けたものだけ入る。
+    for index, pick in enumerate(built.winners, start=1):
         head = "（表紙）" if index == 1 else "　　　　"
-        print(f"  {index}枚目{head}{when:%m/%d}  "
-              f"リーチ {reach if reach is not None else '不明':>5}  "
-              f"post {row['id']:>3}  {names.get(row['id'], '')[:40]}")
+        reach = pick.reach if pick.reach is not None else "不明"
+        print(f"  {index}枚目{head}{pick.published:%m/%d %H:%M}  "
+              f"リーチ {reach:>5}  {pick.media_id}  {(pick.name or '（名前なし）')[:40]}")
 
     print("\n--- 本文 ---")
     print(built.caption)
