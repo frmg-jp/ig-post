@@ -826,15 +826,15 @@ def test_画面から見送ると後ろが前に詰まる(config, conn, client):
 
     from freming.db.repository import create_post
 
-    jst = ZoneInfo("Asia/Tokyo")
+    from freming.instagram.plan import slot_times
 
-    def _slot(days: int) -> str:
-        day = (datetime.now(UTC).astimezone(jst) + timedelta(days=days)).date()
-        moment = datetime.combine(day, datetime.min.time(), tzinfo=jst)
-        return moment.replace(hour=9).astimezone(UTC).isoformat()
+    # **枠は本番と同じ決め方で取る。** 「明日の9時」と決め打ちにすると、
+    # 09:00 より前に走らせたときその日の枠がまだ生きていて1日ぶんずれ、
+    # 毎日 0:00〜9:00 の間だけ落ちるテストになる（2026-08-31 に発覚）。
+    slots = [s.isoformat() for s in slot_times(config, datetime.now(UTC))[:2]]
 
     ids = []
-    for n, when in enumerate((1, 2)):
+    for n, when in enumerate((0, 1)):
         cursor = conn.execute(
             "INSERT INTO properties (source, source_url, title, summary, score, status, "
             "collected_at, display_name, caption_body) "
@@ -842,11 +842,11 @@ def test_画面から見送ると後ろが前に詰まる(config, conn, client):
             "'2026-08-01T00:00:00+00:00', 'House', '本文') RETURNING id")
         prop = cursor.fetchone()["id"]
         conn.commit()
-        ids.append(create_post(conn, "feed", _slot(when), property_id=prop, caption="c"))
+        ids.append(create_post(conn, "feed", slots[when], property_id=prop, caption="c"))
 
     client.post(f"/posts/{ids[0]}/skip", follow_redirects=False)
     row = conn.execute("SELECT scheduled_at FROM posts WHERE id=?", (ids[1],)).fetchone()
-    assert row["scheduled_at"] == _slot(1)
+    assert row["scheduled_at"] == slots[0]
 
 
 # --- 承認したあとの戻り先（2026-08-22） -------------------------------

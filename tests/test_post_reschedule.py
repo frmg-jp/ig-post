@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import pytest
 import yaml
 
 from freming.cli import main
@@ -36,6 +37,20 @@ def _at(days: int, hhmm: str) -> datetime:
     day = (datetime.now(UTC).astimezone(JST) + timedelta(days=days)).date()
     moment = datetime.combine(day, datetime.min.time(), tzinfo=JST)
     return moment.replace(hour=int(hour), minute=int(minute)).astimezone(UTC)
+
+
+def _slots(config_path: str, count: int) -> list[datetime]:
+    """これから使われる枠を、**本番と同じ決め方**で取る。
+
+    「明日の9時」と決め打ちにしない。slot_times は過ぎた枠を返さないので、
+    09:00 より前に走らせるとその日の枠がまだ生きていて1日ぶんずれる。
+    日付で固定すると、**毎日 0:00〜9:00 の間だけ落ちるテスト**になる
+    （実際にそうなっていた。2026-08-31 に発覚）。
+    """
+    from freming.config import load_config
+    from freming.instagram.plan import slot_times
+
+    return slot_times(load_config(config_path), datetime.now(UTC))[:count]
 
 
 def _db(tmp_path):
@@ -197,14 +212,19 @@ def test_出し直しはnowで今すぐに戻せる(monkeypatch, tmp_path) -> No
     assert row["scheduled_at"] <= datetime.now(UTC).isoformat()
 
 
-def test_見送りで空いた枠に後ろが詰まる(monkeypatch, tmp_path) -> None:
+# 枠の時刻を2つで試す。**いつ走らせても、片方は「その日の枠がもう過ぎて
+# いる」側、もう片方は「まだ来ていない」側になる。** 日付で決め打ちして
+# いた頃は、午前中だけ落ちていた。
+@pytest.mark.parametrize("post_time", ["00:05", "23:55"])
+def test_見送りで空いた枠に後ろが詰まる(monkeypatch, tmp_path, post_time) -> None:
     """穴を残さない。順番は変えず、先頭の空き枠から詰め直す。"""
     monkeypatch.delenv("DATABASE_URL", raising=False)
-    config = _config(tmp_path, ["09:00"])
+    config = _config(tmp_path, [post_time])
+    slots = _slots(config, 3)
     conn = _db(tmp_path)
-    first = _post(conn, _at(1, "09:00"), "Day1")
-    second = _post(conn, _at(2, "09:00"), "Day2")
-    third = _post(conn, _at(3, "09:00"), "Day3")
+    first = _post(conn, slots[0], "Day1")
+    second = _post(conn, slots[1], "Day2")
+    third = _post(conn, slots[2], "Day3")
     conn.close()
 
     assert main(["--config", config, "post", "skip", "--id", str(first)]) == 0
@@ -212,13 +232,12 @@ def test_見送りで空いた枠に後ろが詰まる(monkeypatch, tmp_path) ->
 
     conn = connect(tmp_path / "test.db")
     rows = {
-        r["id"]: datetime.fromisoformat(r["scheduled_at"]).astimezone(JST).date()
+        r["id"]: datetime.fromisoformat(r["scheduled_at"])
         for r in conn.execute("SELECT id, scheduled_at FROM posts").fetchall()
     }
-    today = datetime.now(UTC).astimezone(JST).date()
-    # 2番目が1日目の枠へ、3番目が2日目の枠へ繰り上がる
-    assert rows[second] == today + timedelta(days=1)
-    assert rows[third] == today + timedelta(days=2)
+    # 2番目が1つ前の枠へ、3番目がその次へ繰り上がる
+    assert rows[second] == slots[0]
+    assert rows[third] == slots[1]
     # 見送ったものは枠を空ける（**同じ日に2本並ばせない**）
     assert rows[first] > rows[third]
 
