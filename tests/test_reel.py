@@ -465,3 +465,44 @@ def test_本文の件数は実際に入った数になる():
     assert "先週ご紹介した6軒" in caption
     assert "7軒" not in caption
     assert "{count}" not in caption
+
+
+def test_手で出した投稿の名前は本文から読む(tmp_path, monkeypatch):
+    """**本文の2行目はリード文（定型）。** そこを名前として拾わない。
+
+    通常投稿の本文は「・ / リード / 【 名前 】」の型で出している。
+    2026-09-01 の試写では、手で出した1本だけ見出しが
+    「世界で今、手に入る…」になった（リード文を拾っていた）。
+    """
+    from freming.instagram.worker import weekly_picks
+
+    lead = CONFIG.caption.lead[0]
+    manual = _item(
+        "manual-1", "2026-09-02 04:10",
+        caption=f"・\n{lead}\n\n【 The Eyebrow House 】\n\nBuilt in: 1954",
+    )
+    _fake_account(monkeypatch, [*[i for i in WEEK if i.id != "m2"], manual])
+    cfg, conn = _cfg(tmp_path)
+    picks, _ = weekly_picks(cfg, conn, "tok", "ig-1", REEL_NOW)
+    conn.close()
+
+    got = next(p for p in picks if p.media_id == "manual-1")
+    assert got.name == "The Eyebrow House"
+    assert lead not in got.name
+
+
+def test_型に沿わない本文でもリード文は名前にしない(tmp_path, monkeypatch):
+    """【 】が無い投稿。定型のリード文だけは避けて、次の行を使う。"""
+    from freming.instagram.worker import weekly_picks
+
+    lead = CONFIG.caption.lead[0]
+    manual = _item(
+        "manual-2", "2026-09-02 04:10",
+        caption=f"・\n{lead}\n\n古い納屋を住居に",
+    )
+    _fake_account(monkeypatch, [*[i for i in WEEK if i.id != "m2"], manual])
+    cfg, conn = _cfg(tmp_path)
+    picks, _ = weekly_picks(cfg, conn, "tok", "ig-1", REEL_NOW)
+    conn.close()
+
+    assert next(p for p in picks if p.media_id == "manual-2").name == "古い納屋を住居に"

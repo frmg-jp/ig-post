@@ -194,7 +194,7 @@ def weekly_picks(
     出した1本を落とし、7軒あるところを6軒として出した。
 
     見出しは予定表から引く（ig_media_id が一致する行の物件名）。手で出した
-    投稿は予定表に無いので、本文の1行目から取る。
+    投稿は予定表に無いので、本文の【 】から読む（_pick_name）。
 
     戻り値は (選んだ順, 選び方)。選び方は reach か recent。
     """
@@ -215,7 +215,7 @@ def weekly_picks(
             continue
         local = moment.astimezone(zone)
         by_day[local.date()].append(
-            WeekPick(item.id, local, item.image_url, _pick_name(conn, item))
+            WeekPick(item.id, local, item.image_url, _pick_name(config, conn, item))
         )
 
     picked_by = "recent"
@@ -249,7 +249,7 @@ def weekly_picks(
     return out, picked_by
 
 
-def _pick_name(conn: DbConnection, item) -> str:
+def _pick_name(config: Config, conn: DbConnection, item) -> str:
     """本文に並べる見出し。予定表にあれば物件名、無ければ本文の1行目。"""
     row = conn.execute(
         "SELECT p.display_name, p.title FROM posts AS o "
@@ -261,9 +261,31 @@ def _pick_name(conn: DbConnection, item) -> str:
         name = row["display_name"] or row["title"] or ""
         if name.strip():
             return name.strip()
-    # 手で出した投稿。本文の1行目（「・」は飛ばす）をそのまま使う。
-    head = item.head(80)
-    return "" if head == "（本文なし）" else head
+    # 予定表に無い投稿（手で出したもの）。**本文から名前を読む。**
+    #
+    # 通常投稿の本文はこの型で出している:
+    #
+    #     ・
+    #     世界で今、手に入る"気になる建築・不動産"を…   ← config.lead（定型）
+    #
+    #     【 The Eyebrow House 】                      ← 名前はここ
+    #
+    # item.head() は「1行目の『・』を飛ばして2行目」なので、**定型のリード
+    # 文を拾ってしまう**。2026-09-01 の試写で、手で出した1本だけ見出しが
+    # 「世界で今、手に入る…」になった。名前は本文の中にある。
+    import re
+
+    found = re.search(r"【\s*(.+?)\s*】", item.caption or "")
+    if found:
+        return found.group(1).strip()
+
+    # 型に沿っていない本文への逃げ道。定型のリード文は名前ではないので飛ばす。
+    skip = {config.caption.opener, *config.caption.lead}
+    for line in (item.caption or "").splitlines():
+        text = line.strip()
+        if text and text not in skip:
+            return text[:80]
+    return ""
 
 
 @dataclass
