@@ -473,7 +473,10 @@ class ReelConfig(BaseModel):
     total_sec: float = 21.0
     crossfade_sec: float = 0.4
     zoom: float = 0.10            # 1枚の尺で 1.10 倍まで寄る。0 で寄らない
-    square_offset_px: int = 60    # 正方形を中央より上げる量。Reels の下UIを避ける
+    # 正方形を中央より上げる量。**0＝中央。**
+    # 下部UIを避ける名目で 60 にしていたが、中央でも下に420px残るので
+    # 掛からない。下だけ間延びして見えるだけだった（2026-09-01）。
+    square_offset_px: int = 0
     blur_radius: int = 60         # 背景のぼかし
     bg_brightness: float = 0.55   # 背景を暗くする係数。前景の正方形を立たせる
     jpeg_quality: int = 92

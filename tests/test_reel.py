@@ -48,8 +48,13 @@ def test_コマは縦1080x1920になる(tmp_path, square):
     assert Image.open(dest).size == (1080, 1920)
 
 
-def test_正方形は中央より上に置かれる(tmp_path, square):
-    """Reels は下側にUIが重なるので、真ん中に置かない。
+def test_正方形は設定どおりの高さに置かれる(tmp_path, square):
+    """square_offset_px のぶんだけ中央から上げる。**既定は 0＝中央。**
+
+    以前は 60px 上げていた（Reels の下部UIを避ける名目）。1080 の正方形を
+    1920 に置くと中央でも下に420px残るのでUIには掛からず、投稿ページや
+    プロフィールで下だけ間延びして見えるだけだった（2026-09-01 に実物で
+    指摘を受けて中央に戻した）。
 
     前景と背景は明るさで見分ける（背景は bg_brightness で暗くしてある）。
     上端・下端の内側と外側を比べれば、置いた位置がそのまま出る。
@@ -494,3 +499,33 @@ def test_同じ日に複数あればいちばん見られたと書ける(tmp_pat
 
     assert built.picked_by == "reach"
     assert "いちばん見られた" in built.caption
+
+
+def test_既定では上下の余白が等しい(tmp_path):
+    """**下だけ長い状態に戻さないための固定。**
+
+    2026-09-01 の初回リールは上360 / 下480 で公開され、下の余白が
+    間延びして見えると指摘を受けた。中央合わせを既定にする。
+    """
+    # **一様な白を使う。** square フィクスチャは上下で色が違い、暗い下半分が
+    # 背景と区別できない。
+    plain = tmp_path / "plain.jpg"
+    Image.new("RGB", (1080, 1080), "#ffffff").save(plain, "JPEG", quality=95)
+
+    dest = tmp_path / "frame.jpg"
+    compose_frame(plain, dest, CONFIG.reel)
+
+    with Image.open(dest) as frame:
+        width, height = frame.size
+        column = [sum(frame.getpixel((width // 2, y))) for y in range(height)]
+
+    # **閾値は決め打ちにしない。** 固定値にすると背景まで前景と判定されて
+    # 全面が「写真」になり、どんな設定でも通るテストになる（実際にそれで
+    # 一度素通りさせた）。実測の最小と最大の中間で切る。
+    threshold = (min(column) + max(column)) / 2
+    assert max(column) - min(column) > 100, "前景と背景を見分けられていない"
+
+    rows = [y for y, value in enumerate(column) if value > threshold]
+    above, below = rows[0], height - 1 - rows[-1]
+    assert rows[-1] - rows[0] + 1 == 1080, "正方形の高さが取れていない"
+    assert abs(above - below) <= 2, f"上 {above}px / 下 {below}px で揃っていない"
