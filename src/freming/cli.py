@@ -1437,10 +1437,14 @@ def _cmd_post(args: argparse.Namespace) -> int:
             if row is None:
                 print(f"post {args.id} が見つかりません。", file=sys.stderr)
                 return 2
-            if row["kind"] != "feed" or row["state"] != "published":
+            # **リールも戻せる。** 以前は通常投稿だけに絞っていたが、
+            # 2026-09-01 に初回リールをアプリ側で削除して出し直したとき、
+            # ここで弾かれて戻す手段が無くなった。消したものを戻せない
+            # 理由は無い。
+            if row["state"] != "published":
                 print(
-                    f"post {args.id} は {row['kind']}/{row['state']} です。"
-                    "出し直せるのは公開済みの通常投稿だけです。",
+                    f"post {args.id} は {row['state']} です。"
+                    "出し直せるのは公開済みのものだけです。",
                     file=sys.stderr,
                 )
                 return 2
@@ -1457,7 +1461,7 @@ def _cmd_post(args: argparse.Namespace) -> int:
                 horizon = (datetime.now(UTC) + timedelta(days=31)).isoformat()
                 taken = {
                     r["scheduled_at"] for r in scheduled_posts(conn, horizon)
-                    if r["kind"] == "feed" and r["id"] != args.id
+                    if r["kind"] == row["kind"] and r["id"] != args.id
                     and r["state"] in ("planned", "publishing")
                 }
                 target = None

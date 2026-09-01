@@ -24,6 +24,7 @@ on:
           - post-show-all      # 60日先までの予定（窓の外に置いた行を見る。費用なし）
           - post-skip          # 予定を見送りにする（「対象の上限」に post_id）
           - post-unskip        # 見送りを予定に戻す（「対象の上限」に post_id）
+          - post-requeue       # **IG側で消した投稿を今すぐ出し直す**（「対象の上限」に post_id）
           - exchange-ig-code   # 受け取った code をトークンに換える（費用なし）
           - check-ig-token     # トークンの疎通とスコープ（費用なし）
           - post-replan        # 未投稿の予定の本文を作り直す（費用なし）
@@ -101,6 +102,17 @@ jobs:
             source-report)    python -m freming.cli source-report ;;
             post-show)        python -m freming.cli post show ;;
             post-show-all)    python -m freming.cli post show --days 60 ;;
+            post-requeue)
+              # **アプリ側で先に削除してから使うこと。** 消さずに戻すと
+              # 同じものが2回並ぶ。--now なので auto_post が動いていれば
+              # 1分以内に出る（リールは reel.yml 側で出す）。
+              if [ -z "${{ github.event.inputs.limit }}" ]; then
+                echo "「対象の上限」欄に post_id を入れてください。" >&2
+                exit 2
+              fi
+              python -m freming.cli post requeue --id ${{ github.event.inputs.limit }} --now
+              python -m freming.cli post show
+              ;;
             post-skip|post-unskip)
               # 「対象の上限」欄に post_id を入れる（post show の先頭の番号）。
               # **どちらも予定表を書き換えるだけ**で、IG には触らない。

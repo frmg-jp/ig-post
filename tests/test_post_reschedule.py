@@ -429,3 +429,41 @@ def test_予定を作るときも1日1本を超えない(monkeypatch, tmp_path) 
     ]
     conn.close()
     assert len(same_day) == 1, f"同じ日に {len(same_day)} 本入った"
+
+
+# --- 出し直し（requeue）------------------------------------------------
+#
+# アプリ側で消した投稿を、もう一度予定に戻す経路。2026-09-01 に初回リールを
+# 消して出し直そうとしたとき、**リールが弾かれて戻せなかった。**
+
+
+def test_リールも出し直せる(tmp_path):
+    """以前は通常投稿だけに絞っていた。消したものを戻せない理由は無い。"""
+    config = _config(tmp_path, ["09:00"])
+    conn = _db(tmp_path)
+    post_id = create_post(conn, "reel", _at(-1, "19:00").isoformat())
+    finish_post(conn, post_id, "media-1", "container-1")
+    conn.commit()
+    conn.close()
+
+    assert main(["--config", config, "post", "requeue", "--id", str(post_id), "--now"]) == 0
+
+    conn = _db(tmp_path)
+    row = conn.execute("SELECT * FROM posts WHERE id = ?", (post_id,)).fetchone()
+    conn.close()
+    assert row["state"] == "planned"
+    # **公開の痕跡を消す。** 残ったままだと出し直しても published 扱いになる。
+    assert row["ig_media_id"] is None
+    assert row["published_at"] is None
+    assert row["attempts"] == 0
+
+
+def test_公開していないものは出し直せない(tmp_path):
+    """予定のままの行を「出し直す」のは意味が違う。取り違えを防ぐ。"""
+    config = _config(tmp_path, ["09:00"])
+    conn = _db(tmp_path)
+    post_id = create_post(conn, "reel", _at(1, "19:00").isoformat())
+    conn.commit()
+    conn.close()
+
+    assert main(["--config", config, "post", "requeue", "--id", str(post_id), "--now"]) == 2
