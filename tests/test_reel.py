@@ -456,3 +456,41 @@ def test_代用でも1日1本にする(tmp_path, monkeypatch):
     assert len(built.winners) == 7, "1日1本になっていない"
     ids = [row["id"] for row in built.winners]
     assert extra in ids, "同じ日なら先に出た方を採る"
+
+
+# --- 「いちばん見られた」と名乗ってよい条件（2026-09-01）-----------------
+#
+# 1日1本しか出していない週は、日ごとの1位＝その日の唯一の1本。選抜は
+# 起きていない。それでも初回は「先週、いちばん見られた6軒。」で公開された。
+
+
+def test_1日1本の週はいちばん見られたと書かない(tmp_path):
+    """候補と選ばれた数が同じ＝選んでいない。実際に公開してしまった形。"""
+    from freming.instagram.worker import build_weekly_reel
+
+    cfg, conn, _ = _reel_db(tmp_path, days=6)  # 各日1本ずつ
+    built = build_weekly_reel(
+        cfg, conn, "token", tmp_path / "reel.mp4", now=REEL_NOW
+    )
+    conn.close()
+
+    assert built.picked_by == "recent"
+    assert "いちばん見られた" not in built.caption
+    assert "先週ご紹介した6軒" in built.caption
+
+
+def test_同じ日に複数あればいちばん見られたと書ける(tmp_path):
+    """1日に2本出した週は、実際に選抜が起きているので名乗ってよい。"""
+    from freming.instagram.worker import build_weekly_reel
+
+    cfg, conn, _ = _reel_db(tmp_path, days=6)
+    # 09/03 にもう1本足す（リーチは低い＝負ける側）
+    _extra_post(conn, "2026-09-02T23:00:00+00:00", 1)
+
+    built = build_weekly_reel(
+        cfg, conn, "token", tmp_path / "reel.mp4", now=REEL_NOW
+    )
+    conn.close()
+
+    assert built.picked_by == "reach"
+    assert "いちばん見られた" in built.caption

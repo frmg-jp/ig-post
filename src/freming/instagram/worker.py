@@ -247,6 +247,20 @@ def build_weekly_reel(
     picked_by = "reach"
     try:
         winners = daily_winners(config, conn, token, now)
+        # **「いちばん見られた」と名乗ってよいのは、実際に選んだときだけ。**
+        # 1日1本しか出していない週は、日ごとの1位＝その日の唯一の1本で、
+        # 選抜は起きていない。それでもリーチ経路が成功しさえすれば
+        # 「いちばん見られた」と書いてしまう作りだった。
+        #
+        # 2026-09-01 の初回がそれで、6日ぶん各1本なのに
+        # 「先週、いちばん見られた6軒。」で公開された。
+        #
+        # 候補の数と選ばれた数が同じなら、選んでいない。文言を落とす。
+        start, end = last_week(config, now)
+        pool = published_posts_between(conn, start.isoformat(), end.isoformat())
+        if len(pool) <= len(winners):
+            log.info("どの日も候補が1本なので、リーチの言い回しは使いません")
+            picked_by = "recent"
     except MissingInsightsScope:
         if not allow_fallback:
             raise
