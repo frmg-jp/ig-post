@@ -422,3 +422,37 @@ def test_本文の件数は実際に入った数になる():
     assert "先週ご紹介した6軒" in caption
     assert "7軒" not in caption
     assert "{count}" not in caption
+
+
+def test_代用でも1日1本にする(tmp_path, monkeypatch):
+    """同じ日に2本出ている日がある（2026-08-31 に実際に起きた）。
+
+    リーチで選ぶ側は日ごとに1位を採るので必ず1日1本。代用側だけ全部
+    入れると、その日だけ2枚続いてリールが8枚になる。**形を揃える。**
+    """
+    from freming.instagram.worker import build_weekly_reel
+
+    from freming.instagram import worker as worker_mod
+    from freming.instagram.insights import MissingInsightsScope
+
+    cfg, conn, made = _reel_db(tmp_path, days=7)  # 08/31(月)〜09/06(日)
+    # 09/03 にもう1本。先に出たのは 08:00 の方（既存は 19:00）。
+    extra = _extra_post(conn, "2026-09-02T23:00:00+00:00", 10)  # 09/03 08:00 JST
+
+    # 仕込みでリーチを入れてあるので、そのままだとリーチ側が成功する。
+    # **権限が無い状態を作る**のがこのテストの前提。
+    def no_scope(*args, **kwargs):
+        raise MissingInsightsScope("権限なし")
+
+    monkeypatch.setattr(worker_mod, "daily_winners", no_scope)
+
+    built = build_weekly_reel(
+        cfg, conn, "token", tmp_path / "reel.mp4", now=REEL_NOW,
+        allow_fallback=True,
+    )
+    conn.close()
+
+    assert built.picked_by == "recent"
+    assert len(built.winners) == 7, "1日1本になっていない"
+    ids = [row["id"] for row in built.winners]
+    assert extra in ids, "同じ日なら先に出た方を採る"

@@ -251,10 +251,22 @@ def build_weekly_reel(
         if not allow_fallback:
             raise
         log.warning("リーチが読めないので、先週ご紹介した分で代用します")
-        # **リーチで選ぶときと同じ週を見る。** 窓が違うと、選び方を切り替えた
-        # だけで対象の週まで変わってしまう。
+        # **リーチで選ぶときと同じ週・同じ「1日1本」で拾う。** 窓や本数が
+        # 違うと、選び方を切り替えただけで中身の形まで変わる。
+        #
+        # 同じ日に2本出ている日が実際にある（2026-08-31。枠の空き判定の
+        # 不具合で2本公開された）。日でまとめずに全部入れると、その日だけ
+        # 2枚続き、リールが8枚になる。リーチが読めない以上どちらが良かった
+        # かは分からないので、**先に出た方**を採る。
         start, end = last_week(config, now)
-        winners = list(published_posts_between(conn, start.isoformat(), end.isoformat()))
+        rows = published_posts_between(conn, start.isoformat(), end.isoformat())
+        first_of_day: dict[object, Row] = {}
+        for row in rows:  # published_at の昇順で返る
+            day = datetime.fromisoformat(row["published_at"]).astimezone(
+                ZoneInfo(config.instagram.timezone)
+            ).date()
+            first_of_day.setdefault(day, row)
+        winners = [first_of_day[day] for day in sorted(first_of_day)]
         picked_by = "recent"
 
     if len(winners) < 2:
