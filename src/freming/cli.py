@@ -922,6 +922,14 @@ def _cmd_instagram(args: argparse.Namespace) -> int:
         print(f"  code: {len(cleaned)}文字 {cleaned[:6]}…{cleaned[-4:]}")
         print(f"  redirect_uri: {args.redirect_uri}")
         print(f"  client_id: {app_id}")
+        # **app secret の中身は出さない。** 出すのは形だけ。Meta の app secret は
+        # 16進32文字と決まっているので、これだけで「別の欄を貼った」が分かる。
+        # 実際、2026-09-01 の3回の失敗はどれも同じ文言で、code は形が見えていた
+        # のに secret だけ見えず、切り分けに半日かかった。
+        shape = "16進32文字" if len(secret) == 32 and all(
+            c in "0123456789abcdefABCDEF" for c in secret
+        ) else "**Meta の app secret の形ではありません**"
+        print(f"  app secret: {len(secret)}文字 {shape}")
 
         try:
             value = ig.exchange_code(cleaned, app_id, secret, args.redirect_uri)
@@ -934,7 +942,11 @@ def _cmd_instagram(args: argparse.Namespace) -> int:
                 "  2. redirect_uri が認可時と1文字でも違う\n"
                 "     → 上に出ている値と、Metaのダッシュボードの登録値を見比べてください\n"
                 "     → 違うときは --redirect-uri で合わせられます\n"
-                "  3. app secret が違う\n\n"
+                "  3. app secret が違う\n"
+                "     → 上の「app secret」の形を見てください\n"
+                "     → **Facebook アプリの「アプリシークレット」ではありません。**\n"
+                "       Meta の画面で「Instagram」→「API設定」→ Instagram アプリの\n"
+                "       シークレットを使ってください（別物です）\n\n"
                 "1が濃厚なら、担当者さまに同じリンクをもう一度開いてもらってください"
                 "（招待の承認はやり直し不要です）。",
                 file=sys.stderr,
