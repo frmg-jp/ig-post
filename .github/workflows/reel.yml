@@ -15,14 +15,18 @@ name: 週次リール
 
 on:
   # ------------------------------------------------------------------
-  # **2026-08-10 から定期実行を止めている。** 再開の指示が出るまで。
-  #
-  # 戻すときは下の3行のコメントを外すだけ。毎週月曜 19:00 JST（UTC 10:00）。
-  # config.yaml の instagram.reel_weekday / reel_time と合わせること。
+  # 毎週月曜 19:00 JST（UTC 10:00）。2026-08-10 に止めていたのを
+  # 2026-08-31 に再開した。config.yaml の instagram.reel_weekday /
+  # reel_time と合わせること。
   # ここだけ直しても予定は作られない（予定は collect.yml の post plan）。
   #
-  # schedule:
-  #   - cron: "0 10 * * 1"
+  # **定刻には出ない。** GitHub の定期実行は混雑時に大きく遅れる仕様で、
+  # このリポジトリの実測でも毎回3〜10時間ずれている。19:00 の枠を過ぎた
+  # 予定を「動いたときに出す」経路だと思っておくこと。時刻を守りたく
+  # なったら、審査UI側で作れるようにする（ffmpeg とメモリが要る）か、
+  # 外部のスケジューラから叩く必要がある。
+  schedule:
+    - cron: "0 10 * * 1"
   # ------------------------------------------------------------------
   workflow_dispatch:
     inputs:
@@ -100,8 +104,15 @@ jobs:
 
       # **リールだけを扱う。** 通常投稿とストーリーズは審査UI側の担当で、
       # ここで拾うと二重に出る（状態遷移で防いではいるが、担当を分けるのが前提）。
+      #
+      # 条件が `!= preview` なのは、**定期実行では inputs が空になる**ため。
+      # `== publish` と書くと、毎週月曜に起動して何もせず終わる。
+      #
+      # `--limit 1` は**溜まった予定がまとめて出るのを防ぐ**ため。定期実行を
+      # 止めていた間の枠（08/31 など）が残っており、上限を付けないと次に
+      # 動いたとき2本続けて公開される。
       - name: リールを投稿
-        if: ${{ github.event.inputs.mode == 'publish' }}
+        if: ${{ github.event.inputs.mode != 'preview' }}
         run: |
-          python -m freming.cli post run --kind reel \
+          python -m freming.cli post run --kind reel --limit 1 \
             ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
