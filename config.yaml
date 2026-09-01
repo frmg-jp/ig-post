@@ -758,9 +758,17 @@ instagram:
   reel_weekday: 0
   reel_time: "19:00"
   # リーチが読めないとき、直近の投稿で代用してよいか。
-  # **既定は代用しない。** 黙って別の7枚で出すと、狙いと違うものが
-  # 出たことに誰も気づけない。リーチには再認可が要る（insights.py）。
-  reel_fallback_recent: false
+  #
+  # もともとは false にしていた。黙って別の7枚で出すと、狙いと違うものが
+  # 出たことに誰も気づけないため。**その心配は本文で解いた。** 選び方に
+  # 応じて caption.reel.lead_reach / lead_recent が切り替わるので、
+  # 直近で選んだ回は本文もそう名乗る（「今週ご紹介した7軒を、まとめて。」）。
+  #
+  # 2026-09-01 に true にした。リーチの読み取りには再認可が要り
+  # （instagram_business_manage_insights は refresh では増やせない）、
+  # 引き換えが3回続けて失敗している。**リールが1本も出ない方が悪い。**
+  # 再認可が通ったら false に戻してよい（戻すと本文も lead_reach に戻る）。
+  reel_fallback_recent: true
 
   # ハッシュタグと本文の型は caption セクションが持つ（この下）。
 
