@@ -27,6 +27,7 @@ on:
           - post-requeue       # **IG側で消した投稿を今すぐ出し直す**（「対象の上限」に post_id）
           - exchange-ig-code   # 受け取った code をトークンに換える（費用なし）
           - check-ig-token     # トークンの疎通とスコープ（費用なし）
+          - ig-media           # **アカウントの実際の投稿**を新しい順に出す（費用なし）
           - post-replan        # 未投稿の予定の本文を作り直す（費用なし）
           - post-reschedule    # 期限切れ・旧枠の予定を先の枠へ動かす（費用なし）
           - post-plan          # 空いている枠を埋める（費用なし）
@@ -133,6 +134,12 @@ jobs:
               python -m freming.cli instagram check
               ;;
             check-ig-token)   python -m freming.cli instagram check ;;
+            ig-media)
+              # **Instagram 側の実物**を読む。DBの予定表と食い違っていないかを
+              # 確かめる経路。手で出した投稿はDBに無いので、週次リールの材料
+              # からも漏れる。「対象の上限」で件数を指定できる（既定25）。
+              python -m freming.cli instagram media $LIMIT
+              ;;
             post-replan)      python -m freming.cli post replan ;;
             post-reschedule)  python -m freming.cli post reschedule ;;
             post-plan)
