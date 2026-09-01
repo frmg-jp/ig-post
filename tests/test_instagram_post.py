@@ -620,7 +620,7 @@ def test_件数を絞れる(db, monkeypatch):
     )
     cfg = CONFIG.model_copy(deep=True)
     cfg.instagram.public_base_url = "https://example.com"
-    assert worker_mod.run_once(cfg, db, NOW, limit=1) == 1
+    assert worker_mod.run_once(cfg, db, NOW, limit=1).done == 1
     assert len(published) == 1
 
 
@@ -640,7 +640,7 @@ def test_dry_runは投稿せず予定も消費しない(db, monkeypatch):
     cfg = CONFIG.model_copy(deep=True)
     cfg.instagram.public_base_url = "https://example.com"
 
-    assert worker_mod.run_once(cfg, db, NOW, limit=1, dry_run=True) == 1
+    assert worker_mod.run_once(cfg, db, NOW, limit=1, dry_run=True).done == 1
     row = db.execute("SELECT state, attempts FROM posts WHERE id = ?", (post_id,)).fetchone()
     assert row["state"] == "planned"
     assert row["attempts"] == 0      # 次回そのまま出せる
@@ -662,8 +662,13 @@ def test_中身には本文と代替テキストが出る(db, monkeypatch):
 # --- 動かす場所を分ける -------------------------------------------------
 #
 # リールは ffmpeg と数百MBのメモリが要るので、審査UI（Render の無料プラン）
-# では作れない。GitHub Actions に逃がす。**リールの動画は公開URLを使わない**
-# （rupload へ直接送る）ので、画像を配れない場所でも投稿できる。
+# では作れない。GitHub Actions に逃がす。
+#
+# **動画も公開URLで渡す。** 以前は「rupload へ直接送るので公開URLが要らない」
+# と書いてあったが、あれは誤り。ローカルアップロードは Facebook Login for
+# Business のアプリ専用で、Instagram Login のトークンでは使えない
+# （2026-09-01 に 400 で落ちた）。組んだ動画は post_media に置き、審査UIが
+# /m/<token> で配る。作る場所と配る場所が分かれていても、DBが同じなので届く。
 
 
 def test_担当しない種別は取らない(db):
@@ -697,7 +702,7 @@ def test_担当が空なら何もしない(db, monkeypatch):
     cfg.instagram.public_base_url = "https://example.com"
     cfg.instagram.worker_kinds = []
     monkeypatch.setattr(worker_mod, "account_id", lambda token: "1")
-    assert worker_mod.run_once(cfg, db, NOW) == 0
+    assert worker_mod.run_once(cfg, db, NOW).done == 0
 
 
 # --- 予定の本文を作り直す ----------------------------------------------
@@ -930,3 +935,78 @@ def test_名前が並んでもクレジットは末尾に残る():
     )
     assert caption.endswith("familiar by AvapXia — CC BY 4.0")
     assert len(caption) <= 2200
+
+
+# --- リールの動画は公開URLで渡す（2026-09-01）---------------------------
+#
+# ローカルアップロード（upload_type=resumable）は Facebook Login for
+# Business のアプリ専用。Instagram Login のトークンでは黙って無視され、
+# `The parameter video_url is required` で 400 になる。初回公開でこれを
+# 踏み、動画は組めていたのに3回とも落ちた。
+
+
+def test_リールのコンテナはvideo_urlを送る(monkeypatch):
+    """**resumable を送らない。** 送っても無視されて 400 になる。"""
+    from freming.instagram import publish as pub
+
+    sent = {}
+
+    def fake(method, url, token, **kwargs):
+        sent.update(kwargs.get("params") or {})
+        return {"id": "container-1"}
+
+    monkeypatch.setattr(pub, "_request", fake)
+    container = pub.create_reel_container(
+        "tok", "ig-1", "https://example.test/m/abc", caption="本文"
+    )
+
+    assert container == "container-1"
+    assert sent["media_type"] == "REELS"
+    assert sent["video_url"] == "https://example.test/m/abc"
+    assert sent["caption"] == "本文"
+    assert "upload_type" not in sent
+
+
+def test_リールの動画は配り先に置かれる(db, tmp_path, monkeypatch):
+    """組んだ mp4 が post_media に入り、その /m/<token> が Meta に渡ること。"""
+    from freming.instagram.publish import PublishResult
+    from freming.instagram import worker as worker_mod
+
+    post_id = create_post(db, "reel", NOW.isoformat())
+    video = tmp_path / "reel.mp4"
+    video.write_bytes(b"\x00\x01mp4-bytes")
+
+    built = worker_mod.WeeklyReel(
+        video=video, winners=[], track=_Track(), caption="本文",
+        result=None, picked_by="recent",
+    )
+    monkeypatch.setattr(worker_mod, "build_weekly_reel", lambda *a, **k: built)
+
+    handed = {}
+
+    def fake_publish(token, ig_id, video_url, caption=None, **kwargs):
+        handed["url"] = video_url
+        handed["caption"] = caption
+        return PublishResult(media_id="m-1", container_id="c-1")
+
+    monkeypatch.setattr(worker_mod, "publish_reel", fake_publish)
+
+    cfg = load_config("config.yaml").model_copy(deep=True)
+    cfg.instagram.public_base_url = "https://example.test"
+    post = db.execute("SELECT * FROM posts WHERE id = ?", (post_id,)).fetchone()
+    worker_mod._publish_reel(cfg, db, post, "tok", "ig-1")
+
+    row = db.execute(
+        "SELECT token, mime, content FROM post_media WHERE post_id = ?", (post_id,)
+    ).fetchone()
+    assert row is not None, "動画が配り先に置かれていない"
+    assert row["mime"] == "video/mp4"
+    assert bytes(row["content"]) == b"\x00\x01mp4-bytes"
+    # **渡すURLは実際に置いた token のもの。** ここがずれると Meta は 404 を引く。
+    assert handed["url"] == f"https://example.test/m/{row['token']}"
+    assert handed["caption"] == "本文"
+
+
+class _Track:
+    def caption_line(self) -> str:
+        return ""

@@ -10,8 +10,10 @@ Meta の Content Publishing API は2段構え。いきなり投稿はできず�
 
   - **画像は公開URLで渡す。** Meta がこちらへ取りに来る。ローカルの
     パスやDriveのリンクは渡せない（instagram/media.py）。
-  - **動画はファイルを直接送る。** リールには resumable upload があるので、
-    公開URLを用意しなくてよい。数MBの動画をDBに置かずに済む。
+  - **動画も公開URLで渡す。** リールのローカルアップロード（resumable）は
+    Facebook Login for Business のアプリ専用で、Instagram Login の
+    トークンでは使えない（2026-09-01 に実際に 400 で落ちた）。画像と
+    同じ /m/<token> に置いて取りに来てもらう。
   - コンテナの状態確認は1分おき・最大5分（Meta の推奨どおり）。
   - 24時間で100件という投稿上限がある。1日3投稿＋ストーリーズ＋週1リールなら
     まったく届かないが、暴走したときに気づけるよう、上限に近づいたら
@@ -34,7 +36,6 @@ log = get_logger(__name__)
 
 GRAPH = "https://graph.instagram.com"
 API_VERSION = "v23.0"
-UPLOAD_HOST = "https://rupload.facebook.com/ig-api-upload"
 
 # コンテナの出来上がりを待つ間隔と回数。Meta の推奨は「1分おきに5分まで」。
 POLL_INTERVAL_SEC = 20.0
@@ -142,9 +143,20 @@ def create_carousel_container(
     return str(container)
 
 
-def create_reel_container(token: str, ig_id: str, caption: str | None = None) -> str:
-    """リールのコンテナを作る。中身はこのあと upload_video で送る。"""
-    params = {"media_type": "REELS", "upload_type": "resumable"}
+def create_reel_container(token: str, ig_id: str, video_url: str,
+                          caption: str | None = None) -> str:
+    """リールのコンテナを作る。**Meta が video_url へ取りに来る。**
+
+    以前はローカルのファイルを rupload.facebook.com へ直接送っていた
+    （upload_type=resumable）。**あれは使えない。** Meta のドキュメントに
+    「Facebook Login for Business を実装したアプリのみ」と明記があり、
+    こちらのトークンは Instagram Login で取っている。resumable は黙って
+    無視され、`The parameter video_url is required` で 400 になる。
+
+    2026-09-01 の初回公開でそれを踏んだ。動画は組めていたのに3回とも
+    ここで落ちた。**画像とまったく同じ経路（/m/<token>）に寄せる。**
+    """
+    params = {"media_type": "REELS", "video_url": video_url}
     if caption:
         params["caption"] = caption
     body = _request("POST", f"{GRAPH}/{API_VERSION}/{ig_id}/media", token, params=params)
@@ -152,28 +164,6 @@ def create_reel_container(token: str, ig_id: str, caption: str | None = None) ->
     if not container:
         raise InstagramError(f"コンテナIDが返りませんでした: {body}")
     return str(container)
-
-
-def upload_video(token: str, container_id: str, video: Path) -> None:
-    """動画の実体を送る。公開URLが要らないのはこの経路があるから。"""
-    import httpx
-
-    data = video.read_bytes()
-    response = httpx.post(
-        f"{UPLOAD_HOST}/{API_VERSION}/{container_id}",
-        headers={
-            "Authorization": f"OAuth {token}",
-            "offset": "0",
-            "file_size": str(len(data)),
-            "Content-Type": "application/octet-stream",
-        },
-        content=data,
-        timeout=600,
-    )
-    if response.status_code != 200:
-        raise InstagramError(
-            f"動画の送信が {response.status_code} で失敗しました: {response.text[:300]}"
-        )
 
 
 def container_status(token: str, container_id: str) -> str:
@@ -289,10 +279,13 @@ def publish_carousel(
 
 
 def publish_reel(
-    token: str, ig_id: str, video: Path, caption: str | None = None, *, sleep=time.sleep
+    token: str, ig_id: str, video_url: str, caption: str | None = None, *, sleep=time.sleep
 ) -> PublishResult:
-    container = create_reel_container(token, ig_id, caption)
-    upload_video(token, container, video)
+    """リールを出す。video_url は**Meta が取りに来られる公開URL**。
+
+    動画の実体は審査UIが /m/<token> で配る（worker._publish_reel）。
+    """
+    container = create_reel_container(token, ig_id, video_url, caption)
     wait_until_ready(token, container, sleep=sleep)
     media_id = publish_container(token, ig_id, container)
     log.info("リールを投稿しました: media_id=%s", media_id)
@@ -315,6 +308,5 @@ __all__ = [
     "publish_image",
     "publish_reel",
     "publishing_limit",
-    "upload_video",
     "wait_until_ready",
 ]

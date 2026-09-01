@@ -1556,16 +1556,27 @@ def _cmd_post(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 1
-        done = run_once(
+        result = run_once(
             cfg, conn, limit=args.limit, dry_run=args.dry_run,
             kinds=tuple(args.kind) if args.kind else None,
         )
-        if not done:
+        done = result.done
+        if done:
+            if args.dry_run:
+                print(f"{done} 件の中身を出しました（投稿していません）。上のログを確認してください。")
+            else:
+                print(f"{done} 件投稿しました。")
+        elif not result.failed:
             print("時間が来ている予定はありません。")
-        elif args.dry_run:
-            print(f"{done} 件の中身を出しました（投稿していません）。上のログを確認してください。")
-        else:
-            print(f"{done} 件投稿しました。")
+        # **落ちたら赤で終わる。** ここを 0 で返していたので、2026-09-01 の
+        # 初回リールが3回とも 400 で失敗したのに GitHub Actions は緑だった。
+        # ログを開かないかぎり「出たはず」で通ってしまう。
+        if result.failed:
+            print(
+                f"{result.failed} 件は投稿できませんでした。上のログを確認してください。",
+                file=sys.stderr,
+            )
+            return 1
         return 0
 
 

@@ -314,7 +314,15 @@ def _publish_reel(config: Config, conn: DbConnection, post: Row, token: str, ig_
             (built.caption, built.track.caption_line() or None, post["id"]),
         )
         conn.commit()
-        return publish_reel(token, ig_id, built.video, built.caption)
+        # **動画も画像と同じ /m/<token> に置く。** Meta が取りに来る。
+        # ローカルのファイルを直接送る経路（rupload）は Instagram Login の
+        # トークンでは使えない（publish.create_reel_container）。
+        # 出し終わったら purge_media が消すので、URLはすぐ死ぬ。
+        video_token = media.store_media(
+            conn, post["id"], built.video.read_bytes(), mime="video/mp4"
+        )
+        url = config.instagram.public_media_url(video_token)
+        return publish_reel(token, ig_id, url, built.caption)
 
 
 _HANDLERS = {
@@ -382,6 +390,17 @@ def preview(config: Config, conn: DbConnection, post: Row) -> str:
     return "\n".join(lines)
 
 
+@dataclass
+class RunResult:
+    """1回ぶんの結果。**失敗も返す**（成功数だけだと緑で終わる）。"""
+
+    done: int = 0
+    failed: int = 0
+
+    def __bool__(self) -> bool:
+        return bool(self.done or self.failed)
+
+
 def run_once(
     config: Config,
     conn: DbConnection,
@@ -389,8 +408,13 @@ def run_once(
     limit: int | None = None,
     dry_run: bool = False,
     kinds: tuple[str, ...] | None = None,
-) -> int:
-    """時間が来た予定を順に投稿する。戻り値は投稿できた件数。
+) -> RunResult:
+    """時間が来た予定を順に投稿する。
+
+    **戻り値は「出せた件数」と「落ちた件数」の両方。** 成功数だけを返すと、
+    呼び出し側が失敗に気づけない。実際 2026-09-01 の初回リールは3回とも
+    400 で落ちたのに、GitHub Actions は緑で終わった（誰も見なければ
+    「出たはず」で通ってしまう）。
 
     limit で件数を絞れる。**最初の1本は 1 にして様子を見ること。**
     dry_run なら中身を出して、予定は planned に戻す（消費しない）。
@@ -402,28 +426,29 @@ def run_once(
     record = load_token(conn)
     if record is None:
         log.info("Instagram のトークンが未設定のため、投稿は行いません")
-        return 0
+        return RunResult()
     if not config.instagram.public_base_url:
         log.warning(
             "instagram.public_base_url が未設定です。"
             "Meta が画像を取りに来られないため、投稿は行いません"
         )
-        return 0
+        return RunResult()
 
     allowed = tuple(kinds if kinds is not None else config.instagram.worker_kinds)
     if not allowed:
         log.info("担当する種別がありません（instagram.worker_kinds が空）")
-        return 0
+        return RunResult()
     log.info("担当: %s", " / ".join(allowed))
 
     ig_id = "（dry-run）" if dry_run else account_id(record.value)
     done = 0
+    failed = 0
     while limit is None or done < limit:
         post = claim_due_post(
             conn, now.isoformat(), config.instagram.max_attempts, allowed
         )
         if post is None:
-            return done
+            return RunResult(done, failed)
         # 設定を切り替える前に作られたストーリーズの予定が残っていることが
         # ある。**止めたつもりのものが出る**のが一番まずいので、ここで落とす。
         if post["kind"] == KIND_STORY and not config.instagram.post_story:
@@ -447,12 +472,13 @@ def run_once(
             state = fail_post(
                 conn, post["id"], describe_error(exc), config.instagram.max_attempts
             )
+            failed += 1
             log.warning(
                 "投稿に失敗しました（post_id=%s / %s）: %s",
                 post["id"], "打ち切り" if state == "failed" else "次回に再試行", exc,
             )
     # limit に達してループを抜けた場合。ここが無いと None を返す。
-    return done
+    return RunResult(done, failed)
 
 
 class PostingWorker:
@@ -507,5 +533,6 @@ __all__ = [
     "describe_error",
     "preview",
     "publish_one",
+    "RunResult",
     "run_once",
 ]
