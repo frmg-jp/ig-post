@@ -128,6 +128,30 @@ def test_承認された物件を現物で並べられる():
     assert "出てはいけない" not in text      # 非承認は入らない
 
 
+def test_判定が列に入っていなければ知らせる():
+    """**0019 の埋め戻しが効いたかを、これで確かめる。**
+
+    上の割合は score_detail の JSON から数えているので、列が空でも
+    表は普通に出てしまう。列が埋まっていなければ審査UIの絞り込みには
+    使えないので、件数を出して区別する。
+    """
+    filled = {"provenance_visible": 1, "style_identified": 1, "one_of_a_kind": 0}
+    rows = [{**_row("approved", 80), **filled},
+            {**_row("rejected", 40), **filled, "style_identified": None}]
+    report = analyze(rows, WEIGHTS)
+    assert report.columns_filled["style_identified"] == 1   # 2件中1件
+    assert report.columns_filled["provenance_visible"] == 2
+
+    text = render(report, WEIGHTS)
+    assert "列に入っていない判定がある" in text
+    assert "style_identified" in text.split("列に入っていない判定がある", 1)[1]
+
+    # 全部埋まっていれば黙る
+    full = [{**_row("approved", 80), **filled},
+            {**_row("rejected", 40), **filled}]
+    assert "列に入っていない判定がある" not in render(analyze(full, WEIGHTS), WEIGHTS)
+
+
 def test_実例用の列が無い行でも落ちない():
     """集計だけを使う呼び出しが、実例用の列まで揃えなくて済むこと。"""
     report = analyze([_row("approved", 80)], WEIGHTS)
@@ -182,7 +206,31 @@ def test_承認が無ければ何も言わない():
     assert "重みの案" not in text
 
 
-def test_重みの案は合計1になる():
+def test_比較材料の無い軸の重みは案から取り上げない():
+    """**足したばかりの軸を毎回0にする案を出さないこと。**
+
+    style/one_of_a_kind を軸に足した直後、既存の score_detail にその軸は
+    無い（過去の採点が書いていない）。案を全体で1.0に正規化していたころ、
+    比較できる軸だけで1.0を配り直してしまい、新しい軸の重みを毎回
+    まるごと取り上げる案になっていた。
+    """
+    # 内訳に出る軸（story/area/price）と、足したばかりの軸だけにする。
+    weights = {"story": 0.30, "area": 0.20, "price": 0.10,
+               "style": 0.20, "one_of_a_kind": 0.20}
+    rows = [_row("approved", 80, story=90, area=20),
+            _row("rejected", 40, story=20, area=80)]
+    section = render(analyze(rows, weights), weights).split("重みの案", 1)[1]
+
+    values = [float(p[2]) for p in (l.split() for l in section.splitlines())
+              if len(p) >= 3 and p[0] in weights]
+    assert values, "案の表が読めていない"
+    # 比較できる3軸が持っていた 0.60 の中で配り直す（1.0 ではない）
+    assert sum(values) == pytest.approx(0.60, abs=0.011)
+    assert "style 0.20" in section and "one_of_a_kind 0.20" in section
+    assert "比較材料がありません" in section
+
+
+def test_重みの案は比較できる軸の合計に収まる():
     rows = [
         _row("approved", 80, story=90, area=20, price=100),
         _row("rejected", 40, story=20, area=80, price=0),
@@ -198,7 +246,9 @@ def test_重みの案は合計1になる():
         if len(parts) >= 3 and parts[0] in WEIGHTS:
             values.append(float(parts[2]))
     assert values, "案の表が読めていない"
-    assert sum(values) == pytest.approx(1.0, abs=0.011)
+    # 内訳に出るのは story/area/price の3軸だけなので、案もその3軸が
+    # 持っていた 0.25+0.20+0.05 の中に収まる。
+    assert sum(values) == pytest.approx(0.50, abs=0.011)
 
 
 def test_どの軸も差が無ければ重みの話にしない():

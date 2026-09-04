@@ -125,6 +125,9 @@ class ApprovalReport:
     decades: Counter = field(default_factory=Counter)
     countries: Counter = field(default_factory=Counter)
     examples: list[ApprovedExample] = field(default_factory=list)
+    # 判定が**列に**入っている件数。JSON の中の値とは別に数える。
+    # 0019 の埋め戻しが効いたかどうかは、これを見ないと分からない。
+    columns_filled: Counter = field(default_factory=Counter)
     approved_gated: int = 0
     # 足切りに掛かったのに承認されたものの、足切りの理由（story / 築年）。
     # **どちらの足切りを見直す話なのかは、ここを見ないと決められない。**
@@ -178,6 +181,14 @@ def analyze(rows: Sequence[Mapping[str, Any]], weights: Mapping[str, float]) -> 
             year = parse_year(row["year_built"])
             report.decades[f"{year // 10 * 10}年代" if year else "築年不明"] += 1
             report.examples.append(_example(row, score))
+
+        for column in ("provenance_visible", "style_identified", "one_of_a_kind"):
+            try:
+                filled = row[column] is not None
+            except (KeyError, IndexError):
+                continue
+            if filled:
+                report.columns_filled[column] += 1
 
         detail = _detail(row["score_detail"])
         if detail is None:
@@ -339,6 +350,16 @@ def render(report: ApprovalReport, weights: Mapping[str, float],
                 continue
             out.append(f"{key:<22}{yes:>6.0f}%{no:>7.0f}%{yes - no:>+6.0f}pt")
 
+        # **上の割合は score_detail の JSON から数えている。** 列にも
+        # 入っていないと、審査UIでの絞り込みには使えない。
+        reviewed = approved + rejected
+        missing = [k for k in ("provenance_visible", "style_identified", "one_of_a_kind")
+                   if report.columns_filled[k] < reviewed]
+        if missing:
+            out.append("\n※ 列に入っていない判定がある（絞り込みに使えない）:")
+            for key in missing:
+                out.append(f"  {key:<22}{report.columns_filled[key]:>4} / {reviewed} 件")
+
     out.append("\n--- 承認された物件の内訳 ---")
     for label, counter in (
         ("ジャンル", report.genres), ("ソース", report.sources),
@@ -383,32 +404,48 @@ def _suggest(report: ApprovalReport, weights: Mapping[str, float]) -> str:
     usable = {k: s for k, s in report.axes.items() if s.approved and s.rejected}
     if not usable:
         return "重みの案: 比較できる軸がありません。"
+
+    # **案は、比較できる軸が持っている重みの中だけで配り直す。**
+    # 足したばかりの軸は既存の score_detail に入っていないので実績が無い。
+    # 全体を 1.0 に正規化すると、その軸の重みを毎回まるごと取り上げる案に
+    # なる（style/one_of_a_kind を足した直後に実際そうなった）。
+    budget = sum(float(weights.get(k, 0.0)) for k in usable)
+    reserved = sorted(k for k in weights if k not in usable and weights[k] > 0)
+    if budget <= 0:
+        return "重みの案: 比較できる軸に重みが付いていません。"
+
     positive = {k: max(s.gap, 0.0) for k, s in usable.items()}
     total = sum(positive.values())
     if total <= 0:
         return ("重みの案: **どの軸も承認と非承認を分けていません。**\n"
                 "  重みの調整では直りません。軸そのもの（何を見るか）を変える話になります。")
 
-    lines = ["重みの案（実績に比例させた配分と、いまの重みの中間）", ""]
+    lines = [f"重みの案（実績に比例させた配分と、いまの重みの中間 / 合計 {budget:.2f} の中で）", ""]
     lines.append(f"{'軸':<10}{'いま':>7}{'案':>7}   根拠")
     fresh: dict[str, float] = {}
     for key, stat in sorted(usable.items(), key=lambda kv: -kv[1].gap):
         now = float(weights.get(key, 0.0))
-        by_gap = positive[key] / total
+        by_gap = positive[key] / total * budget
         blended = round((now + by_gap) / 2 * 20) / 20   # 0.05 刻み
         fresh[key] = max(blended, 0.05)
-    # 合計を 1.00 に揃える。丸めの誤差は最も効いている軸で吸収する。
+    # 比較できる軸が持っていた合計に戻す。丸めの誤差は最も効いている軸で吸収。
     scale = sum(fresh.values())
     top = max(fresh, key=lambda k: usable[k].gap)
     for key in fresh:
-        fresh[key] = round(fresh[key] / scale * 20) / 20
-    fresh[top] = round(fresh[top] + (1.0 - sum(fresh.values())), 2)
+        fresh[key] = round(fresh[key] / scale * budget * 20) / 20
+    fresh[top] = round(fresh[top] + (budget - sum(fresh.values())), 2)
 
     for key, stat in sorted(usable.items(), key=lambda kv: -kv[1].gap):
         now = float(weights.get(key, 0.0))
         mark = "→" if abs(fresh[key] - now) >= 0.05 else " "
         lines.append(f"{key:<10}{now:>7.2f}{fresh[key]:>7.2f} {mark} 差 {stat.gap:+.0f}")
     lines.append("")
+    if reserved:
+        held = ", ".join(f"{k} {weights[k]:.2f}" for k in reserved)
+        lines.append(f"残り {1.0 - budget:.2f}（{held}）はこの案の対象外です。")
+        lines.append("**足したばかりの軸は、既存の score_detail に入っていないので")
+        lines.append("比較材料がありません。** 採点が一巡すれば表に載ります。")
+        lines.append("")
     lines.append("**この案は採点まで届いた候補の中での選ばれ方しか反映していません。**")
     lines.append("収集が拾わなかった物件は入っていません。また既定の並びが点数順の")
     lines.append("ため、点数の低い候補は読まれる順が後ろになり、承認率が実力より")
