@@ -115,3 +115,54 @@ def test_pending_migrations_are_reported_before_use(tmp_path) -> None:
     path = tmp_path / "ok.db"
     migrate(path)
     ensure_migrated(path)
+
+
+def test_0019は既存の判定をJSONから埋め戻す(db) -> None:
+    """**採点をやり直さずに列を埋める。**
+
+    style_identified / one_of_a_kind の値は 106件ぶんすでに score_detail
+    の中にある。埋め戻さないと、列を足しても既存の行は全部 NULL のままで、
+    絞り込みにも検証にも使えない——APIに再課金して採点し直すことになる。
+    """
+    import json
+
+    from freming.db.migrate import discover_migrations
+
+    conn = connect(db)
+    detail = json.dumps(
+        {"gate": "", "axes": [],
+         "flags": {"provenance_visible": False,
+                   "style_identified": True, "one_of_a_kind": False}},
+        ensure_ascii=False,
+    )
+    conn.execute(
+        "INSERT INTO properties (source, source_url, title, status, score, score_detail)"
+        " VALUES ('dwell', 'https://example.com/a/', 'A', 'approved', 70, ?)",
+        (detail,),
+    )
+    # 採点前の行（score_detail が無い）は触らない
+    conn.execute(
+        "INSERT INTO properties (source, source_url, title, status)"
+        " VALUES ('dwell', 'https://example.com/b/', 'B', 'pending')"
+    )
+    conn.commit()
+
+    # 埋め戻す前は空。これを確かめておかないと、下の assert が
+    # 「もともと入っていた」のか「埋め戻された」のか区別できない。
+    before = conn.execute(
+        "SELECT style_identified FROM properties WHERE title = 'A'").fetchone()
+    assert before["style_identified"] is None
+
+    # 0019 の埋め戻しはマイグレーション適用時に一度走るだけなので、
+    # 既存行に対する効き方はSQLをそのまま流して確かめる。
+    sql = next(m for m in discover_migrations() if m.version.startswith("0019")).sql
+    update = "UPDATE properties" + sql.split("UPDATE properties", 1)[1].split(";", 1)[0] + ";"
+    conn.executescript(update)
+    conn.commit()
+
+    rows = {r["title"]: r for r in conn.execute(
+        "SELECT title, style_identified, one_of_a_kind FROM properties")}
+    assert rows["A"]["style_identified"] == 1
+    assert rows["A"]["one_of_a_kind"] == 0        # false は 0。NULL にしない
+    assert rows["B"]["style_identified"] is None  # 採点前は不明のまま
+    conn.close()

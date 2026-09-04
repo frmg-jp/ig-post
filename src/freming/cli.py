@@ -1306,6 +1306,8 @@ def _cmd_approval_report(args: argparse.Namespace) -> int:
     # ScoreAxis に付けている key はこちら側の短い名前。
     by_axis = {
         "story": weights.get("story", 0.0),
+        "style": weights.get("style_identified", 0.0),
+        "one_of_a_kind": weights.get("one_of_a_kind", 0.0),
         "source": weights.get("source_rank", 0.0),
         "for_sale": weights.get("editorial_for_sale_bonus", 0.0),
         "genre": weights.get("genre_match", 0.0),

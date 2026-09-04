@@ -101,6 +101,31 @@ def _price_axis(config: Config, assessment: Assessment, row: Row) -> ScoreAxis:
     return ScoreAxis("price", 100.0, weight, price[:20])
 
 
+def _style_axis(config: Config, assessment: Assessment) -> ScoreAxis:
+    """時代・様式が特定できるか。**承認実績でいちばん効いていた判定。**
+
+    2026-09-04 の approval-report（審査済み106件）で、承認された65件の
+    80% が真、非承認41件では 22%（差 +58pt）。他のどの軸よりも承認と
+    非承認を分けていたのに、score_detail に書いているだけで点数には
+    入れていなかった。
+
+    真偽なので 0/100 の二値。中間点は作らない——「様式がなんとなく
+    分かる」を作ると、結局 story と同じ連続値になって差が消える。
+    """
+    weight = config.scoring.weights.style_identified
+    if assessment.style_identified:
+        return ScoreAxis("style", 100.0, weight, assessment.style_name or "様式あり")
+    return ScoreAxis("style", 0.0, weight, "様式不明")
+
+
+def _one_of_a_kind_axis(config: Config, assessment: Assessment) -> ScoreAxis:
+    """一点物か。同じく承認実績から（承認 72% / 非承認 32%、差 +41pt）。"""
+    weight = config.scoring.weights.one_of_a_kind
+    if assessment.one_of_a_kind:
+        return ScoreAxis("one_of_a_kind", 100.0, weight, "一点物")
+    return ScoreAxis("one_of_a_kind", 0.0, weight, "同一仕様が複数ありうる")
+
+
 def build_result(
     config: Config, assessment: Assessment, row: Row, model: str
 ) -> ScoreResult:
@@ -108,6 +133,8 @@ def build_result(
     weights = config.scoring.weights
     axes = [
         ScoreAxis("story", float(assessment.story_score), weights.story),
+        _style_axis(config, assessment),
+        _one_of_a_kind_axis(config, assessment),
         _source_rank_axis(config, row),
         _for_sale_axis(config, assessment, row),
         _genre_axis(config, assessment),

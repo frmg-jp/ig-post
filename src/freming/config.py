@@ -244,6 +244,15 @@ class ScoringWeights(BaseModel):
     genre_match: float
     area_match: float
     price: float
+    # **承認実績（approval-report）でいちばん効いていた2つ。**
+    # 承認65件では style_identified が 80% / 非承認 22%（差 +58pt）、
+    # one_of_a_kind が 72% / 32%（差 +41pt）。どちらも score_detail の
+    # JSON に入っているだけで、点数には一切反映していなかった。
+    #
+    # 既定を 0.0 にしてあるのは、古い config.yaml をそのまま読めるように
+    # するため（合計1.0の検証を通す）。実際の値は config.yaml が持つ。
+    style_identified: float = 0.0
+    one_of_a_kind: float = 0.0
 
     @property
     def total(self) -> float:
@@ -254,6 +263,8 @@ class ScoringWeights(BaseModel):
             + self.genre_match
             + self.area_match
             + self.price
+            + self.style_identified
+            + self.one_of_a_kind
         )
 
 

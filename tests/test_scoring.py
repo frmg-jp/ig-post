@@ -96,7 +96,8 @@ def test_strong_candidate_scores_high(config, conn) -> None:
     result = build_result(config, _STRONG, _row(conn, property_id), "test")
     assert result.total >= config.scoring.thresholds.highlight_above
     assert {a.key for a in result.axes} == {
-        "story", "source", "for_sale", "genre", "area", "price"
+        "story", "style", "one_of_a_kind",
+        "source", "for_sale", "genre", "area", "price",
     }
 
 
@@ -174,9 +175,37 @@ def test_score_is_persisted_with_breakdown(config, conn) -> None:
 
     detail = json.loads(row["score_detail"])
     assert {a["key"] for a in detail["axes"]} == {
-        "story", "source", "for_sale", "genre", "area", "price"
+        "story", "style", "one_of_a_kind",
+        "source", "for_sale", "genre", "area", "price",
     }
     assert detail["flags"]["provenance_visible"] is True
+    # **0019 で列に出した2つ。** JSON の中だけに持っていたころは、
+    # 絞り込みにも点数にも使えなかった。
+    assert row["style_identified"] == 1
+    assert row["one_of_a_kind"] == 1
+
+
+def test_様式と一点物が点数に効く(config, conn) -> None:
+    """**承認実績でいちばん効いていた2つ。** 0点でも通っていた。
+
+    approval-report（審査済み106件）で style_identified は承認80%/非承認22%、
+    one_of_a_kind は 72%/32%。どちらも score_detail に書くだけで、合算には
+    入れていなかった。
+    """
+    property_id = _add(conn)
+    row = _row(conn, property_id)
+    weights = config.scoring.weights
+    assert weights.style_identified > 0 and weights.one_of_a_kind > 0
+
+    plain = Assessment(**{**_STRONG.__dict__,
+                          "style_identified": False, "one_of_a_kind": False})
+    strong = build_result(config, _STRONG, row, "t")
+    weak = build_result(config, plain, row, "t")
+
+    assert strong.total > weak.total
+    # 二値。「なんとなく様式が分かる」を作ると story と同じ連続値になる。
+    assert {a.raw for a in strong.axes if a.key in ("style", "one_of_a_kind")} == {100.0}
+    assert {a.raw for a in weak.axes if a.key in ("style", "one_of_a_kind")} == {0.0}
 
 
 def test_dry_run_does_not_write(config, conn) -> None:

@@ -141,6 +141,8 @@ def score_pending(
             country=assessment.country,
             price=assessment.price,
             provenance_visible=assessment.provenance_visible,
+            style_identified=assessment.style_identified,
+            one_of_a_kind=assessment.one_of_a_kind,
             usage_type=assessment.usage_type,
             structure=assessment.structure,
             building_area=assessment.building_area,
