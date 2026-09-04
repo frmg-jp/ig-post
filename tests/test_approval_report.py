@@ -177,8 +177,15 @@ def test_どの軸も差が無ければ重みの話にしない():
     assert "どの軸も承認と非承認を分けていません" in text
 
 
-def test_見せなかった候補は入らないと断る():
-    """選択バイアス。ここを書かないと、足切りの根拠に誤用される。"""
+def test_採点まで届かなかった候補は入らないと断る():
+    """選択バイアス。**ただし「低得点は審査に出ない」ではない。**
+
+    min_to_persist は採点ログの件数を数えているだけで、保存も一覧も
+    止めていない（list_properties の min_score は誰も渡していない）。
+    そう書くと、足切りに掛かった候補が人の目に触れていないことになり、
+    実績を読み違える。
+    """
     rows = [_row("approved", 80, story=90), _row("rejected", 40, story=10)]
     text = render(analyze(rows, WEIGHTS), WEIGHTS)
-    assert "審査に上がらなかった候補" in text
+    assert "収集が拾わなかった物件は入っていません" in text
+    assert "min_to_persist" not in text
