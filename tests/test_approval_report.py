@@ -102,6 +102,31 @@ def test_足切りに掛かったのに承認された件数を出す():
     assert "足切りに掛かったのに承認された物件が 1 件" in render(report, WEIGHTS)
 
 
+def test_足切りの理由を種類ごとに分ける():
+    """**どちらの足切りを見直すのかは、理由の内訳を見ないと決まらない。**
+
+    件数だけでは story_min が厳しいのか built_before が厳しいのか
+    区別できず、片方を動かしても外れる。
+    """
+    rows = [
+        _row("approved", 0, gate="story=25 < 40"),
+        _row("approved", 0, gate="story=35 < 40"),
+        _row("approved", 0, gate="築年 2021 ≧ 2000"),
+        _row("rejected", 0, gate="story=10 < 40"),   # 非承認は数えない
+    ]
+    report = analyze(rows, WEIGHTS)
+    assert report.approved_gated == 3
+    assert report.approved_gate_kinds["story_min"] == 2
+    assert report.approved_gate_kinds["built_before"] == 1
+    assert report.approved_gated_story == [25.0, 35.0]
+
+    text = render(report, WEIGHTS)
+    assert "story_min 2件" in text
+    assert "built_before 1件" in text
+    # 下限をいくつまで下げれば拾えたのかが読めること
+    assert "25/35" in text
+
+
 def test_内訳の無い古い行は軸の集計に入れない():
     """採点前の行を混ぜると平均が狂う。件数だけ出して除く。"""
     rows = [_row("approved", 80, story=90), _row("approved", 70, detail=False),

@@ -92,6 +92,12 @@ class ApprovalReport:
     decades: Counter = field(default_factory=Counter)
     countries: Counter = field(default_factory=Counter)
     approved_gated: int = 0
+    # 足切りに掛かったのに承認されたものの、足切りの理由（story / 築年）。
+    # **どちらの足切りを見直す話なのかは、ここを見ないと決められない。**
+    approved_gate_kinds: Counter = field(default_factory=Counter)
+    # 同じく、story の足切りで落ちたのに承認されたものの story 素点。
+    # 下限をいくつにすれば拾えたのかが分かる。
+    approved_gated_story: list[float] = field(default_factory=list)
     no_detail: int = 0
     # 点数順に並べたとき、上位N件（N=承認数）に承認済みが何件入るか。
     precision_at_k: float | None = None
@@ -147,6 +153,7 @@ def analyze(rows: Sequence[Mapping[str, Any]], weights: Mapping[str, float]) -> 
             # 足切りに掛かった（＝0点になった）ものを人が承認していたら、
             # 足切りの条件が厳しすぎる可能性がある。
             report.approved_gated += 1
+            _gate_kind(report, str(detail["gate"]))
 
         for axis in detail.get("axes") or []:
             key = str(axis.get("key") or "")
@@ -166,6 +173,26 @@ def analyze(rows: Sequence[Mapping[str, Any]], weights: Mapping[str, float]) -> 
 
     _rank_quality(report, scored)
     return report
+
+
+def _gate_kind(report: ApprovalReport, gate: str) -> None:
+    """足切りの理由文字列を種類に振り分ける（weights._gate が書く形）。
+
+    `story=20 < 40` / `築年 2021 ≧ 2000` の2種類しか出ない。将来
+    条件が増えたときに黙って消えないよう、どちらでもないものは
+    理由をそのまま数える。
+    """
+    if gate.startswith("story="):
+        report.approved_gate_kinds["story_min"] += 1
+        head = gate[len("story="):].split()[0]
+        try:
+            report.approved_gated_story.append(float(head))
+        except ValueError:
+            pass
+    elif gate.startswith("築年"):
+        report.approved_gate_kinds["built_before"] += 1
+    else:
+        report.approved_gate_kinds[gate] += 1
 
 
 def _rank_quality(report: ApprovalReport, scored: list[tuple[float, bool]]) -> None:
@@ -222,6 +249,14 @@ def render(report: ApprovalReport, weights: Mapping[str, float]) -> str:
     if report.approved_gated:
         out.append(f"\n**足切りに掛かったのに承認された物件が {report.approved_gated} 件ある。**"
                    "\n  足切り（story_min / built_before）が厳しすぎる可能性がある。")
+        if report.approved_gate_kinds:
+            breakdown = " / ".join(f"{k} {v}件"
+                                   for k, v in report.approved_gate_kinds.most_common())
+            out.append(f"  内訳: {breakdown}")
+        if report.approved_gated_story:
+            values = sorted(report.approved_gated_story)
+            out.append(f"  うち story の足切りで落ちたものの素点: "
+                       f"{'/'.join(f'{v:.0f}' for v in values)}")
 
     out.append("\n--- 軸ごとの効き方（0〜100の素点） ---")
     out.append(f"{'軸':<10}{'承認':>7}{'非承認':>8}{'差':>7}{'重み':>7}   読み方")
