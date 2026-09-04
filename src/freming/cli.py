@@ -1283,6 +1283,39 @@ def _cmd_sources_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_approval_report(args: argparse.Namespace) -> int:
+    """[7] 承認の実績から、スコア付けが合っているかを確かめる。
+
+    **読むだけ。** DBにもAPIにも書かない。承認基準
+    （docs/approval-criteria.md）は仕組みが動く前の8件から言語化した
+    ものなので、その後の実績と食い違っていないかを数字で見る。
+    """
+    from freming.db.connection import session
+    from freming.db.repository import reviewed_properties
+    from freming.scoring.review import analyze, render
+
+    cfg = load_config(args.config)
+    with session(cfg.app.target()) as conn:
+        rows = reviewed_properties(conn)
+    if not rows:
+        print("採点済みの候補がまだありません。")
+        return 0
+
+    weights = cfg.scoring.weights.model_dump()
+    # config の重みの名前と、軸のキーを対応させる。weights.py が
+    # ScoreAxis に付けている key はこちら側の短い名前。
+    by_axis = {
+        "story": weights.get("story", 0.0),
+        "source": weights.get("source_rank", 0.0),
+        "for_sale": weights.get("editorial_for_sale_bonus", 0.0),
+        "genre": weights.get("genre_match", 0.0),
+        "area": weights.get("area_match", 0.0),
+        "price": weights.get("price", 0.0),
+    }
+    print(render(analyze(rows, by_axis), by_axis))
+    return 0
+
+
 def _cmd_post(args: argparse.Namespace) -> int:
     """[9] Instagram への投稿。予定を作る / 見る / 時間が来たものを出す。
 
@@ -2186,6 +2219,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_sources_report.set_defaults(func=_cmd_sources_report)
 
+    p_approval = sub.add_parser(
+        "approval-report",
+        help="承認の実績からスコア付けを検証する（読むだけ・費用なし）",
+    )
+    p_approval.set_defaults(func=_cmd_approval_report)
+
     p_status = sub.add_parser("status", help="候補の件数をステータス別に表示")
     p_status.set_defaults(func=_cmd_status)
 
@@ -2198,6 +2237,7 @@ _NEEDS_MIGRATED_DB = frozenset({
     "collect", "score", "serve", "deliver", "learn", "rules",
     "ingest-url", "add-manual", "remove", "reset-images", "status",
     "instagram", "post", "redeliver", "rescore", "source-report",
+    "approval-report",
     "backfill-captions", "backfill-listings", "image-report", "refetch-images",
     # reel は入れない。**build と tracks はDBを見ない**（渡した画像と
     # assets だけで動く）ので、DBの無い環境でも使えるようにしておく。

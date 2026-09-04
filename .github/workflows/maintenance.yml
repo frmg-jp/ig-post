@@ -20,6 +20,7 @@ on:
           - backfill-listings  # 記事の中の販売ページURLを既存分に入れる（費用なし）
           - rescore            # 採点をやり直す（API費用・納品済みは除く）
           - source-report      # ソース別の歩留まり（費用なし）
+          - approval-report    # **承認の実績からスコア付けを検証**（読むだけ・費用なし）
           - post-show          # 投稿予定の一覧（費用なし）
           - post-show-all      # 60日先までの予定（窓の外に置いた行を見る。費用なし）
           - post-skip          # 予定を見送りにする（「対象の上限」に post_id）
@@ -101,6 +102,7 @@ jobs:
               ;;
             rescore)          python -m freming.cli rescore $LIMIT $YES ;;
             source-report)    python -m freming.cli source-report ;;
+            approval-report)  python -m freming.cli approval-report ;;
             post-show)        python -m freming.cli post show ;;
             post-show-all)    python -m freming.cli post show --days 60 ;;
             post-requeue)

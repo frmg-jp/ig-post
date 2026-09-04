@@ -1050,6 +1050,24 @@ def clear_scores(conn: DbConnection, ids: list[int]) -> int:
     return cursor.rowcount or 0
 
 
+def reviewed_properties(conn: DbConnection) -> list[Row]:
+    """審査済み（承認・納品・非承認）と未審査の行。採点の検証に使う。
+
+    **score_detail を持ち出すのがここの要点。** 合算後のスコアだけでは
+    「どの軸が人の判断を説明しているか」が分からない。0003 で軸ごとの
+    内訳を残してあるのはこのため（scoring/review.py）。
+    """
+    return conn.execute(
+        """
+        SELECT id, source, source_rank, status, score, score_detail,
+               genre, year_built, price, location_city, location_country
+        FROM properties
+        WHERE score IS NOT NULL
+        ORDER BY id
+        """
+    ).fetchall()
+
+
 def source_outcomes(conn: DbConnection) -> list[Row]:
     """ソース別の実績。自動収集を続けるかの判断に使う。
 
