@@ -102,6 +102,38 @@ def test_足切りに掛かったのに承認された件数を出す():
     assert "足切りに掛かったのに承認された物件が 1 件" in render(report, WEIGHTS)
 
 
+def test_承認された物件を現物で並べられる():
+    """プロンプトの実例（approved_examples）を書き直すための材料。
+
+    **集計では代わりにならない。** ジャンルの内訳を見ても、実例の文面は
+    書けない。既定では出さず、件数を指定したときだけ出す。
+    """
+    rows = [
+        {**_row("approved", 82), "display_name": "Eagle Warehouse",
+         "architect": "Frank Freeman", "style_name": "Romanesque Revival",
+         "summary": "時計文字盤がそのまま窓", "year_built": "1893"},
+        {**_row("approved", 60), "display_name": "Desert House",
+         "architect": "", "style_name": "", "summary": "岩塊の直下"},
+        {**_row("rejected", 90), "display_name": "出てはいけない"},
+    ]
+    report = analyze(rows, WEIGHTS)
+
+    assert [e.name for e in report.examples] == ["Eagle Warehouse", "Desert House"]
+
+    # 「承認された物件」だけでは軸の説明文にも当たるので、見出しで見る。
+    assert "点数の高い順に" not in render(report, WEIGHTS)          # 既定では出さない
+    text = render(report, WEIGHTS, examples=1)
+    assert "Eagle Warehouse" in text and "Frank Freeman" in text
+    assert "Desert House" not in text        # 点数の高い順に1件だけ
+    assert "出てはいけない" not in text      # 非承認は入らない
+
+
+def test_実例用の列が無い行でも落ちない():
+    """集計だけを使う呼び出しが、実例用の列まで揃えなくて済むこと。"""
+    report = analyze([_row("approved", 80)], WEIGHTS)
+    assert report.examples[0].name == "#1"   # display_name も title も無い
+
+
 def test_足切りの理由を種類ごとに分ける():
     """**どちらの足切りを見直すのかは、理由の内訳を見ないと決まらない。**
 

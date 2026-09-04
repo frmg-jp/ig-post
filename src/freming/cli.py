@@ -1312,7 +1312,7 @@ def _cmd_approval_report(args: argparse.Namespace) -> int:
         "area": weights.get("area_match", 0.0),
         "price": weights.get("price", 0.0),
     }
-    print(render(analyze(rows, by_axis), by_axis))
+    print(render(analyze(rows, by_axis), by_axis, examples=args.examples))
     return 0
 
 
@@ -2222,6 +2222,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_approval = sub.add_parser(
         "approval-report",
         help="承認の実績からスコア付けを検証する（読むだけ・費用なし）",
+    )
+    p_approval.add_argument(
+        "--examples", type=int, default=0, metavar="N",
+        help="承認された物件をN件、点数の高い順に並べる（プロンプトの実例を書き直す材料）",
     )
     p_approval.set_defaults(func=_cmd_approval_report)
 

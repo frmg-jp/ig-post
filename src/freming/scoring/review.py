@@ -86,6 +86,33 @@ class FlagStat:
 
 
 @dataclass
+class ApprovedExample:
+    """承認された1件の要点。**プロンプトの実例を書き直すための材料。**
+
+    config.scoring.approved_examples は仕組みが動く前の8件のまま。
+    実績で置き換えるには、集計ではなく現物が要る。
+    """
+
+    score: float
+    name: str
+    genre: str
+    year: str
+    city: str
+    architect: str
+    style: str
+    summary: str
+
+    def line(self) -> str:
+        bits = [b for b in (self.style, self.year, self.city) if b]
+        head = f"[{self.score:.0f}] {self.name}"
+        if self.architect:
+            head += f" / {self.architect}"
+        if bits:
+            head += f"（{' · '.join(bits)}）"
+        return f"{head}\n    {self.genre}: {self.summary}" if self.summary else head
+
+
+@dataclass
 class ApprovalReport:
     approved_scores: list[float] = field(default_factory=list)
     rejected_scores: list[float] = field(default_factory=list)
@@ -97,6 +124,7 @@ class ApprovalReport:
     ranks: Counter = field(default_factory=Counter)
     decades: Counter = field(default_factory=Counter)
     countries: Counter = field(default_factory=Counter)
+    examples: list[ApprovedExample] = field(default_factory=list)
     approved_gated: int = 0
     # 足切りに掛かったのに承認されたものの、足切りの理由（story / 築年）。
     # **どちらの足切りを見直す話なのかは、ここを見ないと決められない。**
@@ -149,6 +177,7 @@ def analyze(rows: Sequence[Mapping[str, Any]], weights: Mapping[str, float]) -> 
             report.countries[(row["location_country"] or "不明").strip() or "不明"] += 1
             year = parse_year(row["year_built"])
             report.decades[f"{year // 10 * 10}年代" if year else "築年不明"] += 1
+            report.examples.append(_example(row, score))
 
         detail = _detail(row["score_detail"])
         if detail is None:
@@ -179,6 +208,32 @@ def analyze(rows: Sequence[Mapping[str, Any]], weights: Mapping[str, float]) -> 
 
     _rank_quality(report, scored)
     return report
+
+
+def _text(row: Mapping[str, Any], key: str) -> str:
+    """行に無い列でも落ちないようにする。
+
+    集計だけを使う呼び出し側（テストや古い問い合わせ）が、実例用の列まで
+    揃えなくて済むようにしておく。
+    """
+    try:
+        value = row[key]
+    except (KeyError, IndexError):
+        return ""
+    return (value or "").strip() if isinstance(value, str) else ""
+
+
+def _example(row: Mapping[str, Any], score: float) -> ApprovedExample:
+    return ApprovedExample(
+        score=score,
+        name=_text(row, "display_name") or _text(row, "title") or f"#{row['id']}",
+        genre=_text(row, "genre") or "unknown",
+        year=_text(row, "year_built"),
+        city=_text(row, "location_city"),
+        architect=_text(row, "architect"),
+        style=_text(row, "style_name"),
+        summary=_text(row, "summary"),
+    )
 
 
 def _gate_kind(report: ApprovalReport, gate: str) -> None:
@@ -225,7 +280,8 @@ def _spread(values: list[float]) -> str:
             f"{max(values):>6.0f}")
 
 
-def render(report: ApprovalReport, weights: Mapping[str, float]) -> str:
+def render(report: ApprovalReport, weights: Mapping[str, float],
+           examples: int = 0) -> str:
     """人が読んで判断できる形にする。**数字と、その読み方まで書く。**"""
     out: list[str] = []
     approved = len(report.approved_scores)
@@ -293,6 +349,13 @@ def render(report: ApprovalReport, weights: Mapping[str, float]) -> str:
             continue
         line = " / ".join(f"{k} {v}" for k, v in counter.most_common())
         out.append(f"{label:<8}{line}")
+
+    if examples and report.examples:
+        # **点数順ではなく点数の高い順に上から。** プロンプトの実例を
+        # 書き直すための現物で、集計では代わりにならない。
+        top = sorted(report.examples, key=lambda e: -e.score)[:examples]
+        out.append(f"\n--- 承認された物件（点数の高い順に {len(top)} 件） ---")
+        out.extend(e.line() for e in top)
 
     out.append("\n" + _suggest(report, weights))
     return "\n".join(out)

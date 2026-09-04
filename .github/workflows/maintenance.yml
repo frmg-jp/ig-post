@@ -102,7 +102,12 @@ jobs:
               ;;
             rescore)          python -m freming.cli rescore $LIMIT $YES ;;
             source-report)    python -m freming.cli source-report ;;
-            approval-report)  python -m freming.cli approval-report ;;
+            # 「対象の上限」に件数を入れると、承認された物件をその数だけ
+            # 現物で並べる（プロンプトの実例を書き直す材料）。
+            approval-report)
+              N="${{ github.event.inputs.limit }}"
+              python -m freming.cli approval-report --examples "${N:-0}"
+              ;;
             post-show)        python -m freming.cli post show ;;
             post-show-all)    python -m freming.cli post show --days 60 ;;
             post-requeue)

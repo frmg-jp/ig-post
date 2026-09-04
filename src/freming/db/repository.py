@@ -1060,7 +1060,8 @@ def reviewed_properties(conn: DbConnection) -> list[Row]:
     return conn.execute(
         """
         SELECT id, source, source_rank, status, score, score_detail,
-               genre, year_built, price, location_city, location_country
+               genre, year_built, price, location_city, location_country,
+               title, display_name, architect, style_name, summary
         FROM properties
         WHERE score IS NOT NULL
         ORDER BY id
