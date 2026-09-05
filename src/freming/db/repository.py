@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
 from freming.collect.base import Candidate
@@ -1014,7 +1015,10 @@ def undo_delivery(conn: DbConnection, property_id: int) -> str | None:
 
 
 def properties_needing_rescore(
-    conn: DbConnection, before: str | None = None, limit: int | None = None
+    conn: DbConnection,
+    before: str | None = None,
+    limit: int | None = None,
+    statuses: Sequence[str] | None = None,
 ) -> list[Row]:
     """採点し直す対象。
 
@@ -1024,9 +1028,18 @@ def properties_needing_rescore(
 
     納品済みは触らない。既に人が承認して外に出したものを、あとから
     ルールで落としても意味がない（むしろ履歴が壊れる）。
+
+    statuses を渡すと、その状態の行だけに絞る。**審査済み（承認・非承認）
+    を巻き込まないための指定。** clear_scores は score を NULL に戻すので、
+    そのまま走らせると approval-report が読む実績（score IS NOT NULL）が
+    そこで消える。基準を変えたあとに未審査だけを採点し直す用途では
+    statuses=("pending",) を渡すこと。
     """
     where = ["status != 'delivered'", "scored_at IS NOT NULL"]
     params: list = []
+    if statuses:
+        where.append(f"status IN ({','.join('?' for _ in statuses)})")
+        params.extend(statuses)
     if before:
         where.append("scored_at < ?")
         params.append(before)

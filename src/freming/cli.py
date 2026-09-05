@@ -1141,17 +1141,28 @@ def _cmd_rescore(args: argparse.Namespace) -> int:
     **APIの費用がかかる。** 何件をいくらで叩くのかを先に出し、--yes が
     無ければ何もしない。
     """
+    from collections import Counter
+
     from freming.db.connection import session
     from freming.db.repository import clear_scores, properties_needing_rescore
 
     cfg = load_config(args.config)
     setup_logging(cfg.app.log_dir, cfg.app.log_level)
 
+    statuses = ("pending",) if args.pending else None
     with session(cfg.app.target()) as conn:
-        rows = properties_needing_rescore(conn, before=args.before, limit=args.limit)
+        rows = properties_needing_rescore(
+            conn, before=args.before, limit=args.limit, statuses=statuses
+        )
         if not rows:
             print("採点し直す対象がありません。")
             return 0
+
+        # **何を消すのかを状態ごとに出す。** clear_scores は score を NULL に
+        # 戻すので、承認・非承認を巻き込むと approval-report が読む実績
+        # （score IS NOT NULL）がそこで消える。件数だけでは気づけない。
+        by_status = Counter((r["status"] or "不明") for r in rows)
+        breakdown = " / ".join(f"{k} {v}" for k, v in by_status.most_common())
 
         # 概算。本文の長さから入力トークンを見積もる（日本語・英語まじりで
         # おおよそ2.5文字＝1トークン）。出力は構造化された固定長に近い。
@@ -1159,9 +1170,15 @@ def _cmd_rescore(args: argparse.Namespace) -> int:
         in_tokens = chars / 2.5 + len(rows) * 1200      # 本文＋システムプロンプト
         out_tokens = len(rows) * 400
         cost = in_tokens / 1e6 * 1.0 + out_tokens / 1e6 * 5.0   # Haiku 4.5 の単価
-        print(f"対象 {len(rows)} 件（納品済みは含みません）")
+        print(f"対象 {len(rows)} 件（納品済みは含みません）: {breakdown}")
         print(f"  本文 合計 {chars:,} 字 → 入力 約 {in_tokens/1000:.0f}k / 出力 約 {out_tokens/1000:.0f}k トークン")
         print(f"  概算費用 **約 ${cost:.2f}**（{cfg.scoring.model} の単価。目安です）")
+
+        reviewed = sum(v for k, v in by_status.items() if k != "pending")
+        if reviewed:
+            print(f"\n**承認・非承認の {reviewed} 件が対象に入っています。**")
+            print("  採点結果を消すと、approval-report が読む実績もそこで消えます。")
+            print("  未審査だけを採点し直すなら --pending を付けてください。")
 
         if not args.yes:
             print("\n採点結果を消して未採点に戻します。実行するには --yes を付けてもう一度。")
@@ -2197,6 +2214,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--before", help="この日時より前に採点したものだけ（ISO。例 2026-08-07）"
     )
     p_rescore.add_argument("--limit", type=int, help="対象の上限")
+    p_rescore.add_argument(
+        "--pending", action="store_true",
+        help="未審査だけを対象にする（承認・非承認の実績を消さない）",
+    )
     p_rescore.add_argument("--yes", action="store_true", help="確認せず実行する")
     p_rescore.set_defaults(func=_cmd_rescore)
 

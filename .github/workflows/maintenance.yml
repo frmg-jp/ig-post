@@ -19,6 +19,7 @@ on:
           - backfill-captions  # 投稿本文の項目を既存分に埋める（API費用）
           - backfill-listings  # 記事の中の販売ページURLを既存分に入れる（費用なし）
           - rescore            # 採点をやり直す（API費用・納品済みは除く）
+          - rescore-pending    # **未審査だけ**採点し直して採点まで走らせる（API費用）
           - source-report      # ソース別の歩留まり（費用なし）
           - approval-report    # **承認の実績からスコア付けを検証**（読むだけ・費用なし）
           - post-show          # 投稿予定の一覧（費用なし）
@@ -101,6 +102,16 @@ jobs:
               python -m freming.cli backfill-listings $LIMIT $YES
               ;;
             rescore)          python -m freming.cli rescore $LIMIT $YES ;;
+            # **未審査だけを採点し直す。** 承認・非承認を巻き込むと、
+            # clear_scores が score を NULL に戻すので approval-report が
+            # 読む実績もそこで消える。基準や重みを変えたあとはこちら。
+            # 消してから採点まで一気に走らせる（rescore は消すだけ）。
+            rescore-pending)
+              python -m freming.cli rescore --pending $LIMIT $YES
+              if [ -n "$YES" ]; then
+                python -m freming.cli score $LIMIT
+              fi
+              ;;
             source-report)    python -m freming.cli source-report ;;
             # 「対象の上限」に件数を入れると、承認された物件をその数だけ
             # 現物で並べる（プロンプトの実例を書き直す材料）。

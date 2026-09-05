@@ -181,6 +181,30 @@ def test_採点し直す対象に納品済みは入らない(db):
     assert done not in ids
 
 
+def test_未審査だけに絞れる(db):
+    """**承認・非承認の実績を巻き込まないための指定。**
+
+    clear_scores は score を NULL に戻すので、既定のまま走らせると
+    approval-report が読む実績（score IS NOT NULL）がそこで消える。
+    基準を変えたあとに未審査だけを採点し直す用途では、承認・非承認が
+    対象に入ってはいけない。
+    """
+    from freming.db.repository import properties_needing_rescore
+
+    ids = {}
+    for status in ("pending", "approved", "rejected"):
+        ids[status] = _add(db, "dezeen", f"https://example.com/{status}", status=status)
+        db.execute("UPDATE properties SET score = 60, scored_at = ? WHERE id = ?",
+                   ("2026-08-01T00:00:00+00:00", ids[status]))
+    db.commit()
+
+    # 既定は今までどおり（納品済みだけを除く）
+    assert set(ids.values()) <= {r["id"] for r in properties_needing_rescore(db)}
+
+    only_pending = [r["id"] for r in properties_needing_rescore(db, statuses=("pending",))]
+    assert only_pending == [ids["pending"]]
+
+
 def test_未採点のものは対象にならない(db):
     from freming.db.repository import properties_needing_rescore
 
