@@ -63,8 +63,12 @@ def _line(row: Row, result: ScoreResult) -> str:
         flags.append("売出?")
     mark = f" [{'/'.join(flags)}]" if flags else ""
     title = (row["title"] or row["source_url"])[:44]
+    # **0点なら理由を出す。** 軸の内訳だけでは、足切りで0になったのか
+    # 素点が低いのかが読めない。実際、様式も一点物性も満たしているのに
+    # 0点の行を見て、story の足切りなのか築年なのか分からなかった。
+    gate = f"\n         ⚠ 足切り: {result.gate}" if result.gate else ""
     return (
-        f"  {result.total:5.1f}  {title:<44}{mark}\n"
+        f"  {result.total:5.1f}  {title:<44}{mark}{gate}\n"
         f"         {' / '.join(a.line() for a in result.axes)}\n"
         f"         {row['source_url']}"
     )

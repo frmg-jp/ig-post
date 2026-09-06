@@ -633,3 +633,25 @@ def test_逃げ道に知らない判定名は書けない() -> None:
     ScoringThresholds(story_min_waived_by=["style_identified"])   # 正しい名前は通る
     with pytest.raises(ValidationError, match="不明な判定"):
         ScoringThresholds(story_min_waived_by=["style_identifed"])
+
+
+def test_足切りで0点になったら理由を出す(config, conn) -> None:
+    """**軸の内訳だけでは、0点の理由が読めない。**
+
+    足切りは加重合算の前に効くので、素点が並んでいるのに合計が0という
+    行になる。story で落ちたのか築年で落ちたのかが分からないと、設定の
+    どちらを見直すのか決められない。
+    """
+    _add(conn)
+    floor = int(config.scoring.thresholds.story_min)
+    dull = Assessment(**{**_STRONG.__dict__, "story_score": floor - 20,
+                         "style_identified": False, "one_of_a_kind": False})
+    report = score_pending(config, conn, client=FakeClient(dull)).report()
+    assert "足切り" in report
+    assert f"story={floor - 20} < {floor}" in report
+
+
+def test_足切りに掛からなければ理由は出さない(config, conn) -> None:
+    _add(conn)
+    report = score_pending(config, conn, client=FakeClient(_STRONG)).report()
+    assert "足切り" not in report
