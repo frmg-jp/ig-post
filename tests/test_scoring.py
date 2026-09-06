@@ -655,3 +655,32 @@ def test_足切りに掛からなければ理由は出さない(config, conn) ->
     _add(conn)
     report = score_pending(config, conn, client=FakeClient(_STRONG)).report()
     assert "足切り" not in report
+
+
+def test_上限を指定しなければ全件採点する(config, conn) -> None:
+    """**`or 50` で黙って打ち切られていた。**
+
+    488件を採点し直したつもりが50件しか処理されず、しかも警告も出ずに
+    正常終了していた。「上限なし」は全件でなければならない。
+    """
+    for i in range(60):                      # 既定だった50を超える数
+        _add(conn, source_url=f"https://example.com/all-{i}/")
+    stats = score_pending(config, conn, client=FakeClient(_STRONG))
+    assert stats.scored == 60
+
+
+def test_上限で打ち切ったら残りを警告する(config, conn, caplog) -> None:
+    """打ち切りは正常終了するので、残件を言わないと気づけない。"""
+    import logging
+
+    for i in range(10):
+        _add(conn, source_url=f"https://example.com/left-{i}/")
+    with caplog.at_level(logging.WARNING):
+        score_pending(config, conn, limit=4, client=FakeClient(_STRONG))
+    assert "未採点がまだ 6 件あります" in caplog.text
+
+    # 全部終わったら黙る
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        score_pending(config, conn, client=FakeClient(_STRONG))
+    assert "未採点がまだ" not in caplog.text

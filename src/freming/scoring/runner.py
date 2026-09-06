@@ -17,6 +17,7 @@ from freming.config import Config, load_config
 from freming.db.connection import DbConnection, Row, connect
 from freming.db.repository import (
     approved_rules,
+    count_unscored,
     recent_reject_reasons,
     save_score,
     unscored_properties,
@@ -87,7 +88,9 @@ def score_pending(
     採点されないままになる方が困るため。
     """
     stats = ScoreStats()
-    rows = unscored_properties(conn, limit=limit or 50)
+    # **limit をそのまま渡す。** `or 50` にしていたころ、--limit を付けない
+    # 呼び出しが黙って50件で止まっていた（488件のつもりが50件だった）。
+    rows = unscored_properties(conn, limit=limit)
     if not rows:
         log.info("未採点の候補はありません")
         return stats
@@ -161,6 +164,13 @@ def score_pending(
         )
 
     log.info(stats.summary())
+    # **打ち切られたことを黙って終わらせない。** 上限で止まっても
+    # 正常終了するので、残りがあることは自分で言わないと伝わらない。
+    if not dry_run:
+        left = count_unscored(conn)
+        if left:
+            log.warning("未採点がまだ %d 件あります。`score --limit %d` で続けられます。",
+                        left, left)
     return stats
 
 

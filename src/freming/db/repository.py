@@ -105,12 +105,26 @@ def find_by_source_url(conn: DbConnection, source_url: str) -> Row | None:
     ).fetchone()
 
 
-def unscored_properties(conn: DbConnection, limit: int = 50) -> list[Row]:
-    return conn.execute(
-        "SELECT * FROM properties WHERE score IS NULL AND status = 'pending' "
-        "ORDER BY id LIMIT ?",
-        (limit,),
-    ).fetchall()
+_UNSCORED = "FROM properties WHERE score IS NULL AND status = 'pending'"
+
+
+def unscored_properties(conn: DbConnection, limit: int | None = None) -> list[Row]:
+    """未採点の候補。**limit を省いたら全件。**
+
+    既定を50件にしていたころ、`score`（--limit なし）が黙って50件で
+    止まっていた。488件を採点し直したつもりが50件しか処理されておらず、
+    しかも何も告げずに正常終了していた。件数の上限は呼び出し側が
+    明示する。
+    """
+    sql = f"SELECT * {_UNSCORED} ORDER BY id"
+    if limit is None:
+        return conn.execute(sql).fetchall()
+    return conn.execute(f"{sql} LIMIT ?", (limit,)).fetchall()
+
+
+def count_unscored(conn: DbConnection) -> int:
+    """未採点で残っている件数。採点のあと「まだ残っている」を出すために使う。"""
+    return conn.execute(f"SELECT COUNT(*) AS n {_UNSCORED}").fetchone()["n"]
 
 
 def recent_reject_reasons(conn: DbConnection, limit: int = 30) -> list[str]:
