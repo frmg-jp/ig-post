@@ -53,7 +53,11 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # **採点は1件17秒かかる。** 60分だと 200件強で強制終了され、
+    # rescore が消したあとの score が途中で切れる（残りは未採点のまま
+    # 残る）。2026-09-06 に488件を流そうとして踏んだ。
+    # 他のアクションは数秒〜数分なので、上限を上げても待たされない。
+    timeout-minutes: 300
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
