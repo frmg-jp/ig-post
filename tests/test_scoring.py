@@ -579,3 +579,57 @@ def test_unknown_year_is_not_dropped(config, conn) -> None:
 
 def test_the_year_line_comes_from_config(config, conn) -> None:
     assert config.scoring.thresholds.built_before == 2000
+
+
+def test_storyが低くても様式か一点物があれば落とさない(config, conn) -> None:
+    """**story だけで落とさない。**
+
+    足切りは加重合算の前に効くので、承認実績でいちばん強かった2つ
+    （style_identified / one_of_a_kind = 合わせて重み0.30）が story に
+    上書きされて消えていた。実際、Victorian・一点物の物件が story=35 と
+    いうだけで0点になっていた。
+    """
+    property_id = _add(conn)
+    row = _row(conn, property_id)
+    floor = config.scoring.thresholds.story_min
+    low = int(floor) - 5
+    assert config.scoring.thresholds.story_min_waived_by, "逃げ道が設定されていない"
+
+    def gate(**flags) -> str:
+        a = Assessment(**{**_STRONG.__dict__, "story_score": low, **flags})
+        return build_result(config, a, row, "t").gate
+
+    # 様式だけ / 一点物だけ でも助かる
+    assert gate(style_identified=True, one_of_a_kind=False) == ""
+    assert gate(style_identified=False, one_of_a_kind=True) == ""
+    # **どれも無いものは今まで通り落ちる。** ここが緩むと、中身の無い
+    # 仲介物件が下駄だけで審査に上がっていたころに戻る。
+    assert "story" in gate(style_identified=False, one_of_a_kind=False)
+
+    # 助かった物件は0点ではなく、素点どおりの点が付く
+    saved = Assessment(**{**_STRONG.__dict__, "story_score": low,
+                          "style_identified": True, "one_of_a_kind": True})
+    assert build_result(config, saved, row, "t").total > 0
+
+
+def test_築年の足切りは逃げ道の対象外(config, conn) -> None:
+    """**story の逃げ道で築年まで通してはいけない。** 据え置きの指示がある。"""
+    if config.scoring.thresholds.built_before is None:
+        pytest.skip("築年の足切りが無効")
+    property_id = _add(conn)
+    row = _row(conn, property_id)
+    recent = Assessment(**{**_STRONG.__dict__,
+                           "year_built": str(config.scoring.thresholds.built_before + 5),
+                           "style_identified": True, "one_of_a_kind": True})
+    assert "築年" in build_result(config, recent, row, "t").gate
+
+
+def test_逃げ道に知らない判定名は書けない() -> None:
+    """綴り間違いを黙って無視すると、逃げ道が効かないまま採点が進む。"""
+    from pydantic import ValidationError
+
+    from freming.config import ScoringThresholds
+
+    ScoringThresholds(story_min_waived_by=["style_identified"])   # 正しい名前は通る
+    with pytest.raises(ValidationError, match="不明な判定"):
+        ScoringThresholds(story_min_waived_by=["style_identifed"])

@@ -144,16 +144,37 @@ def build_result(
     return ScoreResult(assessment=assessment, axes=axes, model=model, gate=_gate(config, assessment))
 
 
+def _waived(thresholds, assessment: Assessment) -> bool:
+    """story の足切りを見送る判定が1つでも立っているか。
+
+    名前は config が持つ（Assessment の属性名）。存在しない名前は
+    config 読み込み時に弾いているので、ここでは素直に引く。
+    """
+    return any(getattr(assessment, name, False) for name in thresholds.story_min_waived_by)
+
+
 def _gate(config: Config, assessment: Assessment) -> str:
     """加重合算の前に単独で落とす条件。該当すれば理由、しなければ空文字。
 
-    承認基準の第1・第2（前歴が目に見えるか／様式が特定できるか）は
-    yes/no の条件で、程度問題ではない。story_score はその2つを軸に
-    LLMが出す総合点なので、これが低いものは他の軸が満点でも候補に
-    ならない。加重平均に混ぜていたころは下駄で埋まっていた。
+    story_score が低いものを落とすのは、加重平均に混ぜていたころ、
+    中身の無い仲介物件が「販売中 + 重点エリア + 価格あり」の下駄だけで
+    審査に上がっていたため。
+
+    **ただし story だけで落とさない。** 2026-09-05 に未審査100件を
+    採点し直したところ、様式も一点物性も満たしているのに story が
+    40未満というだけで0点になる物件が出た（Victorian・一点物の
+    2041 Pierce Street、Mediterranean・一点物の Malibu 邸など）。
+    足切りは加重合算の前に効くので、承認実績でいちばん強かった2つの
+    判定（style_identified +58pt / one_of_a_kind +41pt）が、story に
+    上書きされて消えていた。
+
+    story_min_waived_by に挙げた判定のどれかが真なら、story では
+    落とさない。**どれも無いもの——物語も、様式も、一点物性も無い——
+    だけが落ちる。**
     """
-    floor = config.scoring.thresholds.story_min
-    if assessment.story_score < floor:
+    thresholds = config.scoring.thresholds
+    floor = thresholds.story_min
+    if assessment.story_score < floor and not _waived(thresholds, assessment):
         return f"story={assessment.story_score} < {floor:.0f}"
 
     # 築年での足切り。収集の時点では築年が分からないのでここで見る。

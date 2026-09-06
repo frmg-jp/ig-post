@@ -1039,6 +1039,19 @@ scoring:
     # 「販売中(20) + 重点エリア(20) + ランクB(6) + 価格あり(5) + ジャンル不明(3)」
     # の54点で min_to_persist を超え、中身に関係なく審査に上がっていた。
     story_min: 40
+    # **ただし story だけでは落とさない。** 下のどれかが真なら、story が
+    # 40未満でも足切りしない。
+    #
+    # 2026-09-05 に未審査100件を採点し直して分かった。足切りは加重合算の
+    # 前に効くので、承認実績でいちばん強かった2つの判定
+    # （style_identified 差+58pt / one_of_a_kind 差+41pt = 合わせて重み
+    # 0.30）が、story に上書きされて丸ごと消えていた。実際に0点になって
+    # いた例:
+    #   2041 Pierce Street（Victorian・一点物、$4.5M）  story=35
+    #   Peter O'Malley 旧邸（Mediterranean・一点物、$55M） story=25
+    #   Cypress-Clad New Jersey（一点物、dwell S、$3.85M） story=35
+    # 空にすると story 単独で落とす（2026-09-05 以前の挙動）。
+    story_min_waived_by: [style_identified, one_of_a_kind]
     # **2000年以降に建てられた物件は落とす。** 承認基準の第2（時代・様式が
     # 特定できること）を数字で裏打ちするもので、現代の建売・新築マンションを
     # 候補から外すのが目的。

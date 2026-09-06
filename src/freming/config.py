@@ -276,11 +276,38 @@ class ScoringThresholds(BaseModel):
     # 他の軸の下駄で埋まってしまう。実際、台湾の仲介物件は story が 0 でも
     # 54点（min_to_persist の1.8倍）に達して審査に上がっていた。
     story_min: float = 40.0
+    # **story だけで落とさないための逃げ道。** ここに挙げた判定のどれかが
+    # 真なら、story が story_min 未満でも足切りしない。空にすると
+    # story 単独で落とす（2026-09-05 以前の挙動）。
+    #
+    # 足切りは加重合算の前に効くので、承認実績でいちばん強かった2つ
+    # （style_identified / one_of_a_kind）が story に上書きされて
+    # 消えていた。実際、様式も一点物性も満たす物件が0点になっていた。
+    story_min_waived_by: list[str] = Field(
+        default_factory=lambda: ["style_identified", "one_of_a_kind"]
+    )
     # これ以降に建てられた物件は落とす。承認基準の第2（時代・様式が特定
     # できること）を数字で裏打ちするもの。築年が読み取れなかったものは
     # 落とさない（不明を落とすと、築年を書いていない良い記事まで消える）。
     # None で無効。
     built_before: int | None = 2000
+
+    @field_validator("story_min_waived_by")
+    @classmethod
+    def _known_flags(cls, v: list[str]) -> list[str]:
+        """**綴りを間違えたら止める。**
+
+        getattr のフォールバックで引くので、名前が違っても例外にならず、
+        「逃げ道が効いていない」ことに気づけないまま採点が進んでしまう。
+        """
+        allowed = {"provenance_visible", "style_identified", "one_of_a_kind"}
+        unknown = [name for name in v if name not in allowed]
+        if unknown:
+            raise ValueError(
+                f"story_min_waived_by に不明な判定があります: {unknown}"
+                f"（使えるのは {sorted(allowed)}）"
+            )
+        return v
 
 
 class FeedbackConfig(BaseModel):
