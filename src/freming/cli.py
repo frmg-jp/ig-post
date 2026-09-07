@@ -1450,6 +1450,49 @@ def _cmd_post(args: argparse.Namespace) -> int:
                 )
             return 0
 
+        if args.post_action == "inspect":
+            # **DBの published を鵜呑みにしない。** 09/05 と 09/07 の投稿は
+            # published と記録されているのにアカウントに無かった（どちらも
+            # 4枚）。finish_post は media_id が返ったあとにしか呼ばれないので、
+            # 記録があるのに実物が無いなら「出たあとに消えた」ことになる。
+            # ここで両方を並べて、どちらなのかを切り分ける。
+            from freming.instagram.publish import media_permalink
+            from freming.instagram.tokens import load_token
+
+            if not args.id:
+                print("--id で投稿のIDを指定してください。", file=sys.stderr)
+                return 2
+            row = conn.execute("SELECT * FROM posts WHERE id = ?", (args.id,)).fetchone()
+            if row is None:
+                print(f"post {args.id} は見つかりません。", file=sys.stderr)
+                return 2
+
+            keys = row.keys()
+            print(f"post {row['id']}  {row['kind']}  {row['state']}")
+            for field in ("scheduled_at", "published_at", "attempts",
+                          "ig_media_id", "ig_container_id", "permalink"):
+                if field in keys:
+                    print(f"  {field:<16}{row[field]}")
+
+            media_id = row["ig_media_id"] if "ig_media_id" in keys else None
+            if not media_id:
+                print("\n**media_id が記録されていません。** 投稿は成立して"
+                      "いないのに published になっている可能性があります。")
+                return 0
+
+            record = load_token(conn)
+            if record is None:
+                print("\nトークンが無いので実物は確かめられません。")
+                return 0
+            link = media_permalink(record.value, str(media_id))
+            if link:
+                print(f"\nAPI から引けました（＝いまも存在する）: {link}")
+            else:
+                print("\n**API から引けません。** 一度は出たが、そのあと"
+                      "アカウントから消えたことになります（Meta 側の削除や"
+                      "取り下げ、あるいは手で削除された）。")
+            return 0
+
         if args.post_action in ("skip", "unskip"):
             # 見送りと、その取り消し。審査UIからもできるが、requeue や run と
             # 同じ場所（ターミナル）で完結できないと、順番の操作を間違える。
@@ -2164,7 +2207,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_post.add_argument(
         "post_action",
         choices=["plan", "show", "run", "replan", "reschedule", "requeue",
-                 "skip", "unskip", "compact"],
+                 "skip", "unskip", "compact", "inspect"],
         help=(
             "plan: 予定を作る / show: 予定を見る / run: 時間が来たものを投稿する"
             " / replan: まだ出していない予定の本文を作り直す"
@@ -2172,6 +2215,7 @@ def build_parser() -> argparse.ArgumentParser:
             " / requeue: IG側で消した投稿を予定に戻す（--id）"
             " / skip: 見送りにする（--id） / unskip: 見送りを戻す（--id）"
             " / compact: 空いた枠を詰める"
+            " / inspect: 1件の記録と実物を突き合わせる（--id）"
         ),
     )
     p_post.add_argument(

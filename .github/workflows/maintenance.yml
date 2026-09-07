@@ -27,6 +27,7 @@ on:
           - post-skip          # 予定を見送りにする（「対象の上限」に post_id）
           - post-unskip        # 見送りを予定に戻す（「対象の上限」に post_id）
           - post-requeue       # **IG側で消した投稿を今すぐ出し直す**（「対象の上限」に post_id）
+          - post-inspect       # **記録と実物を突き合わせる**（「対象の上限」に post_id）
           - exchange-ig-code   # 受け取った code をトークンに換える（費用なし）
           - check-ig-token     # トークンの疎通とスコープ（費用なし）
           - ig-media           # **アカウントの実際の投稿**を新しい順に出す（費用なし）
@@ -115,6 +116,15 @@ jobs:
               if [ -n "$YES" ]; then
                 python -m freming.cli score $LIMIT
               fi
+              ;;
+            # DBの published を鵜呑みにしないための確認。media_id が
+            # 記録されているか、その media がいまも API から引けるかを出す。
+            post-inspect)
+              if [ -z "${{ github.event.inputs.limit }}" ]; then
+                echo "「対象の上限」欄に post_id を入れてください。" >&2
+                exit 1
+              fi
+              python -m freming.cli post inspect --id ${{ github.event.inputs.limit }}
               ;;
             source-report)    python -m freming.cli source-report ;;
             # 「対象の上限」に件数を入れると、承認された物件をその数だけ
