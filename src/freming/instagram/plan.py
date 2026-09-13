@@ -184,11 +184,23 @@ def plan(config: Config, conn: DbConnection, now: datetime | None = None) -> Pla
 
 
 def _plan_reel(config: Config, conn: DbConnection, now: datetime) -> int:
-    """次の週次リールを1件だけ置く。既に置いてあれば何もしない。"""
+    """次の週次リールを1件だけ置く。既に置いてあれば何もしない。
+
+    **見送り・削除の行は枠を持たない。** 状態を見ずに引いていたころ、
+    09/14 19:00 に deleted の行（post 32）が1件あるだけで、何度
+    post plan を回してもリールの枠が作られなかった。通常投稿は
+    SLOT_HOLDING で同じことを避けている（open_slots）。
+
+    気づいたのは 09/13 の試写のとき。枠が無いと基準日が「今日」に
+    なり、日曜に組むと先週と同じ週のリールができあがる（危うく
+    同じものを2回出すところだった）。
+    """
     moment = next_reel_time(config, now)
+    marks = ",".join("?" for _ in SLOT_HOLDING)
     existing = conn.execute(
-        "SELECT id FROM posts WHERE kind = ? AND scheduled_at = ?",
-        (KIND_REEL, moment.isoformat()),
+        f"SELECT id FROM posts WHERE kind = ? AND scheduled_at = ? "
+        f"AND state IN ({marks})",
+        (KIND_REEL, moment.isoformat(), *SLOT_HOLDING),
     ).fetchone()
     if existing is not None:
         return 0

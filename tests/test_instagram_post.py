@@ -983,3 +983,53 @@ def test_リールの動画は配り先に置かれる(db, tmp_path, monkeypatch
 class _Track:
     def caption_line(self) -> str:
         return ""
+
+
+def _reel_rows(db):
+    return db.execute(
+        "SELECT id, state FROM posts WHERE kind = 'reel' ORDER BY id"
+    ).fetchall()
+
+
+def test_削除したリールの行は枠を塞がない(db):
+    """**見送り・削除は枠を持たない。** リールだけ状態を見ていなかった。
+
+    2026-09-13 に踏んだ。09/14 19:00 に deleted の行が1件あるだけで、
+    何度 post plan を回してもリールの枠が作られなかった。枠が無いと
+    試写の基準日が「今日」になり、日曜に組むと先週と同じ週のリールが
+    できあがる（同じものを2回出すところだった）。
+    """
+    from freming.instagram.plan import _plan_reel, next_reel_time
+
+    moment = next_reel_time(CONFIG, NOW)
+    assert _plan_reel(CONFIG, db, NOW) == 1          # 1回目は作る
+    assert _plan_reel(CONFIG, db, NOW) == 0          # planned があるので作らない
+
+    placed = _reel_rows(db)
+    assert len(placed) == 1
+    # 本番にあったのはこの状態（post 32 が 09/14 19:00 に deleted で居座って
+    # いた）。見送り（skipped）も同じく枠を持たない。
+    db.execute("UPDATE posts SET state = 'deleted' WHERE id = ?", (placed[0]["id"],))
+    db.commit()
+    assert _reel_rows(db)[0]["state"] == "deleted"
+
+    # **ここが本題。** 枠は空いているので、もう一度作られなければならない。
+    assert _plan_reel(CONFIG, db, NOW) == 1
+    states = [row["state"] for row in _reel_rows(db)]
+    assert states.count("planned") == 1, f"枠を持つリールが1件でない: {states}"
+    live = db.execute(
+        "SELECT scheduled_at FROM posts WHERE kind = 'reel' AND state = 'planned'"
+    ).fetchone()
+    assert live["scheduled_at"] == moment.isoformat()
+
+
+def test_公開済みのリールは枠を塞ぐ(db):
+    """**逆に緩めすぎない。** 出したものの枠に2本目を作ってはいけない。"""
+    from freming.instagram.plan import _plan_reel
+
+    assert _plan_reel(CONFIG, db, NOW) == 1
+    row = _reel_rows(db)[0]
+    db.execute("UPDATE posts SET state = 'published' WHERE id = ?", (row["id"],))
+    db.commit()
+    assert _plan_reel(CONFIG, db, NOW) == 0
+    assert len(_reel_rows(db)) == 1
