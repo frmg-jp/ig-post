@@ -950,6 +950,24 @@ def published_posts_between(conn: DbConnection, since: str, until: str) -> list[
     ).fetchall()
 
 
+def published_with_media(conn: DbConnection, limit: int | None = None) -> list[Row]:
+    """公開済みで media_id を持つ投稿。新しい順。
+
+    **アカウントに実在するかを突き合わせるために引く。** 2026-09 に、
+    published と記録されているのにアカウントから消えている投稿が3件
+    見つかった（09/05・09/07・09/12）。どれも media_id と permalink が
+    発行済みで、出たあとに消えている。件数だけ見ていても気づけない。
+    """
+    sql = (
+        "SELECT id, kind, scheduled_at, published_at, ig_media_id, permalink "
+        "FROM posts WHERE state = 'published' AND ig_media_id IS NOT NULL "
+        "ORDER BY published_at DESC"
+    )
+    if limit is None:
+        return conn.execute(sql).fetchall()
+    return conn.execute(f"{sql} LIMIT ?", (limit,)).fetchall()
+
+
 def record_reach(conn: DbConnection, post_id: int, reach: int | None) -> None:
     conn.execute(
         "UPDATE posts SET reach = ?, reach_checked_at = ? WHERE id = ?",

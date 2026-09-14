@@ -28,6 +28,7 @@ on:
           - post-unskip        # 見送りを予定に戻す（「対象の上限」に post_id）
           - post-requeue       # **IG側で消した投稿を今すぐ出し直す**（「対象の上限」に post_id）
           - post-inspect       # **記録と実物を突き合わせる**（「対象の上限」に post_id）
+          - post-audit         # **公開済みが実際に残っているか**を全件確認（費用なし）
           - exchange-ig-code   # 受け取った code をトークンに換える（費用なし）
           - check-ig-token     # トークンの疎通とスコープ（費用なし）
           - ig-media           # **アカウントの実際の投稿**を新しい順に出す（費用なし）
@@ -126,6 +127,9 @@ jobs:
               fi
               python -m freming.cli post inspect --id ${{ github.event.inputs.limit }}
               ;;
+            # 公開済みを1件ずつ実物と突き合わせる。消えているものが
+            # 見つかると exit 1 になる（気づかせるのが目的）。
+            post-audit)       python -m freming.cli post audit $LIMIT ;;
             source-report)    python -m freming.cli source-report ;;
             # 「対象の上限」に件数を入れると、承認された物件をその数だけ
             # 現物で並べる（プロンプトの実例を書き直す材料）。

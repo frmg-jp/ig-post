@@ -224,6 +224,29 @@ def media_permalink(token: str, media_id: str) -> str | None:
     return body.get("permalink")
 
 
+def media_exists(token: str, media_id: str) -> bool | None:
+    """その投稿がいまもアカウントにあるか。
+
+    True=ある / False=無い / None=確かめられなかった（通信やトークンの
+    都合）。**「消えた」と「調べられなかった」を混ぜない。** 混ぜると、
+    トークンが切れた朝に全件が消えたように見える。
+
+    Meta は「存在しない」も「権限が無い」も同じ 400 で返すので、
+    本文に `does not exist` が含まれるかで判断する。
+    """
+    try:
+        _request(
+            "GET", f"{GRAPH}/{API_VERSION}/{media_id}", token,
+            params={"fields": "id"},
+        )
+    except InstagramError as exc:
+        if "does not exist" in str(exc):
+            return False
+        log.warning("存在を確かめられませんでした（media_id=%s）: %s", media_id, exc)
+        return None
+    return True
+
+
 def publishing_limit(token: str, ig_id: str) -> tuple[int, int]:
     """直近24時間の投稿数と上限。暴走に気づくために見る。"""
     body = _request(
@@ -302,6 +325,7 @@ __all__ = [
     "create_carousel_container",
     "create_image_container",
     "create_reel_container",
+    "media_exists",
     "media_permalink",
     "publish_container",
     "publish_carousel",

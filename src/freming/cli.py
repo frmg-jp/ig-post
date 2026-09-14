@@ -1450,6 +1450,53 @@ def _cmd_post(args: argparse.Namespace) -> int:
                 )
             return 0
 
+        if args.post_action == "audit":
+            # **published を一件ずつ実物と突き合わせる。** 2026-09 に
+            # 3件（09/05・09/07・09/12）が、media_id と permalink まで
+            # 発行されたあとアカウントから消えていた。気づいたのは
+            # 週次リールの件数が合わなかったときで、最初の1件から
+            # 1週間たっていた。毎朝これを流せばその日のうちに分かる。
+            from freming.db.repository import published_with_media
+            from freming.instagram.publish import media_exists
+            from freming.instagram.tokens import load_token
+
+            record = load_token(conn)
+            if record is None:
+                print("Instagram のトークンが未設定です。", file=sys.stderr)
+                return 2
+
+            rows = published_with_media(conn, limit=args.limit)
+            if not rows:
+                print("公開済みの投稿がありません。")
+                return 0
+
+            gone, unknown = [], []
+            for row in rows:
+                state = media_exists(record.value, str(row["ig_media_id"]))
+                if state is False:
+                    gone.append(row)
+                elif state is None:
+                    unknown.append(row)
+
+            print(f"公開済み {len(rows)} 件を確認しました。")
+            if unknown:
+                # **確かめられなかったものを「消えた」に混ぜない。**
+                print(f"  {len(unknown)} 件は確認できませんでした"
+                      "（通信かトークンの都合。消えたとは限りません）。")
+            if not gone:
+                print("消えている投稿はありません。")
+                return 0
+
+            print(f"\n**{len(gone)} 件がアカウントから消えています。**")
+            for row in gone:
+                when = (row["published_at"] or "")[:16].replace("T", " ")
+                print(f"  post {row['id']:<4} {row['kind']:<5} {when}  "
+                      f"{row['permalink'] or row['ig_media_id']}")
+            print("\n出し直すなら post requeue --id <post_id> --now。"
+                  "**IG側に残っていないことを確かめてから**使うこと。")
+            # 気づかせるのが目的なので、見つかったら赤で終わる。
+            return 1
+
         if args.post_action == "inspect":
             # **DBの published を鵜呑みにしない。** 09/05 と 09/07 の投稿は
             # published と記録されているのにアカウントに無かった（どちらも
@@ -2207,7 +2254,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_post.add_argument(
         "post_action",
         choices=["plan", "show", "run", "replan", "reschedule", "requeue",
-                 "skip", "unskip", "compact", "inspect"],
+                 "skip", "unskip", "compact", "inspect", "audit"],
         help=(
             "plan: 予定を作る / show: 予定を見る / run: 時間が来たものを投稿する"
             " / replan: まだ出していない予定の本文を作り直す"
@@ -2216,6 +2263,7 @@ def build_parser() -> argparse.ArgumentParser:
             " / skip: 見送りにする（--id） / unskip: 見送りを戻す（--id）"
             " / compact: 空いた枠を詰める"
             " / inspect: 1件の記録と実物を突き合わせる（--id）"
+            " / audit: 公開済みが**実際に残っているか**を全件確認する"
         ),
     )
     p_post.add_argument(
