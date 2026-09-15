@@ -42,6 +42,7 @@ on:
           - refetch-images-bulk # ソース単位でまとめて取り直す（「対象の上限」にソースのkey）
           - fill-images        # **他サイトから探して足す**（画像検索。API費用）
           - fill-images-one    # 1件だけ他サイトから足す（「対象の上限」に property_id）
+          - fill-images-undo   # **他サイトから足した画像を消す**（「対象の上限」に property_id）
       apply:
         description: "本当に実行する（外すと見積もりだけ）"
         type: boolean
@@ -232,6 +233,16 @@ jobs:
             fill-images)
               python -m freming.cli fill-images --all $LIMIT \
                 $( [ -n "$YES" ] || echo --dry-run )
+              ;;
+            # 見当違いのページから取ってしまったときの戻し道。外へは
+            # 出ない。元の記事の写真には触らない。
+            fill-images-undo)
+              if [ -z "${{ github.event.inputs.limit }}" ]; then
+                echo "「対象の上限」欄に property_id を入れてください。" >&2
+                exit 2
+              fi
+              python -m freming.cli fill-images --id ${{ github.event.inputs.limit }} --undo
+              python -m freming.cli image-report --id ${{ github.event.inputs.limit }}
               ;;
             fill-images-one)
               if [ -z "${{ github.event.inputs.limit }}" ]; then
