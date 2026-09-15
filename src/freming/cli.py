@@ -1900,13 +1900,13 @@ def _cmd_reel_preview(cfg, args: argparse.Namespace) -> int:
     Meta へ送るものは無い。リーチの読み取りだけ API を叩く
     （権限が無ければ直近の投稿で代用する。実際に出るときと同じ挙動）。
     """
-    from datetime import UTC, datetime
+    from datetime import UTC, datetime, timedelta
     from pathlib import Path
     from zoneinfo import ZoneInfo
 
     from freming.db.connection import session
     from freming.instagram.tokens import load_token
-    from freming.instagram.worker import PostingError, build_weekly_reel
+    from freming.instagram.worker import PostingError, build_weekly_reel, last_week
     from freming.reel.build import ReelError
 
     zone = ZoneInfo(cfg.instagram.timezone)
@@ -1927,6 +1927,21 @@ def _cmd_reel_preview(cfg, args: argparse.Namespace) -> int:
         if anchor is not None:
             print(f"対象: {anchor.astimezone(zone):%m/%d %H:%M} の枠"
                   f"（その前の週の月〜日をまとめます）")
+        else:
+            # **枠が無いと壁時計で組む。** 日曜に試写すると「先週」が
+            # ひとつ前の週になり、**先週出したリールと同じ中身**ができる。
+            # 2026-09-13 の試写がこれで、08/31〜09/06 の6軒——09/07 に
+            # 出したものと同じ週——を承認にかけていた。
+            print("**リールの枠がありません。** 壁時計で組みます。"
+                  "先週出したものと同じ週になっていないか、下の日付で確かめてください。")
+            print("  枠を作る: python -m freming.cli post plan")
+        # どの週をまとめたのかを、承認の前に必ず出す。**件数だけでは
+        # 週の取り違えに気づけない。**
+        week_start, week_end = last_week(cfg, anchor or datetime.now(UTC))
+        print(
+            f"まとめる週: {week_start.astimezone(zone):%m/%d(%a)} 〜 "
+            f"{(week_end.astimezone(zone) - timedelta(days=1)):%m/%d(%a)}"
+        )
         try:
             built = build_weekly_reel(
                 cfg, conn, record.value, out, now=anchor,
