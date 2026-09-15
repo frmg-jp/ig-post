@@ -50,6 +50,11 @@ on:
         description: "対象の上限（backfill / rescore 用）"
         default: ""
 
+permissions:
+  # Workload Identity 連携（fill-images の画像検索）に要る。
+  id-token: write
+  contents: read
+
 concurrency:
   group: freming-maintenance
   cancel-in-progress: false
@@ -82,14 +87,17 @@ jobs:
         run: pip install -e ".[postgres]"
 
       # fill-images（画像検索）だけが使う。他のアクションには要らないので
-      # 失敗しても止めない。スコープは cloud-platform だけで、Drive は渡さない。
+      # 失敗しても止めない。
       - name: Google に認証（Workload Identity 連携）
         continue-on-error: true
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-          scopes: "https://www.googleapis.com/auth/cloud-platform"
+          # **scopes という入力はこの action には無い**（v2 の警告で判明。
+          # 2026-09-15）。資格情報ファイルを置くだけで、スコープは使う側が
+          # google.auth.default(scopes=[...]) で指定する（drive.py /
+          # images/discover.py）。ここに書いても黙って捨てられる。
 
       - name: マイグレーション適用
         run: python -m freming.cli db migrate

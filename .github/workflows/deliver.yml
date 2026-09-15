@@ -59,11 +59,10 @@ jobs:
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-          # Drive API は cloud-platform だけでは足りない。明示する。
-          scopes: "https://www.googleapis.com/auth/drive"
-          # 納品はこれで足りる。**画像検索（Vision）は cloud-platform が要る**
-          # ので、collect.yml 側で別に認証している。ここでは要らないものを
-          # 足さない。
+          # **scopes という入力はこの action には無い**（v2 の警告で判明。
+          # 2026-09-15）。資格情報ファイルを置くだけで、スコープは使う側が
+          # google.auth.default(scopes=[...]) で指定する（drive.py /
+          # images/discover.py）。ここに書いても黙って捨てられる。
 
       - name: マイグレーション適用
         run: python -m freming.cli db migrate

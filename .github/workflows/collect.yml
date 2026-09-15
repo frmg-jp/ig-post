@@ -19,6 +19,13 @@ on:
         description: "1ソースあたりの上限件数"
         default: "10"
 
+permissions:
+  # Workload Identity 連携（画像検索）に要る。これが無いと OIDC トークンが
+  # 注入されず、auth が「ACTIONS_ID_TOKEN_REQUEST_TOKEN が無い」で落ちる。
+  # 2026-09-15 に実際に踏んだ。
+  id-token: write
+  contents: read
+
 concurrency:
   group: freming-collect
   cancel-in-progress: false
@@ -41,10 +48,9 @@ jobs:
       - name: 依存をインストール
         run: pip install -e ".[postgres]"
 
-      # 画像検索（Cloud Vision）のためだけの認証。**スコープは
-      # cloud-platform だけ**にしてある。納品（deliver.yml）は Drive の
-      # スコープを取るが、ここでは Drive を触らないので渡さない。
+      # 画像検索（Cloud Vision）のためだけの認証。
       # 鍵のJSONは作られず、その場限りの資格情報だけが置かれる。
+      # 使うスコープ（cloud-platform）は images/discover.py 側で指定する。
       # 未設定のリポジトリでも収集は動いてほしいので、失敗しても止めない。
       - name: Google に認証（Workload Identity 連携）
         id: gcp_auth
@@ -53,7 +59,10 @@ jobs:
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-          scopes: "https://www.googleapis.com/auth/cloud-platform"
+          # **scopes という入力はこの action には無い**（v2 の警告で判明。
+          # 2026-09-15）。資格情報ファイルを置くだけで、スコープは使う側が
+          # google.auth.default(scopes=[...]) で指定する（drive.py /
+          # images/discover.py）。ここに書いても黙って捨てられる。
 
       - name: マイグレーション適用
         run: python -m freming.cli db migrate
