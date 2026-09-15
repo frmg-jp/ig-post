@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 from freming.config import Config
 from freming.db.connection import DbConnection, Row
 from freming.images.extract import extract_image_urls
+from freming.images.placeholder import is_flat_image
 from freming.logging_setup import get_logger
 from freming.net.client import HttpClient, RobotsDisallowed
 
@@ -47,6 +48,7 @@ class FetchStats:
     downloaded: int = 0
     too_small: int = 0
     wrong_type: int = 0
+    flat: int = 0          # 単色の「写真なし」板
     failed: int = 0
     # 前回までに取得済み・除外済みのURL。再実行時はここに入るので
     # ダウンロードは発生しない（相手サイトへのリクエストが増えない）。
@@ -69,6 +71,7 @@ class FetchStats:
         )
         dropped = (
             f"小さすぎ {self.too_small} / 形式外 {self.wrong_type} / "
+            f"単色 {self.flat} / "
             f"失敗 {self.failed} / 除外済み {self.skipped_before}"
         )
         return f"{head}（{dropped}）"
@@ -216,6 +219,19 @@ def ingest_urls(
             # ロゴ・アイコン・サムネイル版はここで落ちる
             _skip(url, "too_small")
             stats.too_small += 1
+            continue
+
+        # **他サイトから足す分だけ、単色の「写真なし」板を落とす。**
+        # 寸法は本物と同じことが多く（Dream Town は 1280x800 の #D0D0D0）、
+        # 上の枠では落ちない。掲載ページから取る分は、収集のときに
+        # 代表画像で同じ判定を通している（require_real_photo）。ここで
+        # 足す分にはその関門が無く、**人が一度も見ていないページ**から
+        # 来るので、こちらで見る。
+        if origin_url and config.images.require_real_photo and is_flat_image(
+            response.content, config.images.flat_stddev_max
+        ):
+            _skip(url, "flat")
+            stats.flat += 1
             continue
 
         position += 1

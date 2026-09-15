@@ -747,12 +747,30 @@ def _cmd_fill_images(args: argparse.Namespace) -> int:
         access_token,
         fill_property,
         image_count,
+        undo_fill,
     )
     from freming.net.client import HttpClient
 
     cfg = load_config(args.config)
     setup_logging(cfg.app.log_dir, cfg.app.log_level)
     discovery = cfg.images.discovery
+
+    # **取り消しが先。** 見当違いのページから取ってしまったときの戻し道で、
+    # 外へは一切出ない。元の記事の写真には触らない。
+    if args.undo:
+        if not args.id:
+            print("--undo には --id が要ります。", file=sys.stderr)
+            return 2
+        with session(cfg.app.target()) as conn:
+            removed = undo_fill(conn, args.id)
+        if not removed:
+            print(f"property {args.id} に、他サイトから足した画像はありません。")
+            return 0
+        print(f"{len(removed)} 枚を取り消しました（元の記事の写真は残っています）:")
+        for row in removed:
+            print(f"  {row['source_url'][:70]}")
+            print(f"    ← {row['origin_url'][:70]}")
+        return 0
 
     if not discovery.enabled and not args.dry_run:
         print(
@@ -2315,6 +2333,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_fill.add_argument("--limit", type=int, help="対象の上限（件数）")
     p_fill.add_argument(
         "--dry-run", action="store_true", help="対象と見積もりを出すだけ（費用は出ない）",
+    )
+    p_fill.add_argument(
+        "--undo", action="store_true",
+        help="**他サイトから足した画像を消す**（--id が要る。元の記事の写真は残す）",
     )
     p_fill.set_defaults(func=_cmd_fill_images)
 

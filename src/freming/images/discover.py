@@ -28,6 +28,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from urllib.parse import urlparse, urlunparse
 
@@ -72,6 +73,7 @@ class FillStats:
     had: int = 0
     vision_calls: int = 0
     pages_found: int = 0
+    pages_rejected: int = 0   # この物件のページだと確かめられなかった
     pages_opened: int = 0
     gained: int = 0
     now: int = 0
@@ -82,6 +84,7 @@ class FillStats:
             f"[画像補充] property_id={self.property_id} "
             f"{self.had} → {self.now} 枚"
             f"（候補ページ {self.pages_found} / 開いた {self.pages_opened} / "
+            f"別物件として外した {self.pages_rejected} / "
             f"画像検索 {self.vision_calls} 回）"
         )
 
@@ -283,6 +286,68 @@ def _value(row: Row, key: str) -> str:
         return ""
 
 
+# 物件名にも住所にも出るが、**どの物件にも出る**語。手がかりにならない。
+_GENERIC = frozenset({
+    "home", "homes", "house", "residence", "property", "properties", "estate",
+    "real", "listing", "listings", "for", "sale", "sold", "photo", "photos",
+    "the", "and", "with", "this", "that", "from", "your", "new", "old",
+    "street", "st", "avenue", "ave", "road", "rd", "drive", "dr", "lane", "ln",
+    "court", "ct", "place", "pl", "boulevard", "blvd", "way", "circle",
+    "north", "south", "east", "west", "n", "s", "e", "w", "unit", "apt",
+    "modern", "midcentury", "century", "mid", "design", "architecture",
+    "tour", "video", "watch", "trailer", "movie", "film",
+})
+
+
+def _words(text: str) -> set[str]:
+    """比較用に、英数字の連なりだけを取り出す。URLのハイフンも区切り。"""
+    return {w for w in re.split(r"[^a-z0-9]+", text.lower()) if w}
+
+
+def _identity(row: Row) -> tuple[str, set[str]]:
+    """その物件を**名指しできる**手がかり。(番地, 語) を返す。"""
+    street = _value(row, "street_address")
+    number = ""
+    for word in _words(street):
+        if word.isdigit() and len(word) >= 3:
+            number = word
+            break
+    terms = set()
+    for source in (_value(row, "display_name"), _value(row, "title"), street):
+        terms |= {w for w in _words(source) if not w.isdigit() and w not in _GENERIC and len(w) >= 3}
+    return number, terms
+
+
+def match_score(row: Row, hit: PageHit) -> int:
+    """そのページが**この物件のページか**を点にする。
+
+    **これが無いと、まったく関係ないページの写真を足す。** 2026-09-15 の
+    初回実行で実際に起きた: property 58（6922 N Owen Avenue）の写真を
+    画像検索にかけたところ、Disney の予告編ページが候補に出てきて、
+    そこに並んでいた映画のスチルを3枚取り込んだ。画像検索は「似た画像が
+    あるページ」を返すだけで、**同じ物件だとは言っていない。**
+
+      - 番地（6922 のような数字）が出てくる: +2。いちばん強い
+      - 物件名・通り名の語が出てくる: 6文字以上なら +2、短ければ +1
+      - どの物件にも出る語（house / avenue / north …）は数えない
+
+    2点で通す。teamfallico.com/properties/12719651/6922-n-owen-avenue は
+    番地で通り、video.disney.com/watch/the-north-avenue-irregulars は
+    0点で落ちる（north も avenue も手がかりにならない語）。
+    """
+    number, terms = _identity(row)
+    found = _words(hit.url) | _words(hit.title or "")
+    score = 2 if number and number in found else 0
+    for term in terms:
+        if term in found:
+            score += 2 if len(term) >= 6 else 1
+    return score
+
+
+# ページを開いてよいと判断する点数。
+MATCH_MIN = 2
+
+
 def search_query(row: Row) -> str:
     """名前・住所での検索に使う文字列。"""
     parts = [
@@ -310,6 +375,33 @@ def image_count(conn: DbConnection, property_id: int) -> int:
     return conn.execute(
         "SELECT COUNT(*) AS n FROM images WHERE property_id = ?", (property_id,)
     ).fetchone()["n"]
+
+
+def undo_fill(conn: DbConnection, property_id: int) -> list[Row]:
+    """**他サイトから足した画像だけ**を取り消す。元の記事の写真は残す。
+
+    見当違いのページから取ってしまったときの戻し道。origin_url が
+    入っている行だけを消すので、掲載ページの写真には触らない。
+
+    image_skips は消さない。**もう一度同じURLを取りに行かないため。**
+    消したい理由が「関係ない写真だった」なら、二度と取らないのが正しい。
+    """
+    rows = conn.execute(
+        "SELECT id, source_url, local_path, origin_url FROM images "
+        "WHERE property_id = ? AND origin_url IS NOT NULL ORDER BY position",
+        (property_id,),
+    ).fetchall()
+    for row in rows:
+        path = row["local_path"]
+        if path:
+            from contextlib import suppress
+            from pathlib import Path
+
+            with suppress(OSError):
+                Path(path).unlink(missing_ok=True)
+        conn.execute("DELETE FROM images WHERE id = ?", (row["id"],))
+    conn.commit()
+    return rows
 
 
 def visited_origins(conn: DbConnection, property_id: int) -> set[str]:
@@ -363,7 +455,21 @@ def fill_property(
 
     known = {_value(row, "source_url"), _value(row, "listing_url")}
     known |= visited_origins(conn, property_id)
-    pages = usable_pages(cfg, hits, known={u for u in known if u})
+
+    # **この物件のページだと言い切れないものは開かない。** 画像検索は
+    # 「似た画像が載っているページ」を返すだけで、同じ物件だとは
+    # 言っていない（match_score の説明を参照）。
+    number, terms = _identity(row)
+    if not number and not terms:
+        stats.notes.append("名前も住所も無いので、ページを見分けられません")
+        return stats
+    named = [hit for hit in hits if match_score(row, hit) >= MATCH_MIN]
+    stats.pages_rejected = len(hits) - len(named)
+    for hit in hits:
+        if match_score(row, hit) < MATCH_MIN:
+            log.info("この物件のページか確かめられないので開きません: %s", hit.url)
+
+    pages = usable_pages(cfg, named, known={u for u in known if u})
     stats.pages_found = len(pages)
 
     for page in pages:
@@ -393,6 +499,7 @@ def fill_property(
 
 
 __all__ = [
+    "MATCH_MIN",
     "VISION_UNIT_USD",
     "DiscoveryError",
     "FillStats",
@@ -401,10 +508,12 @@ __all__ = [
     "fill_property",
     "image_count",
     "is_blocked",
+    "match_score",
     "matching_pages",
     "probe_urls",
     "search_pages",
     "search_query",
+    "undo_fill",
     "usable_pages",
     "visited_origins",
 ]

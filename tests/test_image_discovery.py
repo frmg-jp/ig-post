@@ -18,10 +18,12 @@ from freming.db.migrate import migrate
 from freming.db.repository import insert_candidate
 from freming.images import discover
 from freming.images.discover import (
+    MATCH_MIN,
     DiscoveryError,
     PageHit,
     fill_property,
     is_blocked,
+    match_score,
     matching_pages,
     search_pages,
     search_query,
@@ -30,10 +32,26 @@ from freming.images.discover import (
 from freming.net.client import RobotsDisallowed
 
 ARTICLE_URL = "https://example.com/maybeck-house/"
-OTHER_URL = "https://another.example.org/same-house/"
+OTHER_URL = "https://another.example.org/bernard-maybeck-house/"
 
 
-def _png(width: int = 900, height: int = 900, color=(120, 110, 100)) -> bytes:
+def _png(width: int = 900, height: int = 900) -> bytes:
+    """写真の代わり。**単色にしない**——単色は「写真なし」板として落ちる。"""
+    import random
+
+    rng = random.Random(1)
+    image = Image.new("RGB", (width, height))
+    image.putdata([
+        (rng.randrange(256), rng.randrange(256), rng.randrange(256))
+        for _ in range(width * height)
+    ])
+    buffer = BytesIO()
+    image.save(buffer, "PNG")
+    return buffer.getvalue()
+
+
+def _flat_png(width: int, height: int, color=(208, 208, 208)) -> bytes:
+    """物件サイトが写真の無い物件に返す単色の板。"""
     buffer = BytesIO()
     Image.new("RGB", (width, height), color).save(buffer, "PNG")
     return buffer.getvalue()
@@ -330,3 +348,111 @@ def test_a_page_that_refuses_does_not_stop_the_rest(config, conn, row, monkeypat
     stats = fill_property(config, conn, row, client=client, token="t")
     assert stats.pages_opened == 1
     assert stats.gained == 1
+
+
+# --- この物件のページか確かめる -----------------------------------------
+
+def test_unrelated_pages_are_not_opened(conn, row) -> None:
+    """**画像検索は「同じ物件だ」とは言っていない。**
+
+    2026-09-15 の初回実行で実際に起きた: property 58（6922 N Owen Avenue）の
+    写真をかけたところ Disney の予告編ページが候補に出て、そこに並んでいた
+    映画のスチルを3枚取り込んだ。番地も物件名も出てこないページは開かない。
+    """
+    conn.execute(
+        "UPDATE properties SET display_name = ?, street_address = ? WHERE id = ?",
+        ("Cape Cod Residence in Edison Park", "6922 N Owen Avenue", row["id"]),
+    )
+    conn.commit()
+    target = conn.execute(
+        "SELECT * FROM properties WHERE id = ?", (row["id"],)
+    ).fetchone()
+
+    good = PageHit("https://teamfallico.com/properties/12719651/6922-n-owen-avenue/")
+    bad = PageHit(
+        "https://video.disney.com/watch/the-north-avenue-irregulars-trailer",
+        title="The North Avenue Irregulars Trailer",
+    )
+    assert match_score(target, good) >= MATCH_MIN
+    assert match_score(target, bad) < MATCH_MIN
+
+
+def test_a_distinctive_name_is_enough(conn, row) -> None:
+    """住所が無い記事物件は、名前で見分ける（Hezlep House など）。"""
+    conn.execute(
+        "UPDATE properties SET display_name = ? WHERE id = ?",
+        ("Hezlep House", row["id"]),
+    )
+    conn.commit()
+    target = conn.execute(
+        "SELECT * FROM properties WHERE id = ?", (row["id"],)
+    ).fetchone()
+    assert match_score(target, PageHit("https://dwell.com/article/hezlep-house-zook")) >= MATCH_MIN
+    # 「house」だけでは通さない。どの物件にも出る語は数えない。
+    assert match_score(target, PageHit("https://example.com/a-lovely-house")) < MATCH_MIN
+
+
+def test_nothing_is_opened_without_a_handle(config, conn, row, monkeypatch) -> None:
+    """名前も住所も無ければ、**1ページも開かない**。見分けられないため。"""
+    conn.execute(
+        "UPDATE properties SET display_name = NULL, title = NULL WHERE id = ?",
+        (row["id"],),
+    )
+    conn.commit()
+    target = conn.execute(
+        "SELECT * FROM properties WHERE id = ?", (row["id"],)
+    ).fetchone()
+    _have_image(conn, int(row["id"]), "https://cdn.example.com/own-1.jpg")
+    monkeypatch.setattr(discover, "matching_pages", lambda *a, **k: [PageHit(OTHER_URL)])
+    monkeypatch.setattr(discover, "search_pages", lambda *a, **k: [])
+
+    client = FakeClient({})
+    stats = fill_property(config, conn, target, client=client, token="t")
+    assert client.requested == []
+    assert stats.gained == 0
+
+
+def test_undo_removes_only_foreign_images(config, conn, row, monkeypatch) -> None:
+    """取り消しは**足した分だけ**。元の記事の写真は残す。"""
+    _have_image(conn, int(row["id"]), "https://cdn.example.com/own-1.jpg")
+    conn.execute(
+        "UPDATE properties SET display_name = ? WHERE id = ?",
+        ("Grayoaks", row["id"]),
+    )
+    conn.commit()
+    target = conn.execute(
+        "SELECT * FROM properties WHERE id = ?", (row["id"],)
+    ).fetchone()
+    page = "https://dwell.com/article/grayoaks-maybeck"
+    monkeypatch.setattr(discover, "matching_pages", lambda *a, **k: [PageHit(page)])
+    monkeypatch.setattr(discover, "search_pages", lambda *a, **k: [])
+    client = FakeClient({
+        page: _Response('<article><img src="https://cdn.other.org/e1.jpg"></article>'),
+        "https://cdn.other.org/e1.jpg": _Response(_png()),
+    })
+    fill_property(config, conn, target, client=client, token="t")
+
+    removed = discover.undo_fill(conn, int(row["id"]))
+    assert [r["origin_url"] for r in removed] == [page]
+    left = conn.execute(
+        "SELECT source_url FROM images WHERE property_id = ?", (row["id"],)
+    ).fetchall()
+    assert [r["source_url"] for r in left] == ["https://cdn.example.com/own-1.jpg"]
+
+
+def test_flat_placeholders_are_not_taken(config, conn, row) -> None:
+    """他サイトから足す分は、単色の「写真なし」板を採らない。
+
+    寸法（1280x800）は本物と同じなので、短辺の枠では落ちない。掲載ページ
+    から取る分は収集のときに同じ判定を通っているので、ここでは見ない。
+    """
+    from freming.images.fetch import FetchStats, ingest_urls
+
+    url = "https://cdn.example.com/no-photo.jpg"
+    client = FakeClient({url: _Response(_flat_png(1280, 800))})
+    stats = ingest_urls(
+        config, conn, row, [url], client, FetchStats(property_id=int(row["id"])),
+        origin_url="https://other.example.org/listing",
+    )
+    assert stats.flat == 1
+    assert stats.downloaded == 0
