@@ -250,7 +250,14 @@ def weekly_picks(
 
 
 def _pick_name(config: Config, conn: DbConnection, item) -> str:
-    """本文に並べる見出し。予定表にあれば物件名、無ければ本文の1行目。"""
+    """本文に並べる見出し。予定表にあれば物件名、無ければ本文の1行目。
+
+    **物件名をそのまま出す。中身は見ない。** 2026-09-14 のリールには
+    見出しに「募集中」の1行が入った（その物件の display_name が
+    そうなっていた）。**直さない判断を 2026-09-15 にしている。**
+    名前らしさを機械で判定し始めると、正しい名前まで落ちる。
+    気になる行は審査UIで物件名を直せば次から変わる。
+    """
     row = conn.execute(
         "SELECT p.display_name, p.title FROM posts AS o "
         "JOIN properties AS p ON p.id = o.property_id "
