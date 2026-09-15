@@ -40,6 +40,8 @@ on:
           - image-report       # 1件の画像の内訳（枚数が足りない理由。費用なし）
           - refetch-images     # 1件の画像を取り直して足す（費用なし・Driveは触らない）
           - refetch-images-bulk # ソース単位でまとめて取り直す（「対象の上限」にソースのkey）
+          - fill-images        # **他サイトから探して足す**（画像検索。API費用）
+          - fill-images-one    # 1件だけ他サイトから足す（「対象の上限」に property_id）
       apply:
         description: "本当に実行する（外すと見積もりだけ）"
         type: boolean
@@ -78,6 +80,16 @@ jobs:
 
       - name: 依存をインストール
         run: pip install -e ".[postgres]"
+
+      # fill-images（画像検索）だけが使う。他のアクションには要らないので
+      # 失敗しても止めない。スコープは cloud-platform だけで、Drive は渡さない。
+      - name: Google に認証（Workload Identity 連携）
+        continue-on-error: true
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          scopes: "https://www.googleapis.com/auth/cloud-platform"
 
       - name: マイグレーション適用
         run: python -m freming.cli db migrate
@@ -204,6 +216,22 @@ jobs:
                 exit 2
               fi
               python -m freming.cli refetch-images --id ${{ github.event.inputs.limit }} $( [ -n "$YES" ] || echo --dry-run )
+              python -m freming.cli image-report --id ${{ github.event.inputs.limit }}
+              ;;
+            # **画像検索を使う（費用がかかる）。** 「本当に実行する」を
+            # 外すと対象と見積もりだけ出て、APIは呼ばない。
+            # 1件につき2回・1回 $0.0035（毎月1000回までは無料）。
+            fill-images)
+              python -m freming.cli fill-images --all $LIMIT \
+                $( [ -n "$YES" ] || echo --dry-run )
+              ;;
+            fill-images-one)
+              if [ -z "${{ github.event.inputs.limit }}" ]; then
+                echo "「対象の上限」欄に property_id を入れてください。" >&2
+                exit 2
+              fi
+              python -m freming.cli fill-images --id ${{ github.event.inputs.limit }} \
+                $( [ -n "$YES" ] || echo --dry-run )
               python -m freming.cli image-report --id ${{ github.event.inputs.limit }}
               ;;
             image-report)

@@ -727,6 +727,103 @@ def _cmd_refetch_images(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_fill_images(args: argparse.Namespace) -> int:
+    """**他のサイトから探して**、足りない画像を足す。
+
+    refetch-images は同じ掲載ページを読み直すだけなので、元々3枚しか
+    無い記事は何度やっても3枚のまま。こちらは手元の写真を画像検索に
+    かけ、同じ写真が載っている別の記事を開いて、そこから足す。
+
+    **費用がかかる。** Cloud Vision の Web Detection が1枚あたり
+    $0.0035（毎月1000回まで無料）。1物件につき probe_images 枚ぶん
+    呼ぶので、既定（2枚）なら1物件 $0.007。--dry-run で見積もりだけ出る。
+
+    足りないまま終わっても投稿は止めない。10枚揃わなくても出す。
+    """
+    from freming.db.connection import session
+    from freming.images.discover import (
+        VISION_UNIT_USD,
+        DiscoveryError,
+        access_token,
+        fill_property,
+        image_count,
+    )
+    from freming.net.client import HttpClient
+
+    cfg = load_config(args.config)
+    setup_logging(cfg.app.log_dir, cfg.app.log_level)
+    discovery = cfg.images.discovery
+
+    if not discovery.enabled and not args.dry_run:
+        print(
+            "images.discovery.enabled が false です。config.yaml で有効にしてください。",
+            file=sys.stderr,
+        )
+        return 2
+
+    with session(cfg.app.target()) as conn:
+        if args.id:
+            rows = conn.execute(
+                "SELECT * FROM properties WHERE id = ?", (args.id,)
+            ).fetchall()
+            if not rows:
+                print(f"property {args.id} がありません。", file=sys.stderr)
+                return 1
+        else:
+            rows = _refetch_targets(conn, cfg, args.source, args.limit)
+            if not rows:
+                print("上限に届いていない物件はありません。")
+                return 0
+
+        calls = sum(
+            min(image_count(conn, int(row["id"])), discovery.probe_images)
+            for row in rows
+        )
+        print(f"対象 {len(rows)} 件（上限 {cfg.images.max_per_property} 枚）")
+        for row in rows[:40]:
+            print(f"  {row['id']:>5}  {image_count(conn, int(row['id'])):>2}枚  "
+                  f"{(row['display_name'] or row['title'] or '')[:48]}")
+        if len(rows) > 40:
+            print(f"  …ほか {len(rows) - 40} 件")
+        print(f"\n画像検索 {calls} 回 ＝ ${calls * VISION_UNIT_USD:.2f}"
+              "（毎月1000回までは無料）")
+
+        if args.dry_run:
+            print("探しません（--dry-run）。")
+            return 0
+
+        try:
+            token = access_token(discovery)
+        except DiscoveryError as exc:
+            print(f"\n{exc}", file=sys.stderr)
+            return 1
+
+        gained = 0
+        with HttpClient(cfg.http) as client:
+            for row in rows:
+                try:
+                    stats = fill_property(cfg, conn, row, client=client, token=token)
+                except DiscoveryError as exc:
+                    # 認証やAPIの有効化の問題は、次の物件でも同じく落ちる。
+                    # 全件ぶん叩いてから同じ文言を並べても意味が無い。
+                    print(f"\n{exc}", file=sys.stderr)
+                    return 1
+                except Exception as exc:  # noqa: BLE001 - 1件で全体を止めない
+                    print(f"  {row['id']:>5}  失敗（{exc}）"[:150], file=sys.stderr)
+                    continue
+                if stats.gained:
+                    gained += stats.gained
+                    print(f"  {stats.property_id:>5}  {stats.had} → {stats.now} 枚"
+                          f"（{stats.pages_opened} ページから）")
+
+    print(f"\n{len(rows)} 件を探し、{gained} 枚増えました")
+    if gained:
+        print("**他サイトから取った画像には origin_url が入ります。**"
+              "審査UIの画像一覧で出所を確かめてください。")
+        print("**Drive の納品フォルダは更新していません。**")
+    return 0
+
+
 def _cmd_image_report(args: argparse.Namespace) -> int:
     """1物件の画像の内訳を出す。**枚数が足りない理由を目で確かめるため。**
 
@@ -764,7 +861,7 @@ def _cmd_image_report(args: argparse.Namespace) -> int:
             print(f"property {property_id} がありません。", file=sys.stderr)
             return 1
         images = conn.execute(
-            "SELECT position, width, height, source_url FROM images "
+            "SELECT position, width, height, source_url, origin_url FROM images "
             "WHERE property_id = ? ORDER BY position", (property_id,),
         ).fetchall()
         skips = conn.execute(
@@ -781,6 +878,10 @@ def _cmd_image_report(args: argparse.Namespace) -> int:
     for image in images:
         size = f"{image['width']}x{image['height']}" if image["width"] else "寸法不明"
         print(f"  {image['position'] or '-':>2}  {size:>10}  {image['source_url'][:78]}")
+        # **他サイトから足した写真は出所が別。** 引用元を1つだと思って
+        # クレジットを書くと嘘になる（images/discover.py）。
+        if image["origin_url"]:
+            print(f"      ← 別サイトから: {image['origin_url'][:74]}")
 
     if not skips:
         # **「弾いた記録が無い」は「元々無い」の証明にならない。**
@@ -2185,6 +2286,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_refetch.add_argument("--dry-run", action="store_true", help="対象を並べるだけ")
     p_refetch.set_defaults(func=_cmd_refetch_images)
 
+    p_fill = sub.add_parser(
+        "fill-images",
+        help="**他のサイトから探して**足りない画像を足す（画像検索。API費用）",
+    )
+    group_fill = p_fill.add_mutually_exclusive_group(required=True)
+    group_fill.add_argument("--id", type=int, help="property_id（1件だけ）")
+    group_fill.add_argument("--source", help="ソースのkey。まとめて足す")
+    group_fill.add_argument(
+        "--all", dest="source", action="store_const", const=None,
+        help="ソースを問わず、上限に届いていない物件をまとめて足す",
+    )
+    p_fill.add_argument("--limit", type=int, help="対象の上限（件数）")
+    p_fill.add_argument(
+        "--dry-run", action="store_true", help="対象と見積もりを出すだけ（費用は出ない）",
+    )
+    p_fill.set_defaults(func=_cmd_fill_images)
+
     p_ig = sub.add_parser("instagram", help="Instagram のトークン管理（[8] 自動投稿の土台）")
     p_ig.add_argument(
         "ig_action",
@@ -2358,6 +2476,7 @@ _NEEDS_MIGRATED_DB = frozenset({
     "instagram", "post", "redeliver", "rescore", "source-report",
     "approval-report",
     "backfill-captions", "backfill-listings", "image-report", "refetch-images",
+    "fill-images",
     # reel は入れない。**build と tracks はDBを見ない**（渡した画像と
     # assets だけで動く）ので、DBの無い環境でも使えるようにしておく。
 })

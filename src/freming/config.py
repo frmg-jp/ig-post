@@ -418,6 +418,50 @@ class FxConfig(BaseModel):
         return self.jpy_per.get(currency) if currency else None
 
 
+class ImageDiscoveryConfig(BaseModel):
+    """[4] 枚数が足りない物件を、**他のサイトから足す**ための設定。
+
+    掲載ページに3枚しか無い物件は、こちらで何をしても3枚のまま。同じ
+    物件を扱った別の記事にはたいてい別の写真があるので、そちらを探す。
+
+    探し方は2つ:
+
+      1. **画像検索**（Cloud Vision の Web Detection）。手元にある写真を
+         渡して、その写真が載っている他のページを教えてもらう。同じ物件
+         である確証が最も強い。1回 $0.0035（毎月1000回まで無料）。
+      2. **名前と住所での検索**（Custom Search JSON API）。画像検索で何も
+         出なかったときの当て。鍵が未設定なら黙って飛ばす。
+
+    見つけたページは**従来どおりの作法で開く**——robots.txt を確認し、
+    ドメインごとに間隔をあける（HttpClient）。自動収集が禁止されている
+    サイトは blocked_domains で最初から見に行かない。
+    """
+
+    enabled: bool = False
+    # adc             … Application Default Credentials（GitHub Actions の
+    #                   Workload Identity 連携、gcloud のログイン）
+    # service_account … サービスアカウントのJSON鍵
+    auth_mode: Literal["adc", "service_account"] = "adc"
+    credentials_path: Path = Path("credentials/service-account.json")
+    # 1物件あたり、何枚を画像検索にかけるか。**そのまま課金の単位になる。**
+    # 1枚でもだいたい同じページ群が返る。2枚にしているのは、1枚目が
+    # 外観のありふれた写真でヒットしないことがあるため。
+    probe_images: int = 2
+    # 1物件あたり、見に行く他サイトのページ数の上限。
+    max_pages_per_property: int = 6
+    # 自動収集が禁止されているサイト。**画像検索の結果に出ても開かない。**
+    # 手動URL投入（collect/manual.py）でしか扱わないサイトと同じ顔ぶれ。
+    blocked_domains: list[str] = Field(
+        default_factory=lambda: [
+            "zillow.com", "redfin.com", "compass.com", "realtor.com",
+            "trulia.com", "sothebysrealty.com", "christiesrealestate.com",
+        ]
+    )
+    # 検索（2番目の当て）の鍵。環境変数名だけを持ち、値は持たない。
+    search_api_key_env: str = "GOOGLE_CSE_API_KEY"
+    search_engine_id_env: str = "GOOGLE_CSE_ID"
+
+
 class ImagesConfig(BaseModel):
     max_per_property: int = 10
     min_short_edge_px: int = 640
@@ -430,6 +474,7 @@ class ImagesConfig(BaseModel):
         default_factory=lambda: ["image/jpeg", "image/png", "image/webp"]
     )
     work_dir: Path = Path("data/images")
+    discovery: ImageDiscoveryConfig = Field(default_factory=ImageDiscoveryConfig)
 
 
 class ProcessConfig(BaseModel):

@@ -61,6 +61,9 @@ jobs:
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
           # Drive API は cloud-platform だけでは足りない。明示する。
           scopes: "https://www.googleapis.com/auth/drive"
+          # 納品はこれで足りる。**画像検索（Vision）は cloud-platform が要る**
+          # ので、collect.yml 側で別に認証している。ここでは要らないものを
+          # 足さない。
 
       - name: マイグレーション適用
         run: python -m freming.cli db migrate

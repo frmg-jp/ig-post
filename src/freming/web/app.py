@@ -561,11 +561,25 @@ def create_app(
                 return []
             conn2 = _conn()
             try:
-                found = conn2.execute(
-                    "SELECT position, source_url FROM images "
-                    "WHERE property_id = ? AND position IS NOT NULL ORDER BY position",
-                    (row["property_id"],),
-                ).fetchall()
+                # **列が無い環境でも画面は出す。** Render はデプロイの
+                # たびに新しいコードで起動するが、マイグレーションは
+                # GitHub Actions 側で流す。順番が前後すると、origin_url を
+                # 読むこの画面だけが 500 になる（0020）。
+                try:
+                    found = conn2.execute(
+                        "SELECT position, source_url, origin_url FROM images "
+                        "WHERE property_id = ? AND position IS NOT NULL "
+                        "ORDER BY position",
+                        (row["property_id"],),
+                    ).fetchall()
+                except Exception:  # noqa: BLE001 - 列が無いだけ。写真は出す
+                    conn2.rollback()
+                    found = conn2.execute(
+                        "SELECT position, source_url FROM images "
+                        "WHERE property_id = ? AND position IS NOT NULL "
+                        "ORDER BY position",
+                        (row["property_id"],),
+                    ).fetchall()
             finally:
                 conn2.close()
             # 手で上げた画像は取得元URLを持たない（実体がDBにある）ので、
@@ -577,6 +591,13 @@ def create_app(
                 )
                 for r in found
             }
+            # **他サイトから足した写真は見分けが付くようにする。**
+            # 引用元が1つではなくなったので、印が無いと審査でクレジットを
+            # 確かめられない（images/discover.py）。
+            origin_by_position = {
+                int(r["position"]): r["origin_url"]
+                for r in found if _col(r, "origin_url")
+            }
             order = [p for p in _parse_image_order(_col(row, "image_order"))
                      if p in by_position]
             order += [p for p in sorted(by_position) if p not in order]
@@ -584,7 +605,12 @@ def create_app(
             if not _reorderable(row):
                 order = order[:1]
             return [
-                {"position": p, "url": by_position[p], "used": index < limit}
+                {
+                    "position": p,
+                    "url": by_position[p],
+                    "used": index < limit,
+                    "origin": origin_by_position.get(p),
+                }
                 for index, p in enumerate(order)
             ]
 

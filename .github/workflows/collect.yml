@@ -41,6 +41,20 @@ jobs:
       - name: 依存をインストール
         run: pip install -e ".[postgres]"
 
+      # 画像検索（Cloud Vision）のためだけの認証。**スコープは
+      # cloud-platform だけ**にしてある。納品（deliver.yml）は Drive の
+      # スコープを取るが、ここでは Drive を触らないので渡さない。
+      # 鍵のJSONは作られず、その場限りの資格情報だけが置かれる。
+      # 未設定のリポジトリでも収集は動いてほしいので、失敗しても止めない。
+      - name: Google に認証（Workload Identity 連携）
+        id: gcp_auth
+        continue-on-error: true
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          scopes: "https://www.googleapis.com/auth/cloud-platform"
+
       - name: マイグレーション適用
         run: python -m freming.cli db migrate
 
@@ -92,6 +106,21 @@ jobs:
       # 未分類の理由が無い日は API を呼ばずに終わる。
       - name: 学習
         run: python -m freming.cli learn
+
+      # **枚数が足りない物件を、他のサイトから足す。**
+      # 掲載ページに3枚しか無い記事は読み直しても増えない（refetch-images）。
+      # 手元の写真を画像検索にかけて、同じ写真が載っている別の記事から足す。
+      #
+      # **--limit 5 は費用の上限でもある。** 1件につき2回呼ぶので
+      # 1日10回・月300回。Cloud Vision の Web Detection は月1000回まで
+      # 無料なので、この範囲なら費用は出ない。増やすときは請求を見ること。
+      #
+      # 認証に失敗していれば1件目で止まる（費用は出ない）。収集を止める
+      # 理由にはしないので continue-on-error。
+      - name: 足りない画像を他サイトから足す
+        if: ${{ steps.gcp_auth.outcome == 'success' }}
+        continue-on-error: true
+        run: python -m freming.cli fill-images --all --limit 5
 
       # 投稿の予定を3日先まで並べる。**投稿はしない。** 投稿するのは
       # 審査UI側（Meta が画像を取りに来る先が審査UIだから）。ここで

@@ -1158,6 +1158,34 @@ images:
   allowed_content_types: ["image/jpeg", "image/png", "image/webp"]
   work_dir: "data/images"
 
+  # **枚数が足りない物件を、他のサイトから足す。**
+  #
+  # 掲載ページに3枚しか無い物件は、同じ記事を読み直しても3枚のまま
+  # （refetch-images）。同じ物件を扱った別の記事にはたいてい別の写真が
+  # あるので、手元の写真を画像検索（Cloud Vision の Web Detection）に
+  # かけて、その写真が載っている他のページを探す。
+  #
+  # 費用: 1枚あたり $0.0035。**毎月1000回までは無料。** 既定では
+  # 1物件につき2枚ぶん呼ぶので、1日5件までなら月300回で無料枠に収まる
+  # （collect.yml の fill-images --limit 5）。
+  #
+  # 見つけたページも、こちらの作法でしか開かない——robots.txt を確認し、
+  # ドメインごとに3秒あける。blocked_domains は最初から開かない。
+  discovery:
+    enabled: true
+    auth_mode: adc
+    probe_images: 2
+    max_pages_per_property: 6
+    # 自動収集が禁止されているサイト（手動URL投入でしか扱わないのと同じ顔ぶれ）。
+    blocked_domains:
+      - zillow.com
+      - redfin.com
+      - compass.com
+      - realtor.com
+      - trulia.com
+      - sothebysrealty.com
+      - christiesrealestate.com
+
 process:
   output_size: [1080, 1080]
   jpeg_quality: 90

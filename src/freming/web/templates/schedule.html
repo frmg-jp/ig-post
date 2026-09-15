@@ -41,6 +41,12 @@
     font: 11px/1.8 var(--mono); background: var(--bg); color: var(--fg);
     padding: 0 5px;
   }
+  /* 他サイトから足した写真の印。引用元が1つではないので、出所を開けるようにする。 */
+  .thumb .foreign {
+    position: absolute; top: 0; right: 0;
+    font: 11px/1.8 var(--mono); background: var(--fg); color: var(--on-fill);
+    padding: 0 6px; text-decoration: none;
+  }
   /* 出たあとの1枚。掴めないので手の形を出さない。 */
   .thumbs.still .thumb { cursor: default; touch-action: auto; }
   .thumb.unused img { opacity: .3; }
@@ -279,6 +285,11 @@
                  {% if item.reorderable %}data-position="{{ img.position }}"{% endif %}>
               <img src="{{ img.url }}" loading="lazy" alt="">
               {% if item.reorderable %}<span class="no">{{ loop.index }}</span>{% endif %}
+              {# 他サイトから足した写真。引用元が1つではないので印を出す。 #}
+              {% if img.origin %}
+                <a class="foreign" href="{{ img.origin }}" target="_blank"
+                   rel="noopener" title="別のサイトから足した写真: {{ img.origin }}">別</a>
+              {% endif %}
             </div>
           {% endfor %}
         </div>

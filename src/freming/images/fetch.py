@@ -119,6 +119,126 @@ def _probe(data: bytes) -> tuple[tuple[int, int], str] | None:
         return None
 
 
+def existing_urls(conn: DbConnection, property_id: int) -> set[str]:
+    """その物件で既に採用済みの画像URL。"""
+    return {
+        r["source_url"]
+        for r in conn.execute(
+            "SELECT source_url FROM images WHERE property_id = ?", (property_id,)
+        )
+    }
+
+
+def ingest_urls(
+    config: Config,
+    conn: DbConnection,
+    row: Row,
+    urls: list[str],
+    client: HttpClient,
+    stats: FetchStats,
+    *,
+    origin_url: str | None = None,
+) -> FetchStats:
+    """候補URLを順に落として、使えるものを images に入れる。
+
+    掲載ページから取るときも（fetch_images）、画像検索で見つけた別の
+    ページから足すときも（images/discover.py）ここを通る。**判定を
+    1か所にしておく。** 小さすぎ・形式外・弾いた記録の扱いが経路ごとに
+    ずれると、同じURLが片方でだけ通る。
+
+    origin_url には**そのURLが載っていたページ**を渡す。物件の掲載ページ
+    そのものなら None（従来どおり）。
+    """
+    property_id = int(row["id"])
+    work_dir = Path(config.images.work_dir) / f"p{property_id:06d}"
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    existing = existing_urls(conn, property_id)
+    # 一度採用しなかったURLは二度と取りに行かない。判定基準（最小サイズ、
+    # 許可する形式）は設定で変わりうるが、変えたときは image_skips を
+    # 消せば再取得できる。既定では無駄なリクエストを繰り返さない方を採る。
+    skipped = {
+        r["source_url"]
+        for r in conn.execute(
+            "SELECT source_url FROM image_skips WHERE property_id = ?", (property_id,)
+        )
+    }
+
+    def _skip(url: str, reason: str) -> None:
+        conn.execute(
+            "INSERT INTO image_skips (property_id, source_url, reason, created_at) "
+            "VALUES (?, ?, ?, ?) ON CONFLICT (property_id, source_url) DO NOTHING",
+            (property_id, url, reason, _now()),
+        )
+        conn.commit()
+
+    position = conn.execute(
+        "SELECT COALESCE(MAX(position), 0) AS p FROM images WHERE property_id = ?",
+        (property_id,),
+    ).fetchone()["p"]
+
+    for url in urls:
+        if len(existing) >= config.images.max_per_property:
+            break
+        if url in existing:
+            stats.already_have += 1
+            continue
+        if url in skipped:
+            stats.skipped_before += 1
+            continue
+        try:
+            response = client.get(url)
+        except RobotsDisallowed:
+            log.info("robots.txt により取得しません: %s", url)
+            _skip(url, "robots")
+            stats.failed += 1
+            continue
+        except Exception as exc:  # noqa: BLE001 - 1枚の失敗で残りを止めない
+            log.warning("画像を取得できませんでした: %s (%s)", url, exc)
+            _skip(url, "failed")
+            stats.failed += 1
+            continue
+
+        probed = _probe(response.content)
+        if probed is None:
+            _skip(url, "broken")
+            stats.failed += 1
+            continue
+
+        size, content_type = probed
+        if content_type not in config.images.allowed_content_types:
+            _skip(url, "wrong_type")
+            stats.wrong_type += 1
+            continue
+
+        width, height = size
+        if min(width, height) < config.images.min_short_edge_px:
+            # ロゴ・アイコン・サムネイル版はここで落ちる
+            _skip(url, "too_small")
+            stats.too_small += 1
+            continue
+
+        position += 1
+        path = work_dir / f"{position:02d}{_suffix_of(url)}"
+        path.write_bytes(response.content)
+
+        conn.execute(
+            "INSERT INTO images "
+            "(property_id, source_url, width, height, local_path, position, "
+            "fetched_at, origin_url) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (property_id, source_url) DO NOTHING",
+            (property_id, url, width, height, str(path), position, _now(), origin_url),
+        )
+        conn.commit()
+        stats.downloaded += 1
+        existing.add(url)
+        stats.images.append(
+            FetchedImage(url, path, width, height, position)
+        )
+    return stats
+
+
 def fetch_images(
     config: Config,
     conn: DbConnection,
@@ -132,8 +252,7 @@ def fetch_images(
     リクエストが増えないようにする。
     """
     stats = FetchStats(property_id=int(row["id"]))
-    work_dir = Path(config.images.work_dir) / f"p{row['id']:06d}"
-    work_dir.mkdir(parents=True, exist_ok=True)
+    had_before = bool(existing_urls(conn, int(row["id"])))
 
     owns_client = client is None
     client = client or HttpClient(config.http)
@@ -159,98 +278,13 @@ def fetch_images(
         stats.found_urls = len(urls)
         log.info("画像URLを %d 件見つけました: property_id=%s", len(urls), row["id"])
 
-        existing = {
-            r["source_url"]
-            for r in conn.execute(
-                "SELECT source_url FROM images WHERE property_id = ?", (row["id"],)
-            )
-        }
-        # 一度採用しなかったURLは二度と取りに行かない。判定基準（最小サイズ、
-        # 許可する形式）は設定で変わりうるが、変えたときは image_skips を
-        # 消せば再取得できる。既定では無駄なリクエストを繰り返さない方を採る。
-        skipped = {
-            r["source_url"]
-            for r in conn.execute(
-                "SELECT source_url FROM image_skips WHERE property_id = ?", (row["id"],)
-            )
-        }
-
-        def _skip(url: str, reason: str) -> None:
-            conn.execute(
-                "INSERT INTO image_skips (property_id, source_url, reason, created_at) "
-                "VALUES (?, ?, ?, ?) ON CONFLICT (property_id, source_url) DO NOTHING",
-                (row["id"], url, reason, _now()),
-            )
-            conn.commit()
-
-        position = conn.execute(
-            "SELECT COALESCE(MAX(position), 0) AS p FROM images WHERE property_id = ?",
-            (row["id"],),
-        ).fetchone()["p"]
-
-        for url in urls:
-            if stats.downloaded + len(existing) >= config.images.max_per_property:
-                break
-            if url in existing:
-                stats.already_have += 1
-                continue
-            if url in skipped:
-                stats.skipped_before += 1
-                continue
-            try:
-                response = client.get(url)
-            except RobotsDisallowed:
-                log.info("robots.txt により取得しません: %s", url)
-                _skip(url, "robots")
-                stats.failed += 1
-                continue
-            except Exception as exc:  # noqa: BLE001 - 1枚の失敗で残りを止めない
-                log.warning("画像を取得できませんでした: %s (%s)", url, exc)
-                _skip(url, "failed")
-                stats.failed += 1
-                continue
-
-            probed = _probe(response.content)
-            if probed is None:
-                _skip(url, "broken")
-                stats.failed += 1
-                continue
-
-            size, content_type = probed
-            if content_type not in config.images.allowed_content_types:
-                _skip(url, "wrong_type")
-                stats.wrong_type += 1
-                continue
-
-            width, height = size
-            if min(width, height) < config.images.min_short_edge_px:
-                # ロゴ・アイコン・サムネイル版はここで落ちる
-                _skip(url, "too_small")
-                stats.too_small += 1
-                continue
-
-            position += 1
-            path = work_dir / f"{position:02d}{_suffix_of(url)}"
-            path.write_bytes(response.content)
-
-            conn.execute(
-                "INSERT INTO images "
-                "(property_id, source_url, width, height, local_path, position, fetched_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT (property_id, source_url) DO NOTHING",
-                (row["id"], url, width, height, str(path), position, _now()),
-            )
-            conn.commit()
-            stats.downloaded += 1
-            stats.images.append(
-                FetchedImage(url, path, width, height, position)
-            )
+        ingest_urls(config, conn, row, urls, client, stats)
     finally:
         if owns_client:
             client.close()
 
     log.info(stats.summary())
-    if stats.downloaded == 0 and not existing:
+    if stats.downloaded == 0 and not had_before:
         raise NoImagesFound(
             f"使える画像が見つかりませんでした（候補URL {stats.found_urls} 件、"
             f"短辺 {config.images.min_short_edge_px}px 未満 {stats.too_small} 件）"

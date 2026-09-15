@@ -166,3 +166,36 @@ def test_0019は既存の判定をJSONから埋め戻す(db) -> None:
     assert rows["A"]["one_of_a_kind"] == 0        # false は 0。NULL にしない
     assert rows["B"]["style_identified"] is None  # 採点前は不明のまま
     conn.close()
+
+
+def test_0020は画像の出所を残せるようにする(db) -> None:
+    """**引用元が1つとは限らなくなる。**
+
+    他のサイトから足した画像（images/discover.py）は、元の記事とは別の
+    ページから来る。origin_url が無いと、審査で「この写真はどこの？」に
+    答えられず、クレジットも書けない。既存の行は NULL（＝掲載ページ
+    そのもの）のまま。
+    """
+    conn = connect(db)
+    conn.execute(
+        "INSERT INTO properties (source, source_url, title, status)"
+        " VALUES ('dwell', 'https://example.com/a/', 'A', 'approved')"
+    )
+    property_id = conn.execute(
+        "SELECT id FROM properties WHERE title = 'A'").fetchone()["id"]
+    conn.execute(
+        "INSERT INTO images (property_id, source_url, position) VALUES (?, ?, 1)",
+        (property_id, "https://cdn.example.com/1.jpg"),
+    )
+    conn.execute(
+        "INSERT INTO images (property_id, source_url, position, origin_url)"
+        " VALUES (?, ?, 2, ?)",
+        (property_id, "https://cdn.other.org/2.jpg", "https://other.org/article"),
+    )
+    conn.commit()
+
+    rows = {r["source_url"]: r["origin_url"] for r in conn.execute(
+        "SELECT source_url, origin_url FROM images ORDER BY position")}
+    assert rows["https://cdn.example.com/1.jpg"] is None
+    assert rows["https://cdn.other.org/2.jpg"] == "https://other.org/article"
+    conn.close()
