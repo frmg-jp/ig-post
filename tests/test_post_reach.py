@@ -102,3 +102,47 @@ def test_リールの選抜がリーチを保存する(db, monkeypatch):
     )
     assert [p.reach for p in picks] == [384]
     assert db.execute("SELECT reach FROM posts WHERE id = 1").fetchone()["reach"] == 384
+
+
+def test_1件読めなくても残りを止めない(db, monkeypatch, capsys):
+    """**権限が無いのと、その1件が読めないのは別。**
+
+    Meta はどちらも「permission」を含む400で返す。2026-09-16 に、5件を
+    記録したあと6件目で権限エラーが出て、そこで全件を打ち切っていた。
+    権限は実際にあり、その投稿だけが読めなかった。
+    """
+    from freming.cli import main
+    from freming.instagram import insights
+    from freming.instagram.tokens import save_token
+
+    _add(db, 1, "111", "2026-09-14T00:02:00+00:00")
+    _add(db, 2, "222", "2026-09-13T00:02:00+00:00")
+    save_token(db, "token")
+
+    cfg = _config_for(db)
+
+    def _reach(_token, media_id):
+        if media_id == "111":
+            raise insights.MissingInsightsScope("(#10) permission")
+        return 200
+
+    monkeypatch.setattr(insights, "has_insights_scope", lambda _t: True)
+    monkeypatch.setattr(insights, "media_reach", _reach)
+
+    import freming.cli as cli
+    monkeypatch.setattr(cli, "load_config", lambda *_a, **_k: cfg)
+
+    assert main(["post", "reach"]) == 0
+    rows = {r["id"]: r["reach"] for r in db.execute("SELECT id, reach FROM posts")}
+    assert rows[1] is None      # 読めなかった
+    assert rows[2] == 200       # **その先も見る**
+
+
+def _config_for(conn):
+    """テスト用に、同じDBを指す設定を作る。"""
+    from freming.config import load_config
+
+    cfg = load_config("config.yaml").model_copy(deep=True)
+    row = conn.execute("PRAGMA database_list").fetchall()[0]
+    cfg.app.db_path = row["file"]
+    return cfg

@@ -1728,6 +1728,7 @@ def _cmd_post(args: argparse.Namespace) -> int:
             from freming.db.repository import posts_for_reach, record_reach
             from freming.instagram.insights import (
                 MissingInsightsScope,
+                has_insights_scope,
                 media_reach,
             )
             from freming.instagram.tokens import load_token
@@ -1736,6 +1737,22 @@ def _cmd_post(args: argparse.Namespace) -> int:
             if record is None:
                 print("Instagram のトークンが未設定です。", file=sys.stderr)
                 return 2
+
+            # **トークンに権限が無いのと、その1件が読めないのは別。**
+            # Meta はどちらも「permission」を含む400で返す。最初に
+            # アカウント単位で一度だけ確かめておけば、以降の同じ文言は
+            # 「この投稿は読めない」と読める。
+            #
+            # 2026-09-16 にこれで止まった。5件を記録したあと6件目で
+            # 権限エラーが出て、全件分の処理を打ち切っていた。権限は
+            # 実際にはあり、その投稿だけが読めなかった。
+            if not has_insights_scope(record.value):
+                print(
+                    "トークンにインサイトの権限がありません。\n"
+                    "  python -m freming.cli instagram auth-url\n"
+                    "のURLで認可をやり直してください。", file=sys.stderr,
+                )
+                return 1
 
             days = args.days or 30
             since = (datetime.now(UTC) - timedelta(days=days)).isoformat()
@@ -1748,10 +1765,12 @@ def _cmd_post(args: argparse.Namespace) -> int:
             for row in rows:
                 try:
                     value = media_reach(record.value, str(row["ig_media_id"]))
-                except MissingInsightsScope as exc:
-                    # 権限が無いのは1件の問題ではない。全件で同じになる。
-                    print(f"\n{exc}", file=sys.stderr)
-                    return 1
+                except MissingInsightsScope:
+                    # 権限はある（上で確かめた）。この投稿が読めないだけ。
+                    print(f"  post {row['id']:<4} リーチを読めません"
+                          "（この投稿では取れない種類の指標）", file=sys.stderr)
+                    failed += 1
+                    continue
                 except Exception as exc:  # noqa: BLE001 - 1件で全体を止めない
                     print(f"  post {row['id']}: 読めませんでした（{exc}）"[:150],
                           file=sys.stderr)
