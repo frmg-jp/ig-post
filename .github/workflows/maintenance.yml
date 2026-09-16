@@ -30,6 +30,8 @@ on:
           - post-inspect       # **記録と実物を突き合わせる**（「対象の上限」に post_id）
           - post-audit         # **公開済みが実際に残っているか**を全件確認（費用なし）
           - post-reach         # 直近の投稿のリーチを読んで記録（費用なし）
+          - listing-status     # **いま買えるのかを掲載ページで確認**（費用なし）
+          - weekly-report      # 週次レポートを出す（読むだけ・費用なし）
           - exchange-ig-code   # 受け取った code をトークンに換える（費用なし）
           - check-ig-token     # トークンの疎通とスコープ（費用なし）
           - ig-media           # **アカウントの実際の投稿**を新しい順に出す（費用なし）
@@ -158,6 +160,12 @@ jobs:
               python -m freming.cli post reach --days "${D:-30}"
               ;;
             source-report)    python -m freming.cli source-report ;;
+            # 「対象の上限」に件数。外すと対象を並べるだけで開かない。
+            listing-status)
+              python -m freming.cli listing-status $LIMIT \
+                $( [ -n "$YES" ] || echo --dry-run )
+              ;;
+            weekly-report)    python -m freming.cli report ;;
             # 「対象の上限」に件数を入れると、承認された物件をその数だけ
             # 現物で並べる（プロンプトの実例を書き直す材料）。
             approval-report)

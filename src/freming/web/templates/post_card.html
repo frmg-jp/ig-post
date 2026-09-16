@@ -65,6 +65,20 @@
     {% if prop["style_name"] %}<tr><th>様式</th><td colspan="2">{{ prop["style_name"] }}</td></tr>{% endif %}
     <tr><th>場所</th><td colspan="2">{{ prop["location_city"] }}{% if prop["location_country"] %}, {{ prop["location_country"] }}{% endif %}</td></tr>
     {% if prop["price"] %}<tr><th>価格</th><td colspan="2">{{ prop["price"] }}</td></tr>{% endif %}
+    <tr>
+      <th>販売状況</th>
+      <td colspan="2">
+        {% if prop["listing_status"] %}
+          {{ status_labels.get(prop["listing_status"], prop["listing_status"]) }}
+          {% if prop["listing_status_at"] %}（{{ prop["listing_status_at"][:10] }} 確認）{% endif %}
+          {% if prop["listing_status_note"] %}<br><span class="note">{{ prop["listing_status_note"] }}</span>{% endif %}
+        {% else %}
+          {# **未確認を「販売中」に丸めない。** #}
+          未確認（掲載ページを開いていないか、開けない相手）
+        {% endif %}
+      </td>
+    </tr>
+    {% if prop["mls_number"] %}<tr><th>MLS</th><td colspan="2">{{ prop["mls_number"] }}</td></tr>{% endif %}
     <tr><th>出所</th><td colspan="2"><a href="{{ prop['source_url'] }}" target="_blank" rel="noopener">{{ prop["source"] }}</a></td></tr>
   </table>
 

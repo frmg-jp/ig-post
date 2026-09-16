@@ -411,6 +411,7 @@ def create_app(
 
         メモは公開されない。本文（caption）とは別物。
         """
+        from freming.collect.listing_status import LABELS as STATUS_LABELS
         from freming.report.weekly import axes_of
 
         conn = _conn()
@@ -445,6 +446,7 @@ def create_app(
                 "images": images,
                 "axes": axes_of(prop) if prop is not None else [],
                 "carousel_max": config.instagram.carousel_max,
+                "status_labels": STATUS_LABELS,
                 "counts": counts,
                 "status": "report",
             },
@@ -471,6 +473,7 @@ def create_app(
         """
         from datetime import UTC, datetime, timedelta
 
+        from freming.collect.listing_status import LABELS as STATUS_LABELS
         from freming.report.weekly import build
 
         when = datetime.now(UTC)
@@ -492,6 +495,7 @@ def create_app(
             "report.html",
             {
                 "report": report,
+                "status_labels": STATUS_LABELS,
                 "counts": counts,
                 "status": "report",
                 "prev_week": (report.start - timedelta(days=7)).date().isoformat(),

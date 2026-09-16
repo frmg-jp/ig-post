@@ -139,6 +139,16 @@ jobs:
         continue-on-error: true
         run: python -m freming.cli fill-images --all --limit 5
 
+      # **いま買えるのかを掲載ページで確かめる。** 記事があるだけでは
+      # 「販売中」と言わない（編集方針）。自動収集が禁止されている
+      # サイト（Zillow / Redfin / Compass …）は開かないので、そこにしか
+      # 無い物件は「未確認」のまま残る——それを「販売中」に丸めない。
+      #
+      # 1日20件ずつ、確認が古いものから。費用はかからない。
+      - name: 販売状況を確かめる
+        continue-on-error: true
+        run: python -m freming.cli listing-status --limit 20
+
       # 投稿の予定を3日先まで並べる。**投稿はしない。** 投稿するのは
       # 審査UI側（Meta が画像を取りに来る先が審査UIだから）。ここで
       # 予定だけ作っておくと、人が朝いちで「投稿予定」を見て止められる。

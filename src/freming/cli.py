@@ -727,6 +727,75 @@ def _cmd_refetch_images(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_listing_status(args: argparse.Namespace) -> int:
+    """**掲載ページを開いて、いま買えるのかを確かめる。**
+
+    記事があるだけでは「販売中」と言わない（編集方針）。いまの
+    is_for_sale は記事に売出の signal があるかの判定で、書かれた時点の
+    話でしかない。
+
+    **開けない相手は確認しない。** Zillow / Redfin / Compass などは
+    自動収集が禁止されているので、そこにしか無い物件は「未確認」の
+    まま残る。未確認を「販売中」に丸めない。
+
+    費用はかからない（相手サイトを読むだけ）。robots.txt とドメイン
+    ごとの間隔は HttpClient が守る。
+    """
+    from freming.collect import listing_status as ls
+    from freming.db.connection import session
+    from freming.net.client import HttpClient
+
+    cfg = load_config(args.config)
+    setup_logging(cfg.app.log_dir, cfg.app.log_level)
+
+    with session(cfg.app.target()) as conn:
+        if args.id:
+            rows = conn.execute(
+                "SELECT * FROM properties WHERE id = ?", (args.id,)
+            ).fetchall()
+            if not rows:
+                print(f"property {args.id} がありません。", file=sys.stderr)
+                return 1
+        else:
+            rows = ls.targets(conn, args.limit)
+            if not rows:
+                print("確認する物件がありません（承認済み・納品済みが対象）。")
+                return 0
+
+        checkable = [r for r in rows if ls.check_url(cfg, r)]
+        print(f"対象 {len(rows)} 件（うち開けるのは {len(checkable)} 件）")
+        if len(rows) != len(checkable):
+            print(f"  {len(rows) - len(checkable)} 件は自動収集が禁止されている"
+                  "サイトなので開きません（未確認のまま）。")
+        if args.dry_run:
+            for row in checkable[:40]:
+                print(f"  {row['id']:>5}  {ls.check_url(cfg, row)[:90]}")
+            wait = len(checkable) * cfg.http.request_interval_sec
+            print(f"\n確認しません（--dry-run）。所要 約 {wait / 60:.0f} 分。")
+            return 0
+
+        counts: dict[str, int] = {}
+        with HttpClient(cfg.http) as client:
+            for row in rows:
+                result = ls.check(cfg, row, client=client)
+                if result is None:
+                    counts["未確認"] = counts.get("未確認", 0) + 1
+                    continue
+                ls.save(conn, int(row["id"]), result)
+                counts[result.label] = counts.get(result.label, 0) + 1
+                name = (row["display_name"] or row["title"] or "")[:36]
+                mls = f" MLS {result.mls}" if result.mls else ""
+                print(f"  {row['id']:>5}  {result.label:<6} {name}{mls}")
+                if result.value in (ls.SOLD, ls.OFF_MARKET):
+                    print(f"         根拠: {result.evidence[:90]}")
+
+    print("\n" + " / ".join(f"{k} {v}" for k, v in sorted(counts.items())))
+    if counts.get("成約済み") or counts.get("取り下げ"):
+        print("**もう買えない物件が含まれています。** 投稿予定から外すか、"
+              "本文の書き方を変えてください（/schedule）。")
+    return 0
+
+
 def _cmd_weekly_report(args: argparse.Namespace) -> int:
     """週次レポートを端末に出す。**DBを読むだけで、外へは出ない。**
 
@@ -2577,6 +2646,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_sources_report.set_defaults(func=_cmd_sources_report)
 
+    p_listing = sub.add_parser(
+        "listing-status",
+        help="**掲載ページを開いて、いま買えるのかを確かめる**（費用なし）",
+    )
+    p_listing.add_argument("--id", type=int, help="property_id（1件だけ）")
+    p_listing.add_argument("--limit", type=int, help="対象の上限（件数）")
+    p_listing.add_argument(
+        "--dry-run", action="store_true", help="対象を並べるだけ（開かない）",
+    )
+    p_listing.set_defaults(func=_cmd_listing_status)
+
     p_weekly = sub.add_parser(
         "report",
         help="週次レポート（今週の候補10件＋Pick of the Week。読むだけ・費用なし）",
@@ -2611,7 +2691,7 @@ _NEEDS_MIGRATED_DB = frozenset({
     "instagram", "post", "redeliver", "rescore", "source-report",
     "approval-report",
     "backfill-captions", "backfill-listings", "image-report", "refetch-images",
-    "fill-images",
+    "fill-images", "listing-status", "report",
     # reel は入れない。**build と tracks はDBを見ない**（渡した画像と
     # assets だけで動く）ので、DBの無い環境でも使えるようにしておく。
 })

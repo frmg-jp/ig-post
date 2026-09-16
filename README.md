@@ -48,6 +48,9 @@ python scripts/check_drive.py        # [2] Drive疎通確認（★ここが通�
 | `python -m freming.cli reset-images --id <ID>` | 取得済み画像を捨てて取り直す（抽出ルールを直したとき） |
 | `python -m freming.cli refetch-images --id <ID>` | 同じ掲載ページを読み直して足りない画像を足す（費用なし） |
 | `python -m freming.cli fill-images --all [--limit 5]` | **他のサイトから探して**足りない画像を足す（画像検索。Cloud Vision の Web Detection が1枚 $0.0035・月1000回まで無料。`--dry-run` で見積もりだけ） |
+| `python -m freming.cli listing-status [--limit 20]` | **掲載ページを開いて、いま買えるのかを確かめる**（費用なし。自動収集が禁止のサイトは開かず「未確認」のまま） |
+| `python -m freming.cli report [--week YYYY-MM-DD]` | 週次レポート（今週の候補10件＋Pick of the Week）。審査UIの `/report` と同じ中身 |
+| `python -m freming.cli post reach [--days 30]` | 公開済みの投稿のリーチを読んで記録（費用なし） |
 | `python -m freming.cli status` | 候補の件数をステータス別に表示 |
 | `python -m freming.collect.editorial --source dezeen` | 同上（モジュール単体実行） |
 | `python -m freming.scoring.runner --limit 20` | 同上（モジュール単体実行） |

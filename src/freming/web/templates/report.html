@@ -89,6 +89,14 @@
           {% if row["price"] %}・{{ row["price"] }}{% endif %}
         </div>
         <div class="meta">
+          {# 販売状況。**確認していない（NULL）と「読み取れず」を分ける。**
+             編集方針の「記事があるだけで Active と判断しない」に対応する。 #}
+          {% if row["listing_status"] %}
+            <span class="tag">{{ status_labels.get(row["listing_status"], row["listing_status"]) }}</span>
+          {% else %}
+            <span class="tag">販売状況 未確認</span>
+          {% endif %}
+          {% if row["mls_number"] %}<span class="tag">MLS {{ row["mls_number"] }}</span>{% endif %}
           {% if row["style_identified"] %}<span class="tag">様式</span>{% endif %}
           {% if row["one_of_a_kind"] %}<span class="tag">一点物</span>{% endif %}
           {% if row["provenance_visible"] %}<span class="tag">前歴</span>{% endif %}
