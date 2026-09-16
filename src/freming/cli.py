@@ -821,7 +821,7 @@ def _cmd_weekly_report(args: argparse.Namespace) -> int:
             return 2
 
     with session(cfg.app.target()) as conn:
-        report = build(cfg, conn, when, limit=args.limit)
+        report = build(cfg, conn, when)
     print(render(report))
     return 0
 
@@ -2683,7 +2683,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_weekly.add_argument(
         "--week", help="その日を含む週を出す（YYYY-MM-DD）。既定は今週",
     )
-    p_weekly.add_argument("--limit", type=int, default=10, help="候補の件数（既定10）")
     p_weekly.set_defaults(func=_cmd_weekly_report)
 
     p_approval = sub.add_parser(

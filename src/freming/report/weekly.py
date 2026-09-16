@@ -1,29 +1,29 @@
-"""[10] 週次レポート——「今週の10件」と Pick of the Week。
+"""[10] 週次レポート——**出したものがどうだったか**。
 
-FREMING CURATED の編集方針（WEEKLY GLOBAL ARCHITECTURE REPORT）を、
-**手元にある候補で**組み立てる。外へは一切出ない（DBを読むだけ）ので
-費用はかからず、何度開いても同じ。
+    今週出した1本ずつ（写真・リーチ・メモ） → 数字 → 先週との比較 → 気づき
 
-作る中身:
+最初は「未審査の上位10件」を並べていたが、**それは未審査タブの仕事**で、
+週次で見たいことではない。この画面は振り返り——出した投稿が実際にどう
+だったかを1か所で読むためのものにする（2026-09-16 の指摘）。
 
-  - **今週の候補**: 未審査のうち点数の高い順。ジャンル別に見出しを立てる
-    （Conversion / Hidden Gem / Architect …）。編集方針の「カテゴリーが
-    偏っていないか」を目で確かめるため
-  - **Pick of the Week**: いちばん点の高い1件。「飛行機に乗ってでも見に
-    行く1軒」を人が選び直せるよう、**候補の並びも一緒に出す**
-  - **今週出したもの**: 公開済みの投稿とリーチ
-  - **最終チェック**: 10件あるか / 米国に偏っていないか / Hidden Gem と
-    Conversion が入っているか。編集方針の最後の確認欄に対応する
+中身:
 
-**これは調査の代わりにはならない。** 編集方針が挙げている Wallpaper* や
-The Modern House を読んで世界から探す仕事は、収集ソースを増やす話で、
-この画面では増えない。ここに出るのは「いま手元にある候補」だけ。
+  - **今週出したもの**: 1本ずつ、表紙・物件名・リーチ・写真の枚数と、
+    投稿カルテに書いたメモの抜粋
+  - **今週の数字**: 本数・リーチの合計と平均、いちばん見られた1本
+  - **先週との比較**: 合計と平均の増減。**リーチは時間とともに伸びる**ので、
+    出したばかりの週は不利になる。そう画面にも書く
+  - **ジャンル別の平均**（直近8週）: 何が効いているかの手がかり。件数が
+    少ないうちは断定しない
+  - **今週の振り返り**: 出したものの偏りと、メモの書き漏れ
+
+外へは一切出ない（DBを読むだけ）。何度開いても同じ。
 """
 
 from __future__ import annotations
 
 import json
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -31,8 +31,8 @@ from zoneinfo import ZoneInfo
 from freming.config import Config
 from freming.db.connection import DbConnection, Row
 
-# 編集方針の目安。1週間に選ぶ件数。
-TARGET_COUNT = 10
+# ジャンル別の平均を見る期間。短すぎると1本の当たり外れで動く。
+TREND_WEEKS = 8
 
 # 見出しに使う日本語。genre の値は scoring/schema.py の GENRES。
 GENRE_LABELS = {
@@ -44,17 +44,12 @@ GENRE_LABELS = {
     "unknown": "その他",
 }
 
-
-@dataclass
-class Section:
-    genre: str
-    label: str
-    rows: list[Row]
+KIND_LABELS = {"feed": "通常", "story": "ストーリーズ", "reel": "リール"}
 
 
 @dataclass
 class Check:
-    """編集方針の最終チェック欄。1行ずつ ○／要確認 を出す。"""
+    """今週の振り返り。1行ずつ ○／要確認 を出す。"""
 
     label: str
     ok: bool
@@ -62,19 +57,33 @@ class Check:
 
 
 @dataclass
+class GenreStat:
+    genre: str
+    label: str
+    posts: int
+    reach_avg: float
+
+
+@dataclass
 class WeeklyReport:
     start: datetime          # 週の初日（現地時刻）
     end: datetime            # 週の最終日の翌日0時（現地時刻）
     generated_at: datetime
-    candidates: list[Row] = field(default_factory=list)
-    sections: list[Section] = field(default_factory=list)
-    pick: Row | None = None
     published: list[Row] = field(default_factory=list)
-    collected: int = 0
-    approved: int = 0
-    rejected: int = 0
+    best: Row | None = None          # いちばん見られた1本
+    reach_total: int = 0
+    reach_avg: float = 0.0
+    measured: int = 0                # リーチが読めている本数
+    prev_total: int = 0
+    prev_avg: float = 0.0
+    prev_count: int = 0
+    genres: list[GenreStat] = field(default_factory=list)
     by_country: Counter = field(default_factory=Counter)
     by_genre: Counter = field(default_factory=Counter)
+    # 在庫は1行だけ。**並べない**（未審査タブで見る）。
+    pending: int = 0
+    approved_waiting: int = 0
+    collected: int = 0
     checks: list[Check] = field(default_factory=list)
 
     @property
@@ -83,8 +92,12 @@ class WeeklyReport:
         return f"{self.start:%Y/%m/%d}（月）〜 {last:%m/%d}（日）"
 
     @property
-    def reach_total(self) -> int:
-        return sum(int(row["reach"] or 0) for row in self.published)
+    def total_delta(self) -> int:
+        return self.reach_total - self.prev_total
+
+    @property
+    def avg_delta(self) -> float:
+        return self.reach_avg - self.prev_avg
 
 
 def week_bounds(config: Config, now: datetime) -> tuple[datetime, datetime]:
@@ -95,13 +108,6 @@ def week_bounds(config: Config, now: datetime) -> tuple[datetime, datetime]:
         local.date() - timedelta(days=local.weekday()), time.min, tzinfo=zone
     )
     return monday, monday + timedelta(days=7)
-
-
-def _flag(row: Row, key: str) -> bool:
-    try:
-        return bool(row[key])
-    except (KeyError, IndexError, TypeError):
-        return False
 
 
 def axes_of(row: Row) -> list[tuple[str, float, str]]:
@@ -122,10 +128,35 @@ def axes_of(row: Row) -> list[tuple[str, float, str]]:
     ]
 
 
-def build(
-    config: Config, conn: DbConnection, now: datetime | None = None,
-    *, limit: int = TARGET_COUNT,
-) -> WeeklyReport:
+# 出した1本について読むもの。表紙とメモまで含める（カルテを開かなくても
+# 週の輪郭が分かるように）。
+_PUBLISHED = """
+SELECT o.id, o.kind, o.published_at, o.permalink, o.reach, o.reach_checked_at,
+       o.note, o.property_id,
+       p.display_name, p.title, p.genre, p.location_city, p.location_country,
+       p.listing_status, p.score,
+       (SELECT COUNT(*) FROM images i WHERE i.property_id = p.id) AS image_count,
+       (SELECT i.source_url FROM images i WHERE i.property_id = p.id
+         ORDER BY i.position LIMIT 1) AS cover
+  FROM posts AS o
+  LEFT JOIN properties AS p ON p.id = o.property_id
+ WHERE o.state = 'published' AND o.published_at >= ? AND o.published_at < ?
+ ORDER BY o.published_at
+"""
+
+
+def _published(conn: DbConnection, start: datetime, end: datetime) -> list[Row]:
+    return conn.execute(
+        _PUBLISHED, (start.astimezone(UTC).isoformat(), end.astimezone(UTC).isoformat())
+    ).fetchall()
+
+
+def _reach_values(rows: list[Row]) -> list[int]:
+    """**未取得は数に入れない。** 0 として平均に混ぜると実態より下がる。"""
+    return [int(r["reach"]) for r in rows if r["reach"] is not None]
+
+
+def build(config: Config, conn: DbConnection, now: datetime | None = None) -> WeeklyReport:
     """レポートを組み立てる。**DBを読むだけ。**"""
     now = now or datetime.now(UTC)
     start, end = week_bounds(config, now)
@@ -134,83 +165,112 @@ def build(
         generated_at=now.astimezone(ZoneInfo(config.instagram.timezone)),
     )
 
-    # 今週の候補。**収集した日では絞らない。** 先週入った物件が今週の
-    # いちばん良い1軒であることは普通にある。編集方針も「その週に本当に
-    # 面白いものがあれば」と言っていて、入荷日の話はしていない。
-    report.candidates = conn.execute(
-        "SELECT * FROM properties WHERE status = 'pending' AND score IS NOT NULL "
-        "ORDER BY score DESC, id DESC LIMIT ?", (limit,),
-    ).fetchall()
+    report.published = _published(conn, start, end)
+    values = _reach_values(report.published)
+    report.measured = len(values)
+    report.reach_total = sum(values)
+    report.reach_avg = (report.reach_total / len(values)) if values else 0.0
+    measured_rows = [r for r in report.published if r["reach"] is not None]
+    report.best = max(measured_rows, key=lambda r: int(r["reach"]), default=None)
 
-    order = [g for g in config.genres.priority if g in GENRE_LABELS]
-    order += [g for g in GENRE_LABELS if g not in order]
-    for genre in order:
-        rows = [r for r in report.candidates if (r["genre"] or "unknown") == genre]
-        if rows:
-            report.sections.append(Section(genre, GENRE_LABELS[genre], rows))
+    prev = _published(conn, start - timedelta(days=7), start)
+    prev_values = _reach_values(prev)
+    report.prev_count = len(prev)
+    report.prev_total = sum(prev_values)
+    report.prev_avg = (report.prev_total / len(prev_values)) if prev_values else 0.0
 
-    report.pick = report.candidates[0] if report.candidates else None
+    report.genres = _genre_stats(conn, end)
 
-    # 今週出したもの。リーチは post reach が毎日書き足す。
-    report.published = conn.execute(
-        "SELECT o.id, o.kind, o.published_at, o.permalink, o.reach, "
-        "p.display_name, p.title, p.location_city, p.location_country, p.genre "
-        "FROM posts AS o LEFT JOIN properties AS p ON p.id = o.property_id "
-        "WHERE o.state = 'published' AND o.published_at >= ? AND o.published_at < ? "
-        "ORDER BY o.published_at",
-        (start.astimezone(UTC).isoformat(), end.astimezone(UTC).isoformat()),
-    ).fetchall()
+    for row in report.published:
+        report.by_country[(row["location_country"] or "不明").strip()] += 1
+        report.by_genre[row["genre"] or "unknown"] += 1
 
     window = (start.astimezone(UTC).isoformat(), end.astimezone(UTC).isoformat())
     report.collected = conn.execute(
         "SELECT COUNT(*) AS n FROM properties WHERE collected_at >= ? AND collected_at < ?",
         window,
     ).fetchone()["n"]
-    report.approved = conn.execute(
-        "SELECT COUNT(*) AS n FROM properties WHERE reviewed_at >= ? AND reviewed_at < ? "
-        "AND status IN ('approved', 'delivered')", window,
+    report.pending = conn.execute(
+        "SELECT COUNT(*) AS n FROM properties WHERE status = 'pending'"
     ).fetchone()["n"]
-    report.rejected = conn.execute(
-        "SELECT COUNT(*) AS n FROM properties WHERE reviewed_at >= ? AND reviewed_at < ? "
-        "AND status = 'rejected'", window,
+    report.approved_waiting = conn.execute(
+        "SELECT COUNT(*) AS n FROM properties WHERE status IN ('approved', 'delivered')"
     ).fetchone()["n"]
-
-    for row in report.candidates:
-        report.by_country[(row["location_country"] or "不明").strip()] += 1
-        report.by_genre[row["genre"] or "unknown"] += 1
 
     report.checks = _checks(report)
     return report
 
 
-def _checks(report: WeeklyReport) -> list[Check]:
-    """編集方針の最終チェック欄。**足りないことを隠さない。**
+def _genre_stats(conn: DbConnection, end: datetime) -> list[GenreStat]:
+    """ジャンル別の平均リーチ（直近 TREND_WEEKS 週）。
 
-    「10件を埋めるために弱い案件を入れない」が方針なので、件数が
-    足りないこと自体は失敗ではない。ただし黙って8件にはしない。
+    **今週だけでは何も言えない。** 1週間に出るのは数本で、ジャンルごとに
+    見れば1本ずつになる。数週ぶんためて、ようやく傾向の手がかりになる。
     """
-    total = len(report.candidates)
-    us = report.by_country.get("USA", 0) + report.by_country.get("United States", 0)
-    checks = [
-        Check(
-            f"候補が {TARGET_COUNT} 件あるか", total >= TARGET_COUNT,
-            "" if total >= TARGET_COUNT else
-            f"{total} 件。埋めるために弱い案件を入れない——足りない週は足りないまま出す",
-        ),
-        Check(
-            "米国だけに偏っていないか", total == 0 or us * 2 <= total,
-            "" if total == 0 or us * 2 <= total else f"{total} 件中 {us} 件が米国",
-        ),
-        Check(
-            "Hidden Gem が入っているか", report.by_genre.get("hidden_gem", 0) > 0,
-        ),
-        Check(
-            "Conversion（用途変更）が入っているか",
-            report.by_genre.get("adaptive_reuse", 0) > 0,
-        ),
-        Check("Pick of the Week を選んだか", report.pick is not None),
+    since = (end - timedelta(weeks=TREND_WEEKS)).astimezone(UTC).isoformat()
+    rows = conn.execute(
+        "SELECT p.genre AS genre, o.reach AS reach FROM posts AS o "
+        "JOIN properties AS p ON p.id = o.property_id "
+        "WHERE o.state = 'published' AND o.reach IS NOT NULL "
+        "AND o.published_at >= ? AND o.published_at < ?",
+        (since, end.astimezone(UTC).isoformat()),
+    ).fetchall()
+
+    buckets: dict[str, list[int]] = defaultdict(list)
+    for row in rows:
+        buckets[row["genre"] or "unknown"].append(int(row["reach"]))
+    stats = [
+        GenreStat(
+            genre=genre,
+            label=GENRE_LABELS.get(genre, genre),
+            posts=len(values),
+            reach_avg=sum(values) / len(values),
+        )
+        for genre, values in buckets.items()
     ]
-    return checks
+    return sorted(stats, key=lambda s: s.reach_avg, reverse=True)
+
+
+def _checks(report: WeeklyReport) -> list[Check]:
+    """今週の振り返り。**出したものについて見る。**
+
+    以前は未審査の候補について見ていたが、この画面は振り返りなので、
+    確かめるのは「出したもの」。
+    """
+    posts = len(report.published)
+    us = report.by_country.get("USA", 0) + report.by_country.get("United States", 0)
+    unmeasured = posts - report.measured
+    noted = sum(1 for row in report.published if (row["note"] or "").strip())
+    top_genre = report.by_genre.most_common(1)[0] if report.by_genre else None
+
+    return [
+        Check(
+            "リーチが全部読めているか", unmeasured == 0,
+            "" if unmeasured == 0 else
+            f"{posts} 本中 {unmeasured} 本が未取得。出したばかりの投稿はまだ集計されていない",
+        ),
+        Check(
+            "米国だけに偏っていないか", posts == 0 or us * 2 <= posts,
+            "" if posts == 0 or us * 2 <= posts else f"{posts} 本中 {us} 本が米国",
+        ),
+        Check(
+            "ジャンルが偏っていないか",
+            top_genre is None or posts <= 2 or top_genre[1] * 2 <= posts,
+            "" if top_genre is None or posts <= 2 or top_genre[1] * 2 <= posts else
+            f"{posts} 本中 {top_genre[1]} 本が {GENRE_LABELS.get(top_genre[0], top_genre[0])}",
+        ),
+        Check(
+            "振り返りのメモを残したか", posts == 0 or noted > 0,
+            "" if posts == 0 or noted > 0 else
+            "1本も書かれていない。カルテのメモは次の選定で読む唯一の記録",
+        ),
+    ]
+
+
+def name_of(row: Row) -> str:
+    if row["kind"] == "reel":
+        return "週次リール"
+    return row["display_name"] or row["title"] or "（物件不明）"
 
 
 def render(report: WeeklyReport) -> str:
@@ -219,61 +279,66 @@ def render(report: WeeklyReport) -> str:
         "FREMING CURATED — WEEKLY REPORT",
         f"  {report.label}（{report.generated_at:%m/%d %H:%M} 時点）",
         "",
-        f"今週の入荷 {report.collected} 件 / 承認 {report.approved} / "
-        f"非承認 {report.rejected} / 公開 {len(report.published)}",
-        "",
-        f"■ 今週の候補（未審査の上位 {len(report.candidates)} 件）",
+        "■ 今週の数字",
+        f"  出した {len(report.published)} 本（先週 {report.prev_count} 本）",
+        f"  リーチ合計 {report.reach_total}（先週 {report.prev_total} / "
+        f"{report.total_delta:+d}）",
+        f"  1本あたり {report.reach_avg:.0f}（先週 {report.prev_avg:.0f} / "
+        f"{report.avg_delta:+.0f}）",
     ]
-    for section in report.sections:
-        lines.append(f"\n  {section.label}")
-        for row in section.rows:
-            lines.append(f"    {_one_line(row)}")
+    if report.measured < len(report.published):
+        lines.append(
+            f"  ※ {len(report.published) - report.measured} 本はリーチ未取得。"
+            "平均には入れていない"
+        )
 
-    if report.pick is not None:
-        lines += ["", "■ Pick of the Week", f"  {_one_line(report.pick)}"]
-        if report.pick["summary"]:
-            lines.append(f"    {report.pick['summary']}")
+    if report.best is not None:
+        lines += [
+            "", "■ いちばん見られた1本",
+            f"  {name_of(report.best)}（リーチ {report.best['reach']}）",
+        ]
 
     if report.published:
         lines += ["", "■ 今週出したもの"]
         for row in report.published:
             reach = f"リーチ {row['reach']}" if row["reach"] is not None else "リーチ未取得"
-            name = row["display_name"] or row["title"] or "（物件不明）"
-            lines.append(f"    {(row['published_at'] or '')[:10]}  {name[:40]:<40} {reach}")
+            photos = f"  写真 {row['image_count'] or 0}枚" if row["property_id"] else ""
+            lines.append(
+                f"  {(row['published_at'] or '')[:10]}  {name_of(row)[:38]:<38} "
+                f"{reach}{photos}"
+            )
+            if (row["note"] or "").strip():
+                lines.append(f"      メモ: {row['note'].strip()[:70]}")
 
-    lines += ["", "■ 最終チェック"]
+    if report.genres:
+        lines += ["", f"■ ジャンル別の平均リーチ（直近{TREND_WEEKS}週）"]
+        for stat in report.genres:
+            lines.append(f"  {stat.label:<22} {stat.reach_avg:>5.0f}（{stat.posts}本）")
+        lines.append("  ※ 本数が少ないうちは、1本の当たり外れで順位が動く")
+
+    lines += ["", "■ 今週の振り返り"]
     for check in report.checks:
         mark = "○" if check.ok else "要確認"
         lines.append(f"  [{mark}] {check.label}" + (f" — {check.note}" if check.note else ""))
+
+    lines += [
+        "", "■ 在庫",
+        f"  未審査 {report.pending} 件（今週の入荷 {report.collected}）/ "
+        f"投稿に回せる {report.approved_waiting} 件",
+    ]
     return "\n".join(lines)
-
-
-def _one_line(row: Row) -> str:
-    name = row["display_name"] or row["title"] or ""
-    place = " / ".join(x for x in (row["location_city"], row["location_country"]) if x)
-    bits = [f"#{row['id']:<5}", f"{float(row['score'] or 0):>3.0f}点", name[:44]]
-    if place:
-        bits.append(f"（{place}）")
-    marks = []
-    if _flag(row, "style_identified"):
-        marks.append("様式")
-    if _flag(row, "one_of_a_kind"):
-        marks.append("一点物")
-    if _flag(row, "provenance_visible"):
-        marks.append("前歴")
-    if marks:
-        bits.append("[" + "/".join(marks) + "]")
-    return "  ".join(bits)
 
 
 __all__ = [
     "GENRE_LABELS",
-    "TARGET_COUNT",
+    "KIND_LABELS",
+    "TREND_WEEKS",
     "Check",
-    "Section",
+    "GenreStat",
     "WeeklyReport",
     "axes_of",
     "build",
+    "name_of",
     "render",
     "week_bounds",
 ]

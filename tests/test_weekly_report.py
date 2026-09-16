@@ -1,8 +1,10 @@
 """[10] 週次レポートのテスト。
 
-編集方針（WEEKLY GLOBAL ARCHITECTURE REPORT）の形に、手元の候補を
-並べ直すもの。**外へは出ない**ので、確かめるのはDBの読み方と、
-足りないことを隠さずに出すかどうか。
+**出したものがどうだったか**を読む画面。最初は未審査の候補を並べて
+いたが、それは未審査タブの仕事だった（2026-09-16 の指摘）。
+
+確かめるのは、数字の作り方（未取得を 0 に混ぜない）と、振り返りの
+チェックが「出したもの」を見ていること。
 """
 
 from __future__ import annotations
@@ -60,122 +62,164 @@ def _add(conn, url, *, score=None, genre=None, country="United States", **extra)
     return property_id
 
 
+def _post(conn, post_id, property_id, published_at, *, reach=None, note=None, kind="feed"):
+    conn.execute(
+        "INSERT INTO posts (id, kind, state, scheduled_at, published_at, property_id, "
+        "reach, note) VALUES (?, ?, 'published', ?, ?, ?, ?, ?)",
+        (post_id, kind, published_at, published_at, property_id, reach, note),
+    )
+    conn.commit()
+
+
 def test_週は月曜から日曜(config) -> None:
     start, end = week_bounds(config, NOW)
     assert start.strftime("%Y-%m-%d") == "2026-09-14"   # 月曜
     assert end.strftime("%Y-%m-%d") == "2026-09-21"
 
 
-def test_候補は未審査の点数順(config, conn) -> None:
-    _add(conn, "https://a.example.com/1", score=70, genre="architect")
-    _add(conn, "https://a.example.com/2", score=90, genre="hidden_gem")
-    low = _add(conn, "https://a.example.com/3", score=40, genre="loft")
-    conn.execute("UPDATE properties SET status = 'approved' WHERE id = ?", (low,))
-    conn.commit()
-
-    report = build(config, conn, NOW)
-    assert [float(r["score"]) for r in report.candidates] == [90.0, 70.0]
-    # 審査済みは候補に出さない（もう選び終わっている）
-    assert low not in [r["id"] for r in report.candidates]
-
-
-def test_採点していない候補は出さない(config, conn) -> None:
-    """点が無いものを混ぜると、並びの意味が無くなる。"""
-    _add(conn, "https://a.example.com/1", score=60, genre="architect")
-    _add(conn, "https://a.example.com/2")      # 未採点
-    report = build(config, conn, NOW)
-    assert len(report.candidates) == 1
-
-
-def test_ジャンル別に並ぶ(config, conn) -> None:
-    _add(conn, "https://a.example.com/1", score=80, genre="adaptive_reuse")
-    _add(conn, "https://a.example.com/2", score=70, genre="architect")
-    report = build(config, conn, NOW)
-    labels = [s.label for s in report.sections]
-    # config の優先順（architect が先）に従う。点数順ではない
-    assert labels[0].startswith("Architect")
-    assert "Conversion" in labels[1]
-
-
-def test_Pickは最上位の1件(config, conn) -> None:
-    _add(conn, "https://a.example.com/1", score=70, genre="architect")
-    top = _add(conn, "https://a.example.com/2", score=95, genre="hidden_gem")
-    assert build(config, conn, NOW).pick["id"] == top
-
-
-def test_件数が足りないことを隠さない(config, conn) -> None:
-    """**10件を埋めるために弱い案件を入れない**が方針。ただし黙らない。"""
-    _add(conn, "https://a.example.com/1", score=70, genre="architect")
-    report = build(config, conn, NOW)
-    check = next(c for c in report.checks if "10 件" in c.label)
-    assert check.ok is False
-    assert "弱い案件を入れない" in check.note
-
-
-def test_米国への偏りを出す(config, conn) -> None:
-    for i in range(3):
-        _add(conn, f"https://a.example.com/{i}", score=70, genre="architect",
-             country="United States")
-    report = build(config, conn, NOW)
-    check = next(c for c in report.checks if "米国" in c.label)
-    assert check.ok is False
-    assert "3 件" in check.note
-
-
-def test_偏りが無ければ通る(config, conn) -> None:
-    _add(conn, "https://a.example.com/1", score=70, genre="architect",
-         country="United States")
-    _add(conn, "https://a.example.com/2", score=60, genre="adaptive_reuse",
-         country="France")
-    report = build(config, conn, NOW)
-    assert next(c for c in report.checks if "米国" in c.label).ok is True
-    assert next(c for c in report.checks if "Conversion" in c.label).ok is True
-    assert next(c for c in report.checks if "Hidden Gem" in c.label).ok is False
-
-
-def test_今週出した投稿とリーチが出る(config, conn) -> None:
-    property_id = _add(conn, "https://a.example.com/1", score=70, genre="architect",
-                       display_name="Steel Ranch")
-    conn.execute(
-        "INSERT INTO posts (id, kind, state, scheduled_at, published_at, property_id, reach) "
-        "VALUES (1, 'feed', 'published', ?, ?, ?, 384)",
-        ("2026-09-15T00:02:00+00:00", "2026-09-15T00:02:00+00:00", property_id),
-    )
-    # 先週の投稿は入らない（別の物件。posts は物件×種別で1行）
-    other = _add(conn, "https://a.example.com/2", score=60, genre="loft")
-    conn.execute(
-        "INSERT INTO posts (id, kind, state, scheduled_at, published_at, property_id) "
-        "VALUES (2, 'feed', 'published', ?, ?, ?)",
-        ("2026-09-08T00:02:00+00:00", "2026-09-08T00:02:00+00:00", other),
-    )
-    conn.commit()
+def test_今週出したものが主役(config, conn) -> None:
+    """未審査の候補は並べない（未審査タブの仕事）。"""
+    a = _add(conn, "https://a.example.com/1", score=70, genre="architect",
+             display_name="Steel Ranch")
+    b = _add(conn, "https://a.example.com/2", score=60, genre="loft",
+             display_name="先週の1軒")
+    _add(conn, "https://a.example.com/3", score=95, genre="hidden_gem",
+         display_name="未審査の高得点")      # 出していない。レポートに出さない
+    _post(conn, 1, a, "2026-09-15T00:02:00+00:00", reach=131)
+    _post(conn, 2, b, "2026-09-08T00:02:00+00:00", reach=300)   # 先週
 
     report = build(config, conn, NOW)
     assert [row["id"] for row in report.published] == [1]
-    assert report.reach_total == 384
+    assert "未審査の高得点" not in render(report)
+
+
+def test_未取得を0として平均に混ぜない(config, conn) -> None:
+    """出したばかりの投稿はまだ集計されていない。0 扱いすると平均が下がる。"""
+    a = _add(conn, "https://a.example.com/1", score=70, genre="architect")
+    b = _add(conn, "https://a.example.com/2", score=70, genre="loft")
+    _post(conn, 1, a, "2026-09-15T00:02:00+00:00", reach=200)
+    _post(conn, 2, b, "2026-09-16T00:02:00+00:00")              # 未取得
+
+    report = build(config, conn, NOW)
+    assert report.reach_total == 200
+    assert report.reach_avg == 200.0      # 100 ではない
+    assert report.measured == 1
+    check = next(c for c in report.checks if "リーチが全部読めている" in c.label)
+    assert check.ok is False
+
+
+def test_先週と比べる(config, conn) -> None:
+    a = _add(conn, "https://a.example.com/1", score=70, genre="architect")
+    b = _add(conn, "https://a.example.com/2", score=70, genre="loft")
+    _post(conn, 1, a, "2026-09-15T00:02:00+00:00", reach=150)
+    _post(conn, 2, b, "2026-09-08T00:02:00+00:00", reach=100)
+
+    report = build(config, conn, NOW)
+    assert report.prev_count == 1
+    assert report.prev_total == 100
+    assert report.total_delta == 50
+
+
+def test_いちばん見られた1本(config, conn) -> None:
+    a = _add(conn, "https://a.example.com/1", score=70, genre="architect",
+             display_name="低い方")
+    b = _add(conn, "https://a.example.com/2", score=70, genre="loft",
+             display_name="高い方")
+    _post(conn, 1, a, "2026-09-15T00:02:00+00:00", reach=100)
+    _post(conn, 2, b, "2026-09-16T00:02:00+00:00", reach=300)
+    assert build(config, conn, NOW).best["id"] == 2
+
+
+def test_カルテのメモが出る(config, conn) -> None:
+    a = _add(conn, "https://a.example.com/1", score=70, genre="architect")
+    _post(conn, 1, a, "2026-09-15T00:02:00+00:00", reach=100, note="1枚目が弱い")
+    text = render(build(config, conn, NOW))
+    assert "1枚目が弱い" in text
+
+
+def test_メモが1本も無ければ要確認(config, conn) -> None:
+    a = _add(conn, "https://a.example.com/1", score=70, genre="architect")
+    _post(conn, 1, a, "2026-09-15T00:02:00+00:00", reach=100)
+    check = next(c for c in build(config, conn, NOW).checks if "メモ" in c.label)
+    assert check.ok is False
+
+
+def test_出したものの偏りを見る(config, conn) -> None:
+    """**候補ではなく、出したもの**について確かめる。"""
+    for i in range(3):
+        pid = _add(conn, f"https://a.example.com/{i}", score=70, genre="architect",
+                   country="United States")
+        _post(conn, i + 1, pid, f"2026-09-1{5 + i}T00:02:00+00:00", reach=100)
+
+    report = build(config, conn, NOW)
+    assert next(c for c in report.checks if "米国" in c.label).ok is False
+    assert next(c for c in report.checks if "ジャンル" in c.label).ok is False
+
+
+def test_ジャンル別の平均は直近数週で見る(config, conn) -> None:
+    """1週間では1ジャンル1本になる。数週ためないと傾向にならない。"""
+    a = _add(conn, "https://a.example.com/1", score=70, genre="architect")
+    b = _add(conn, "https://a.example.com/2", score=70, genre="loft")
+    _post(conn, 1, a, "2026-09-15T00:02:00+00:00", reach=300)
+    _post(conn, 2, b, "2026-08-20T00:02:00+00:00", reach=100)   # 数週前でも入る
+
+    stats = {s.genre: s for s in build(config, conn, NOW).genres}
+    assert stats["architect"].reach_avg == 300
+    assert stats["loft"].reach_avg == 100
+    # 高い順に並べる
+    assert build(config, conn, NOW).genres[0].genre == "architect"
+
+
+def test_在庫は件数だけ(config, conn) -> None:
+    """未審査は並べず、数とリンクだけ置く。"""
+    _add(conn, "https://a.example.com/1", score=95, genre="hidden_gem",
+         display_name="未審査の1軒")
+    report = build(config, conn, NOW)
+    assert report.pending == 1
+    assert "未審査の1軒" not in render(report)
 
 
 def test_テキストでも読める(config, conn) -> None:
-    _add(conn, "https://a.example.com/1", score=70, genre="architect",
-         display_name="Grayoaks")
+    a = _add(conn, "https://a.example.com/1", score=70, genre="architect",
+             display_name="Grayoaks")
+    _post(conn, 1, a, "2026-09-15T00:02:00+00:00", reach=131)
     text = render(build(config, conn, NOW))
     assert "WEEKLY REPORT" in text
     assert "Grayoaks" in text
-    assert "Pick of the Week" in text
+    assert "いちばん見られた1本" in text
 
 
 def test_画面が開く(config, conn) -> None:
-    _add(conn, "https://a.example.com/1", score=70, genre="architect",
-         display_name="Grayoaks")
-    client = TestClient(create_app(config))
-    body = client.get("/report").text
+    a = _add(conn, "https://a.example.com/1", score=70, genre="architect",
+             display_name="Grayoaks")
+    _post(conn, 1, a, "2026-09-15T00:02:00+00:00", reach=131, note="1枚目が弱い")
+    body = TestClient(create_app(config)).get("/report").text
     assert "WEEKLY REPORT" in body
     assert "Grayoaks" in body
+    assert "1枚目が弱い" in body            # カルテの抜粋
+
+
+def test_何も出していない週でも開く(config, conn) -> None:
+    client = TestClient(create_app(config))
+    assert client.get("/report?week=2026-08-03").status_code == 200
 
 
 def test_壊れた週の指定でも画面は開く(config, conn) -> None:
     client = TestClient(create_app(config))
     assert client.get("/report?week=まいにち").status_code == 200
+
+
+def test_画面に出る文字に星印を書かない(config, conn) -> None:
+    """`**強調**` は Markdown。HTMLではそのまま星印が出る。
+
+    2026-09-16 の実機で「**埋めるために弱い案件を入れない**」と表示されて
+    いた。コード中のコメントと、画面に出る文字を混同しない。
+    """
+    a = _add(conn, "https://a.example.com/1", score=70, genre="architect")
+    _post(conn, 1, a, "2026-09-15T00:02:00+00:00")
+    for check in build(config, conn, NOW).checks:
+        assert "**" not in check.label
+        assert "**" not in check.note
 
 
 # --- 投稿カルテ -------------------------------------------------------
@@ -259,16 +303,3 @@ def test_空のメモは消える(config, conn) -> None:
 
 def test_無い投稿は404(config) -> None:
     assert TestClient(create_app(config)).get("/posts/999").status_code == 404
-
-
-def test_画面に出る文字に星印を書かない(config, conn) -> None:
-    """`**強調**` は Markdown。HTMLではそのまま星印が出る。
-
-    2026-09-16 の実機で「**埋めるために弱い案件を入れない**」と表示されて
-    いた。コード中のコメントと、画面に出る文字を混同しない。
-    """
-    _add(conn, "https://a.example.com/1", score=70, genre="architect")
-    report = build(config, conn, NOW)
-    for check in report.checks:
-        assert "**" not in check.label
-        assert "**" not in check.note

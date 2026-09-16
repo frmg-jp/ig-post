@@ -474,7 +474,13 @@ def create_app(
         from datetime import UTC, datetime, timedelta
 
         from freming.collect.listing_status import LABELS as STATUS_LABELS
-        from freming.report.weekly import build
+        from freming.report.weekly import (
+            GENRE_LABELS,
+            KIND_LABELS,
+            TREND_WEEKS,
+            build,
+            name_of,
+        )
 
         when = datetime.now(UTC)
         if week:
@@ -496,6 +502,10 @@ def create_app(
             {
                 "report": report,
                 "status_labels": STATUS_LABELS,
+                "genre_labels": GENRE_LABELS,
+                "kind_labels": KIND_LABELS,
+                "trend_weeks": TREND_WEEKS,
+                "name_of": name_of,
                 "counts": counts,
                 "status": "report",
                 "prev_week": (report.start - timedelta(days=7)).date().isoformat(),
