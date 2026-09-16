@@ -1616,6 +1616,62 @@ def _cmd_post(args: argparse.Namespace) -> int:
             # 気づかせるのが目的なので、見つかったら赤で終わる。
             return 1
 
+        if args.post_action == "reach":
+            # **読んだ数字を捨てない。** 2026-09-15 まで、週次リールの
+            # 選抜で毎週リーチを読んでいたのに、DBには1件も残っていな
+            # かった（record_reach を誰も呼んでいなかった）。記録が無い
+            # ので「先週と比べてどうだったか」が一度も言えていない。
+            #
+            # リーチは時間とともに伸びるので、しばらくは毎日読み直す。
+            # 費用はかからない（Graph API のインサイト）。
+            from datetime import UTC, datetime, timedelta
+
+            from freming.db.repository import posts_for_reach, record_reach
+            from freming.instagram.insights import (
+                MissingInsightsScope,
+                media_reach,
+            )
+            from freming.instagram.tokens import load_token
+
+            record = load_token(conn)
+            if record is None:
+                print("Instagram のトークンが未設定です。", file=sys.stderr)
+                return 2
+
+            days = args.days or 30
+            since = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+            rows = posts_for_reach(conn, since)
+            if not rows:
+                print(f"直近 {days} 日に公開した投稿がありません。")
+                return 0
+
+            read = failed = 0
+            for row in rows:
+                try:
+                    value = media_reach(record.value, str(row["ig_media_id"]))
+                except MissingInsightsScope as exc:
+                    # 権限が無いのは1件の問題ではない。全件で同じになる。
+                    print(f"\n{exc}", file=sys.stderr)
+                    return 1
+                except Exception as exc:  # noqa: BLE001 - 1件で全体を止めない
+                    print(f"  post {row['id']}: 読めませんでした（{exc}）"[:150],
+                          file=sys.stderr)
+                    failed += 1
+                    continue
+                if value is None:
+                    # まだ集計されていない。**0 として保存しない。**
+                    continue
+                before = row["reach"]
+                record_reach(conn, int(row["id"]), value)
+                read += 1
+                mark = "" if before is None else f"（前回 {before}）"
+                print(f"  post {row['id']:<4} {row['kind']:<5} "
+                      f"{(row['published_at'] or '')[:10]}  リーチ {value}{mark}")
+
+            print(f"\n{len(rows)} 件中 {read} 件のリーチを記録しました"
+                  + (f"（{failed} 件は読めず）" if failed else ""))
+            return 0
+
         if args.post_action == "inspect":
             # **DBの published を鵜呑みにしない。** 09/05 と 09/07 の投稿は
             # published と記録されているのにアカウントに無かった（どちらも
@@ -2409,7 +2465,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_post.add_argument(
         "post_action",
         choices=["plan", "show", "run", "replan", "reschedule", "requeue",
-                 "skip", "unskip", "compact", "inspect", "audit"],
+                 "skip", "unskip", "compact", "inspect", "audit", "reach"],
         help=(
             "plan: 予定を作る / show: 予定を見る / run: 時間が来たものを投稿する"
             " / replan: まだ出していない予定の本文を作り直す"
@@ -2419,6 +2475,7 @@ def build_parser() -> argparse.ArgumentParser:
             " / compact: 空いた枠を詰める"
             " / inspect: 1件の記録と実物を突き合わせる（--id）"
             " / audit: 公開済みが**実際に残っているか**を全件確認する"
+            " / reach: 直近の投稿のリーチを読んで記録する（--days）"
         ),
     )
     p_post.add_argument(
@@ -2431,7 +2488,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_post.add_argument(
         "--days", type=int,
-        help="show で何日先まで出すか。既定は config の plan_days",
+        help="show で何日先まで出すか（既定は config の plan_days）/ "
+             "reach で何日前までの投稿を読み直すか（既定30）",
     )
     p_post.add_argument(
         "--limit", type=int,

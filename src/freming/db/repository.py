@@ -968,12 +968,42 @@ def published_with_media(conn: DbConnection, limit: int | None = None) -> list[R
     return conn.execute(f"{sql} LIMIT ?", (limit,)).fetchall()
 
 
+def posts_for_reach(conn: DbConnection, since: str) -> list[Row]:
+    """リーチを読み直す対象。since 以降に公開されたもの。
+
+    **リーチは時間とともに伸びる。** 出した直後の数字を1回だけ取って
+    置いておくと、常に過小評価になる。しばらくは毎日読み直す。
+    """
+    return conn.execute(
+        "SELECT id, kind, published_at, ig_media_id, reach, reach_checked_at "
+        "FROM posts WHERE state = 'published' AND ig_media_id IS NOT NULL "
+        "AND published_at >= ? ORDER BY published_at DESC",
+        (since,),
+    ).fetchall()
+
+
 def record_reach(conn: DbConnection, post_id: int, reach: int | None) -> None:
     conn.execute(
         "UPDATE posts SET reach = ?, reach_checked_at = ? WHERE id = ?",
         (reach, _now(), post_id),
     )
     conn.commit()
+
+
+def record_reach_by_media(conn: DbConnection, media_id: str, reach: int | None) -> bool:
+    """media_id から引いてリーチを残す。予定表に無い投稿は何もしない。
+
+    週次リールの選抜は**アカウントの実物**を見るので、手で出した投稿も
+    混ざる（予定表に行が無い）。**読んだ数字をその場で捨てない**ために、
+    引ける行にだけ書く。2026-09-15 まで、選抜で読んだリーチは1件も
+    保存されていなかった（record_reach を誰も呼んでいなかった）。
+    """
+    cursor = conn.execute(
+        "UPDATE posts SET reach = ?, reach_checked_at = ? WHERE ig_media_id = ?",
+        (reach, _now(), media_id),
+    )
+    conn.commit()
+    return bool(cursor.rowcount)
 
 
 def count_posts_by_state(conn: DbConnection) -> dict[str, int]:

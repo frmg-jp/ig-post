@@ -37,8 +37,7 @@ from freming.db.repository import (
     claim_due_post,
     fail_post,
     finish_post,
-    published_posts_between,
-    record_reach,
+    record_reach_by_media,
     set_permalink,
 )
 from freming.instagram import media
@@ -224,6 +223,11 @@ def weekly_picks(
             for picks in by_day.values():
                 for pick in picks:
                     pick.reach = media_reach(token, pick.media_id)
+                    # **読んだ数字をその場で捨てない。** 2026-09-15 まで、
+                    # 毎週ここでリーチを読みながら1件も保存しておらず、
+                    # 「先週と比べてどうだったか」が一度も言えなかった。
+                    # 予定表に無い投稿（手で出したもの）は何も起きない。
+                    record_reach_by_media(conn, pick.media_id, pick.reach)
             picked_by = "reach"
         except MissingInsightsScope:
             if not (
