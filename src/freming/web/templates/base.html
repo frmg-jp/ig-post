@@ -2,7 +2,10 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+{# viewport-fit=cover は、ノッチのある端末で横向きにしたときに
+   env(safe-area-inset-*) を使えるようにするため。これが無いと左右が
+   常に安全域ぶん空き、狭い画面がさらに狭くなる。 #}
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{% block title %}FREMING CURATED 審査{% endblock %}</title>
 {# ファビコンは frmg.jp の実物（wp_freming/img/icon/）をそのまま置いている。
    審査UIを公開するようになり、ブラウザのタブに他の業務と並ぶため、
@@ -68,8 +71,16 @@
   /* ダークモードは持たない。frmg.jp がライトのみなので、反転させると
      そこだけ別サイトになる。 */
   * { box-sizing: border-box; }
+  /* iOS を横向きにしたときの文字の自動拡大を止める。放っておくと、
+     縦と横で字の大きさが変わって行が崩れる。 */
+  html { -webkit-text-size-adjust: 100%; }
   /* 既定の青いリンクを出さない。色は意味のあるところにだけ置く */
   a { color: var(--fg); }
+  /* 画像が親をはみ出さない。狭い画面で横スクロールが出る原因の筆頭。 */
+  img { max-width: 100%; }
+  /* 長いURL（引用元・販売ページ・写真の出所）はどこでも折る。
+     折らないと1本のURLで画面全体が横に伸びる。 */
+  .note, .meta, pre, code, td, th { overflow-wrap: anywhere; }
   body {
     margin: 0; background: var(--bg); color: var(--fg);
     /* 本家の和文は 16px / 行送り 2.0 の明朝。審査UIは件数を捌くので
@@ -91,39 +102,55 @@
   /* ---- マストヘッド ------------------------------------------------- */
   /* 罫は引かない。地色が同じで sticky なので、スクロールすると本文が
      ヘッダの下へ潜り込む。区切りは余白で作る。 */
+  /* マストヘッドは2段に固定する。
+       1段目 … ロゴ ＋ 画面の切り替え（ルール候補・投稿予定・…）
+       2段目 … 審査タブ（未審査・承認・…）
+     **狭い画面では折り返さず、段ごとに横スクロールさせる。**
+     以前は1つの flex に全部入れて折り返していたため、項目が増えるたびに
+     行が増え、ロゴの右に1つだけ・次の行に1つだけ、という崩れ方をした
+     （2026-09-16 のスクリーンショット）。段が決まっていれば、項目を
+     足しても崩れない。 */
   header {
     position: sticky; top: 0; z-index: 10; background: var(--bg);
-    padding: 14px 28px 16px;
-    display: flex; gap: 22px; align-items: baseline; flex-wrap: wrap;
+    padding: 14px 28px 12px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  header .bar {
+    display: flex; align-items: center; gap: 22px; min-width: 0;
   }
   /* 本家のロゴ「FRMG™」と同じ、等幅・大文字・字送りなし */
   header h1 {
     font-size: 16px; font-weight: 400; margin: 0;
-    letter-spacing: normal; text-transform: uppercase;
+    letter-spacing: normal; text-transform: uppercase; white-space: nowrap;
   }
-  nav { display: flex; gap: 20px; flex-wrap: wrap; }
+  nav { display: flex; gap: 20px; flex-wrap: wrap; min-width: 0; }
+  /* 画面の切り替えは右に寄せる。項目が増えても段は増えない。 */
+  nav.sections { margin-left: auto; justify-content: flex-end; }
   /* 本家のグローバルナビは 16px 等幅の大文字。審査UIは項目数が多いので
      13px まで落とすが、書体と字送りは合わせる */
   nav a {
     color: var(--muted); text-decoration: none;
     font-family: var(--mono);
-    font-size: 13px; letter-spacing: var(--track-label);
+    /* 行送りは本文の 2 を継がない。継ぐと文字の下に行送りぶんの空きが
+       でき、選択中の下線が遠くに離れて見える（狭い画面で目立った）。 */
+    font-size: 13px; line-height: 1.4; letter-spacing: var(--track-label);
     padding-bottom: 3px; border-bottom: 2px solid transparent;
   }
   /* 本家の .hover-red と同じで、ホバーの一点だけ赤に振る */
   nav a:hover { color: var(--hi); }
   nav a.on { color: var(--fg); border-bottom-color: var(--fg); }
-  /* nav の外に出したが、見た目はタブと揃える */
-  a.rules {
-    color: var(--muted); text-decoration: none;
-    font-family: var(--mono);
-    font-size: 13px; letter-spacing: var(--track-label);
-    padding-bottom: 3px; border-bottom: 2px solid transparent;
-  }
-  a.rules:hover { color: var(--hi); }
-  a.rules.on { color: var(--fg); border-bottom-color: var(--fg); }
   nav a .n { color: var(--faint); margin-left: 4px; }
   nav a.on .n { color: var(--muted); }
+  /* 横に流す帯。**折り返さずにスクロールさせる。**スクロールバーは
+     出さない（指で流せるうえ、出ると1行ぶん高さを食う）。 */
+  .scroll-x {
+    flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none; -ms-overflow-style: none;
+  }
+  .scroll-x::-webkit-scrollbar { display: none; }
+  .scroll-x > * { white-space: nowrap; flex: none; }
+
   .auto {
     margin-left: auto; font-size: 11px; color: var(--ok);
     letter-spacing: var(--track-label); text-transform: uppercase;
@@ -333,68 +360,128 @@
   .subnav a.on { color: var(--fg); border-bottom: 2px solid var(--fg); }
 
   @media (max-width: 640px) {
-    header, main { padding-left: 18px; padding-right: 18px; }
+    /* 左右の余白は、ノッチのある端末の安全域と大きい方を採る。
+       viewport-fit=cover にしているので、横向きでも文字が切れない。 */
+    header, main {
+      padding-left: max(16px, env(safe-area-inset-left));
+      padding-right: max(16px, env(safe-area-inset-right));
+    }
+    /* ホームバーに最後の行が隠れないようにする。 */
+    main { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
     .card { grid-template-columns: 1fr; }
     details.manual .grid { grid-template-columns: 1fr; }
     .keys { display: none; }
 
-    /* タイトルの右端に「ルール候補」を置き、タブは次の行に丸ごと送る。
-       order で並べ替えるので、HTML の順序は触らない。 */
-    header { align-items: center; row-gap: 14px; }
-    header h1 { order: 0; }
-    a.rules { order: 1; margin-left: auto; }
-    header nav { order: 2; flex-basis: 100%; }
-    .auto { order: 3; margin-left: 0; }
+    /* マストヘッド。2段のまま、段ごとに横へ流す。
+       指で押す場所は 40px 前後を確保する（13px の文字に下 3px だけでは、
+       親指で隣を押す）。 */
+    header { padding-top: 8px; padding-bottom: 6px; gap: 2px; }
+    header .bar { gap: 14px; }
+    /* **ロゴは出さない。** 幅 390px でロゴに 150px 使うと、画面の
+       切り替え（4項目）が右にあふれ、しかも右寄せのせいで**あふれた
+       先頭に指が届かない**（2026-09-16 に実機の並びで確認）。
+       どのサイトかはタブのタイトルとファビコンで分かる。帯2本に全幅を
+       渡したほうが操作できる。 */
+    header h1 { display: none; }
+    nav.sections { margin-left: 0; justify-content: flex-start; }
+    nav { gap: 16px; }
+    nav a { padding: 8px 0 6px; }
+    /* 帯の右端に地色のぼかしを置き、「まだ先がある」ことを示す。
+       スクロールバーを消しているので、これが無いと気づけない。 */
+    header .bar { position: relative; }
+    header .bar::after {
+      content: ""; position: absolute; right: 0; top: 0; bottom: 0; width: 24px;
+      background: linear-gradient(to right, transparent, var(--bg));
+      pointer-events: none;
+    }
+    .auto { margin-left: 0; }
 
-    /* 操作列を1行に収める。左が承認、右が非承認の一式。
-         左 30% … 承認
-         右 68% … 理由のプルダウン ＋ 自由記入 ＋ 非承認
-       間の 2% が両者の間隔になる（30+2+68=100）。
+    /* **入力欄は 16px 未満にしない。** iOS Safari は 16px 未満の入力に
+       フォーカスすると画面を勝手に拡大し、そのまま戻らない。審査で
+       理由を打つたびに拡大されていた。 */
+    select, input[type=text], input[type=url], input[type=datetime-local],
+    textarea { font-size: 16px; }
+    /* 指で押す高さ。32px は狭い。 */
+    :root { --control-h: 40px; }
 
-       承認は1つしか入らないので狭くてよい。右は3つ入るので、比率を
-       動かすならこちらに寄せる。 */
-    .actions { gap: 8px 2%; }
-    .actions form.approve { display: flex; flex: 0 0 30%; min-width: 0; }
+    /* 見出しは1行で切らず、2行まで出す。狭い画面では1行に入る字数が
+       少なく、「1938 Tudor Manor in …」の肝心な部分が消える。 */
+    .title {
+      white-space: normal; display: -webkit-box;
+      -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+
+    /* 並べ替えの帯も横に流す（折り返すと3行になる）。
+       **flex にしない。** 先頭の「並べ替え：」は素のテキストなので、
+       flex の子になると1文字ずつ折り返して縦に並ぶ（実測で4行になった）。
+       inline のまま nowrap で流す。 */
+    .subnav {
+      white-space: nowrap; overflow-x: auto; line-height: 1.6;
+      scrollbar-width: none; -ms-overflow-style: none;
+    }
+    .subnav::-webkit-scrollbar { display: none; }
+    .subnav a { display: inline-block; margin-right: 14px; padding: 6px 0; }
+
+    /* 操作列。**1行に詰め込まない。**
+       入力欄を 16px にした（iOS の自動拡大を止めるため）ので、承認・理由・
+       自由記入・非承認の4つは1行に入らない。実測 393px 幅で、非承認の
+       ボタンが文字ごと潰れていた。
+
+         1行目 … 承認（全幅）
+         2行目 … 理由のプルダウン（全幅）
+         3行目 … 自由記入 ＋ 非承認
+
+       押し間違いが減るほうを採る。審査は件数を捌く作業だが、間違って
+       承認すると納品まで進む。 */
+    .actions { gap: 8px; }
+    .actions form.approve { display: flex; flex: 1 1 100%; min-width: 0; }
     .actions form.approve button.ok { width: 100%; min-width: 0; }
     .actions form.reject {
-      display: flex; flex: 0 0 68%; gap: 4px; align-items: center;
-      /* min-width の既定は auto で、中身の最小幅より狭くならない。
-         49% を指定しても、これが無いと行からはみ出す。 */
-      min-width: 0;
+      display: flex; flex: 1 1 100%; gap: 8px; flex-wrap: wrap; min-width: 0;
     }
-    /* 中の3つは幅を主張させない。min-width: 0 が無いと、プルダウンは
-       最長の選択肢、ボタンは 6em を下限にして押し合い、行が溢れる。 */
-    .actions form.reject select { flex: 1; min-width: 0; width: auto; }
-    .actions form.reject input[type=text].free { flex: 1; min-width: 0; }
-    .actions form.reject button.ng { flex: 0 1 auto; min-width: 0; padding: 0 6px; }
-    .actions a.drive { flex: 0 0 auto; }
+    .actions form.reject select { flex: 1 1 100%; min-width: 0; width: auto; }
+    .actions form.reject input[type=text].free { flex: 1 1 55%; min-width: 0; }
+    .actions form.reject button.ng { flex: 1 1 auto; min-width: 0; }
+    .actions a.drive { flex: 1 1 100%; }
   }
 </style>
 </head>
 <body>
 <header>
-  <h1>FREMING CURATED</h1>
-  <nav>
-    {% for key, label in [("pending","未審査"),("approved","承認"),("rejected","非承認"),("delivered","納品済"),("all","すべて")] %}
-      <a href="/?status={{ key }}" class="{{ 'on' if status == key else '' }}">
-        {{ label }}{% if counts and counts.get(key) %}<span class="n">{{ counts.get(key) }}</span>{% endif %}
-      </a>
-    {% endfor %}
-  </nav>
-  {# ルール候補はタブと性格が違う（審査ではなく設定の見直し）。nav の外に
-     出しておくと、狭い画面でタイトルの右端に寄せられる。 #}
-  <a href="/rules" class="rules {{ 'on' if status == 'rules' else '' }}">ルール候補</a>
-  <a href="/schedule" class="rules {{ 'on' if status == 'schedule' else '' }}">投稿予定</a>
-  <a href="/stories" class="rules {{ 'on' if status == 'stories' else '' }}">ストーリーズ</a>
-  <a href="/report" class="rules {{ 'on' if status == 'report' else '' }}">週次レポート</a>
-  {% if auto_deliver %}
-    <span class="auto {{ 'busy' if delivering_id else '' }}">
-      自動納品 ON{% if queued %}・待ち {{ queued }}{% endif %}
+  {# 1段目: ロゴと、画面の切り替え。**折り返さない。**狭い画面では
+     この帯だけが横に流れる（scroll-x）。 #}
+  <div class="bar">
+    <h1>FREMING CURATED</h1>
+    <nav class="sections scroll-x">
+      {% for path, key, label in [
+        ("/schedule", "schedule", "投稿予定"),
+        ("/stories", "stories", "ストーリーズ"),
+        ("/report", "report", "週次レポート"),
+        ("/rules", "rules", "ルール候補"),
+      ] %}
+        <a href="{{ path }}" class="{{ 'on' if status == key else '' }}">{{ label }}</a>
+      {% endfor %}
+    </nav>
+  </div>
+
+  {# 2段目: 審査タブ。件数つき。ここも折り返さず横に流す。 #}
+  <div class="bar">
+    <nav class="tabs scroll-x">
+      {% for key, label in [("pending","未審査"),("approved","承認"),("rejected","非承認"),("delivered","納品済"),("all","すべて")] %}
+        <a href="/?status={{ key }}" class="{{ 'on' if status == key else '' }}">
+          {{ label }}{% if counts and counts.get(key) %}<span class="n">{{ counts.get(key) }}</span>{% endif %}
+        </a>
+      {% endfor %}
+    </nav>
+    {% if auto_deliver %}
+      <span class="auto {{ 'busy' if delivering_id else '' }}">
+        自動納品 ON{% if queued %}・待ち {{ queued }}{% endif %}
+      </span>
+    {% endif %}
+    <span class="keys">
+      <kbd>J</kbd><kbd>K</kbd> 移動 <kbd>A</kbd> 承認 <kbd>R</kbd> 理由 <kbd>Enter</kbd> 元記事
     </span>
-  {% endif %}
-  <span class="keys">
-    <kbd>J</kbd><kbd>K</kbd> 移動 <kbd>A</kbd> 承認 <kbd>R</kbd> 理由 <kbd>Enter</kbd> 元記事
-  </span>
+  </div>
 </header>
 <main>{% block body %}{% endblock %}</main>
 <script>

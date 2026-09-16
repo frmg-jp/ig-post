@@ -1270,3 +1270,23 @@ def test_投稿済みは戻せない(config, conn, client):
     assert "notice=back_no" in response.headers["location"]
     row = conn.execute("SELECT state FROM posts WHERE id=?", (post_id,)).fetchone()
     assert row["state"] == "published"
+
+
+def test_ヘッダは2段で折り返さない(client) -> None:
+    """狭い画面でナビが崩れないこと。
+
+    2026-09-16 の実機（390px）で、1つの flex に全項目を入れて折り返して
+    いたため「ロゴの右に1つ・次の行に1つ」という並びになった。段を
+    決め、段ごとに横スクロールさせる。
+    """
+    body = client.get("/").text
+    assert 'class="sections scroll-x"' in body      # 画面の切り替え
+    assert 'class="tabs scroll-x"' in body          # 審査タブ
+    # 右寄せのまま溢れると、あふれた先頭に指が届かない
+    assert "justify-content: flex-start" in body
+
+
+def test_入力欄は16px未満にしない(client) -> None:
+    """iOS Safari は 16px 未満の入力にフォーカスすると画面を拡大する。"""
+    body = client.get("/").text
+    assert "textarea { font-size: 16px; }" in body

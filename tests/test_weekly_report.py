@@ -259,3 +259,16 @@ def test_空のメモは消える(config, conn) -> None:
 
 def test_無い投稿は404(config) -> None:
     assert TestClient(create_app(config)).get("/posts/999").status_code == 404
+
+
+def test_画面に出る文字に星印を書かない(config, conn) -> None:
+    """`**強調**` は Markdown。HTMLではそのまま星印が出る。
+
+    2026-09-16 の実機で「**埋めるために弱い案件を入れない**」と表示されて
+    いた。コード中のコメントと、画面に出る文字を混同しない。
+    """
+    _add(conn, "https://a.example.com/1", score=70, genre="architect")
+    report = build(config, conn, NOW)
+    for check in report.checks:
+        assert "**" not in check.label
+        assert "**" not in check.note

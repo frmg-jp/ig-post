@@ -195,7 +195,7 @@ def _checks(report: WeeklyReport) -> list[Check]:
         Check(
             f"候補が {TARGET_COUNT} 件あるか", total >= TARGET_COUNT,
             "" if total >= TARGET_COUNT else
-            f"{total} 件。**埋めるために弱い案件を入れない**——足りない週は足りないまま出す",
+            f"{total} 件。埋めるために弱い案件を入れない——足りない週は足りないまま出す",
         ),
         Check(
             "米国だけに偏っていないか", total == 0 or us * 2 <= total,

@@ -11,6 +11,8 @@
   .card2 .meta { font: 12px/1.9 var(--mono); }
   .card2 table { border-collapse: collapse; width: 100%; font: 12px/1.9 var(--mono); }
   .card2 td, .card2 th { text-align: left; padding: 4px 10px 4px 0; border-bottom: 1px solid var(--fill); vertical-align: top; }
+  /* 見出し列は折らない。狭い画面で「販売状/況」と割れていた。 */
+  .card2 th { white-space: nowrap; }
   .card2 .num { text-align: right; }
   .card2 .thumbs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .card2 .thumb { position: relative; width: 120px; }
@@ -20,6 +22,11 @@
   .card2 .thumb.unused img { opacity: .3; }
   .card2 pre { white-space: pre-wrap; font: 12px/1.9 var(--mono); border: 1px solid var(--fill); padding: 10px; }
   .card2 textarea { width: 100%; min-height: 120px; font: 13px/1.8 var(--mono); }
+  @media (max-width: 640px) {
+    /* 写真は2枚並べて画面幅を使い切る。120px 固定だと右が余る。 */
+    .card2 .thumb { width: calc(50% - 3px); }
+    .card2 textarea { font-size: 16px; }   /* iOS の自動拡大を止める */
+  }
 </style>
 
 <div class="card2">
@@ -63,7 +70,7 @@
     {% if prop["architect"] %}<tr><th>設計</th><td colspan="2">{{ prop["architect"] }}</td></tr>{% endif %}
     {% if prop["year_built"] %}<tr><th>築年</th><td colspan="2">{{ prop["year_built"] }}</td></tr>{% endif %}
     {% if prop["style_name"] %}<tr><th>様式</th><td colspan="2">{{ prop["style_name"] }}</td></tr>{% endif %}
-    <tr><th>場所</th><td colspan="2">{{ prop["location_city"] }}{% if prop["location_country"] %}, {{ prop["location_country"] }}{% endif %}</td></tr>
+    <tr><th>場所</th><td colspan="2">{{ [prop["location_city"], prop["location_country"]]|select|join(", ") }}</td></tr>
     {% if prop["price"] %}<tr><th>価格</th><td colspan="2">{{ prop["price"] }}</td></tr>{% endif %}
     <tr>
       <th>販売状況</th>

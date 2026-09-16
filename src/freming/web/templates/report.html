@@ -27,7 +27,18 @@
   .rep .check .ng { color: var(--hi); }
   .rep table { border-collapse: collapse; width: 100%; font: 12px/1.9 var(--mono); }
   .rep td, .rep th { text-align: left; padding: 4px 8px 4px 0; border-bottom: 1px solid var(--fill); }
-  @media (max-width: 640px) { .rep .item img { width: 64px; height: 64px; } }
+  @media (max-width: 640px) {
+    .rep .item img { width: 64px; height: 64px; }
+    /* 週の行き来は指で押す。文字だけだと隣を押す。 */
+    .rep .week a { display: inline-block; padding: 6px 0; }
+    /* 「今週出したもの」は4列。狭い画面では表をやめて行ごとの塊にする。
+       横スクロールにすると、右端の「カルテ」に気づけない。 */
+    .rep table, .rep tbody, .rep tr, .rep td { display: block; width: 100%; }
+    .rep thead { display: none; }
+    .rep tr { border-bottom: 1px solid var(--line); padding: 10px 0; }
+    .rep td { border: 0; padding: 1px 0; }
+    .rep td.name { font-size: 15px; font-family: var(--serif); }
+  }
 </style>
 
 <div class="rep">
@@ -59,8 +70,9 @@
       {{ "%.0f"|format(report.pick["score"] or 0) }}点
       {% if report.pick["architect"] %}・{{ report.pick["architect"] }}{% endif %}
       {% if report.pick["year_built"] %}・{{ report.pick["year_built"] }}{% endif %}
-      {% if report.pick["location_city"] %}・{{ report.pick["location_city"] }}{% endif %}
-      {% if report.pick["location_country"] %}, {{ report.pick["location_country"] }}{% endif %}
+      {%- if report.pick["location_city"] or report.pick["location_country"] %}
+        ・{{ [report.pick["location_city"], report.pick["location_country"]]|select|join(", ") }}
+      {%- endif %}
     </div>
     {% if report.pick["summary"] %}<div class="why">{{ report.pick["summary"] }}</div>{% endif %}
   </div>
@@ -84,8 +96,9 @@
           #{{ row["id"] }}・{{ "%.0f"|format(row["score"] or 0) }}点
           {% if row["architect"] %}・{{ row["architect"] }}{% endif %}
           {% if row["year_built"] %}・Built {{ row["year_built"] }}{% endif %}
-          {% if row["location_city"] %}・{{ row["location_city"] }}{% endif %}
-          {% if row["location_country"] %}, {{ row["location_country"] }}{% endif %}
+          {%- if row["location_city"] or row["location_country"] %}
+            ・{{ [row["location_city"], row["location_country"]]|select|join(", ") }}
+          {%- endif %}
           {% if row["price"] %}・{{ row["price"] }}{% endif %}
         </div>
         <div class="meta">
@@ -114,13 +127,13 @@
 {% if report.published %}
   <h2>今週出したもの</h2>
   <table>
-    <tr><th>日付</th><th>物件</th><th>リーチ</th><th></th></tr>
+    <thead><tr><th>日付</th><th>物件</th><th>リーチ</th><th></th></tr></thead>
     {% for row in report.published %}
       <tr>
         <td>{{ row["published_at"][:10] }}</td>
-        <td>{{ row["display_name"] or row["title"] or "（物件なし）" }}</td>
+        <td class="name">{{ row["display_name"] or row["title"] or "（物件なし）" }}</td>
         {# **リーチ未取得と 0 を混ぜない。** 取れていないだけかもしれない。 #}
-        <td>{{ row["reach"] if row["reach"] is not none else "—" }}</td>
+        <td>リーチ {{ row["reach"] if row["reach"] is not none else "—（未取得）" }}</td>
         <td>
           <a href="/posts/{{ row['id'] }}">カルテ</a>
           {% if row["permalink"] %}
