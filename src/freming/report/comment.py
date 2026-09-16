@@ -49,8 +49,9 @@ Instagram メディア）の運用担当です。週次の数字を受け取り�
   それを「弱かった」と書かない。
 - **数字は渡されたものをそのまま書く。** 丸めない（87 を「90近く」と
   書かない）。位を落とさない（93 を「90点台」と書かない）。割り算や
-  引き算をして新しい数字を作らない。自信が無ければ数字を書かずに、
-  「増えた」「少なかった」と言葉で書く。
+  引き算をして新しい数字を作らない。幅で書かない（「7〜8本」と
+  書かない）。自信が無ければ数字を書かずに、「増えた」「少なかった」と
+  言葉で書く。
 - 日本語。3〜5文、300字以内。見出しも箇条書きも使わず、地の文で書く。
 - 最後に「次に試すこと」を1つだけ、具体的に書く。在庫が無いものは
   勧めない。"""
@@ -126,9 +127,30 @@ def build_source(report: WeeklyReport) -> str:
 # 本文から拾う数値。「3本」「168」「1.5倍」など。
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
 
+# **数の単位。** 1桁でもこれが付いていれば、材料の数字を指している。
+# 「7〜8本」の 7 がこれで引っかかる（2026-09-16 に実際にすり抜けた）。
+# 単位に届くまでに挟まるもの（幅の記号・区切り・別の数字）は読み飛ばす。
+_COUNTER = re.compile(r"[〜～~\-–—ー、,.／/や0-9]*([本枚点件％%倍割])")
+
 
 def numbers_in(text: str) -> set[str]:
     return {m.group(0).replace(",", "") for m in _NUMBER.finditer(text)}
+
+
+def _checked(body: str) -> set[str]:
+    """検算にかける数字。**1桁は単位が付いているときだけ見る。**
+
+    1桁の数は「次に試すことを1つ」「3文で」のような言い回しにも出るので、
+    全部見ると通らない。ただし「8本」「3枚」は材料の数字を指しているので、
+    単位が続いていれば1桁でも見る。幅で書かれた「7〜8本」の 7 も、
+    単位まで読み飛ばして拾う。
+    """
+    out: set[str] = set()
+    for match in _NUMBER.finditer(body):
+        value = match.group(0).replace(",", "")
+        if len(value.split(".")[0]) >= 2 or _COUNTER.match(body, match.end()):
+            out.add(value)
+    return out
 
 
 def unsupported_numbers(body: str, source: str) -> set[str]:
@@ -136,13 +158,8 @@ def unsupported_numbers(body: str, source: str) -> set[str]:
 
     言い回しで縛るより確実な検算。モデルが「先週より30%増」のような
     計算を勝手に始めたときも、その 30 が材料に無ければここで止まる。
-
-    1桁の数（1〜9）は「3文で」「1つ」のような言い回しにも出るので
-    見逃す。材料の数字はたいてい2桁以上で、取り違えが問題になるのも
-    そちら。
     """
-    allowed = numbers_in(source)
-    return {n for n in numbers_in(body) - allowed if len(n.split(".")[0]) >= 2}
+    return _checked(body) - numbers_in(source)
 
 
 def _text(response) -> str:
@@ -215,6 +232,15 @@ def save(conn: DbConnection, week_start: str, comment: Comment) -> None:
     conn.commit()
 
 
+def delete(conn: DbConnection, week_start: str) -> bool:
+    """その週の講評を消す。**読み間違いを書いたものを残さないため。**"""
+    if load(conn, week_start) is None:
+        return False
+    conn.execute("DELETE FROM weekly_notes WHERE week_start = ?", (week_start,))
+    conn.commit()
+    return True
+
+
 def load(conn: DbConnection, week_start: str):
     """その週の講評。無ければ None。**画面はこれを読むだけ。**"""
     try:
@@ -225,13 +251,37 @@ def load(conn: DbConnection, week_start: str):
         return None
 
 
+def load_latest(conn: DbConnection, *, not_after: str | None = None):
+    """**いちばん新しい講評。** 無ければ None。
+
+    講評は終わった週について書く（月曜の定期実行）ので、いま開いている
+    週にはまだ無い。「今週はまだ途中です」と空欄を出すより、先週書いた
+    ものを週の名前つきで出したほうが読める。
+
+    not_after を渡すと、その週より後のものは返さない（過去の週を
+    ?week= で見ているときに、未来の講評を出さないため）。
+    """
+    sql = "SELECT * FROM weekly_notes"
+    params: tuple = ()
+    if not_after is not None:
+        sql += " WHERE week_start <= ?"
+        params = (not_after,)
+    sql += " ORDER BY week_start DESC LIMIT 1"
+    try:
+        return conn.execute(sql, params).fetchone()
+    except Exception:  # noqa: BLE001 - 列が無い環境でも画面は出す
+        return None
+
+
 __all__ = [
     "MAX_TOKENS",
     "RETRY",
     "SYSTEM",
     "Comment",
     "build_source",
+    "delete",
     "load",
+    "load_latest",
     "numbers_in",
     "save",
     "unsupported_numbers",

@@ -152,6 +152,10 @@ jobs:
       # **週に1回だけ、講評を書かせる。** 月曜だけ走る（この定期実行は
       # 毎日 00:00 UTC = 09:00 JST なので、月曜の朝に出る）。
       #
+      # **--last-week が要る。** 月曜の朝は新しい週が始まって9時間しか
+      # 経っていないので、そのままだと0本の週を講評してしまう。
+      # 講評は終わった週について書く（2026-09-16 に気づいた）。
+      #
       # 画面（/report）からはAPIを呼ばない。開くたびに呼ぶと、見るだけで
       # 費用が出る。ここで書いたものをDBに置き、画面は読むだけにする。
       # Haiku で1回1円未満。既にその週の講評があれば何もしない。
@@ -163,7 +167,7 @@ jobs:
         continue-on-error: true
         run: |
           if [ "$(date -u +%u)" = "1" ]; then
-            python -m freming.cli report --comment
+            python -m freming.cli report --last-week --comment
           else
             echo "月曜だけ書きます（今日は $(date -u +%A)）"
           fi

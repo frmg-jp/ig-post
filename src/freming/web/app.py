@@ -527,10 +527,27 @@ def create_app(
             report = build(config, conn, when)
             # **画面からはAPIを呼ばない。** 週1の定期実行が書いたものを
             # 読むだけ。開くたびに呼ぶと、見るだけで費用が出る。
-            note = weekly_comment.load(conn, report.start.date().isoformat())
+            #
+            # 講評は**終わった週**について書く（月曜の朝）ので、いま見て
+            # いる週にはまだ無い。空欄を出すより、直近に書いたものを
+            # 週の名前つきで出す。
+            note = weekly_comment.load_latest(
+                conn, not_after=report.start.date().isoformat()
+            )
             counts = count_by_status(conn)
         finally:
             conn.close()
+
+        # 講評がどの週のものかを見出しに出す。いま見ている週と違うことが
+        # あるので（月曜に書くのは先週ぶん）、書かないと誤読される。
+        note_label = ""
+        note_is_other_week = False
+        if note is not None:
+            start = datetime.fromisoformat(str(note["week_start"]))
+            note_label = f"{start:%Y/%m/%d}（月）〜 {start + timedelta(days=6):%m/%d}（日）"
+            note_is_other_week = (
+                str(note["week_start"]) != report.start.date().isoformat()
+            )
 
         return templates.TemplateResponse(
             request,
@@ -538,6 +555,8 @@ def create_app(
             {
                 "report": report,
                 "note": note,
+                "note_label": note_label,
+                "note_is_other_week": note_is_other_week,
                 "status_labels": STATUS_LABELS,
                 "genre_labels": GENRE_LABELS,
                 "kind_labels": KIND_LABELS,

@@ -802,7 +802,7 @@ def _cmd_weekly_report(args: argparse.Namespace) -> int:
     審査UIの /report と同じ中身。画面が開けない場所でも読めるように
     しておく（納品や採点と同じ考え方）。
     """
-    from datetime import UTC, datetime
+    from datetime import UTC, datetime, timedelta
     from zoneinfo import ZoneInfo
 
     from freming.db.connection import session
@@ -820,11 +820,22 @@ def _cmd_weekly_report(args: argparse.Namespace) -> int:
         except ValueError:
             print("--week は YYYY-MM-DD で指定してください。", file=sys.stderr)
             return 2
+    if getattr(args, "last_week", False):
+        # **講評は終わった週について書く。** 定期実行は月曜の朝なので、
+        # そのままだと始まったばかりの週（まだ0本）を講評してしまう。
+        when = when - timedelta(days=7)
 
     with session(cfg.app.target()) as conn:
         report = build(cfg, conn, when)
         week_start = report.start.date().isoformat()
         print(render(report))
+
+        if getattr(args, "clear_comment", False):
+            gone = comment.delete(conn, week_start)
+            print(f"\n（{week_start} の講評を"
+                  + ("消しました。" if gone else "持っていません。")
+                  + "）")
+            return 0
 
         existing = comment.load(conn, week_start)
         if args.comment:
@@ -832,6 +843,12 @@ def _cmd_weekly_report(args: argparse.Namespace) -> int:
             # 保存されたものを読むだけ）。同じ週に何度も書かせない。
             if existing is not None and not args.force:
                 print(f"\n（{week_start} の講評は既にあります。書き直すなら --force）")
+            # **終わっていない週には書かせない。** 途中の本数を先週の
+            # 1週間分と比べると「半分に落ち込んだ」と読める（2026-09-16）。
+            elif report.end > datetime.now(UTC) and not args.force:
+                print("\n（この週はまだ途中です。講評は終わった週について"
+                      "書きます——--last-week を付けてください）", file=sys.stderr)
+                return 2
             else:
                 try:
                     written = comment.write(cfg, report)
@@ -2707,11 +2724,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--week", help="その日を含む週を出す（YYYY-MM-DD）。既定は今週",
     )
     p_weekly.add_argument(
+        "--last-week", action="store_true",
+        help="**終わった週**を出す。講評を書かせるときはこちら（既定の今週は途中）",
+    )
+    p_weekly.add_argument(
         "--comment", action="store_true",
         help="**講評を書かせて保存する**（Claude を1回呼ぶ。1円未満）",
     )
     p_weekly.add_argument(
-        "--force", action="store_true", help="その週の講評が既にあっても書き直す",
+        "--force", action="store_true",
+        help="その週の講評が既にあっても書き直す（途中の週にも書かせる）",
+    )
+    p_weekly.add_argument(
+        "--clear-comment", action="store_true",
+        help="その週の講評を消す（読み間違いを書いたものを残さない）",
     )
     p_weekly.set_defaults(func=_cmd_weekly_report)
 

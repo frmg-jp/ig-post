@@ -33,6 +33,7 @@ on:
           - listing-status     # **いま買えるのかを掲載ページで確認**（費用なし）
           - weekly-report      # 週次レポートを出す（読むだけ・費用なし）
           - weekly-comment     # **講評を書かせる**（Claude を1回。1円未満）
+          - weekly-comment-clear # 講評を消す（「対象の上限」に週の月曜）
           - exchange-ig-code   # 受け取った code をトークンに換える（費用なし）
           - check-ig-token     # トークンの疎通とスコープ（費用なし）
           - ig-media           # **アカウントの実際の投稿**を新しい順に出す（費用なし）
@@ -168,12 +169,22 @@ jobs:
               ;;
             weekly-report)    python -m freming.cli report ;;
             # 「本当に実行する」を入れると、その週の講評があっても書き直す。
+            # **講評は終わった週について書く**（--last-week）。今週は
+            # まだ途中なので、そのまま講評させると「半分に落ち込んだ」の
+            # ような誤読になる（2026-09-16 に実際に出た）。
             weekly-comment)
               if [ -n "$YES" ]; then
-                python -m freming.cli report --comment --force
+                python -m freming.cli report --last-week --comment --force
               else
-                python -m freming.cli report --comment
+                python -m freming.cli report --last-week --comment
               fi
+              ;;
+            # 講評を消す。「対象の上限」にその週の月曜（YYYY-MM-DD）。
+            # 空なら今週。読み間違いを書いたものを残さないため。
+            weekly-comment-clear)
+              W="${{ github.event.inputs.limit }}"
+              python -m freming.cli report --clear-comment \
+                $( [ -n "$W" ] && echo --week "$W" )
               ;;
             # 「対象の上限」に件数を入れると、承認された物件をその数だけ
             # 現物で並べる（プロンプトの実例を書き直す材料）。

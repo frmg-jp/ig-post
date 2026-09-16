@@ -9,6 +9,8 @@ APIは呼ばない（返答を差し替える）。確かめるのは検算と�
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -118,9 +120,17 @@ def test_渡していない数字を見つける() -> None:
     assert comment.unsupported_numbers("先週より42%伸びました", source) == {"42"}
 
 
-def test_1桁は見逃す() -> None:
+def test_単位の無い1桁は見逃す() -> None:
     """「3文で」「1つだけ」のような言い回しにも数字が出る。"""
     assert comment.unsupported_numbers("次に試すことを1つ", "本数: 12") == set()
+
+
+def test_単位の付いた1桁は見る() -> None:
+    """**「7〜8本」の 7 を止める。** 2026-09-16 にこれがすり抜けた。"""
+    source = "出した本数: 8"
+    assert comment.unsupported_numbers("先週並みの8本に戻す", source) == set()
+    assert comment.unsupported_numbers("7〜8本に戻す", source) == {"7"}
+    assert comment.unsupported_numbers("写真を3枚足す", source) == {"3"}
 
 
 def test_数字が合わない講評は保存しない(config, conn, monkeypatch) -> None:
@@ -175,6 +185,81 @@ def test_書いて保存して画面に出る(config, conn, monkeypatch) -> None
     assert "講評" in body
     assert "リーチは384でした" in body
     assert "材料に Claude が書いています" in body   # 出どころを明示
+
+
+def test_先週の講評が今週の画面に出る(config, conn, monkeypatch) -> None:
+    """**講評は終わった週について書く**ので、今週にはまだ無い。
+
+    空欄を出すより、先週書いたものを週の名前つきで出す。どの週の話かを
+    書かないと「今週の講評」と読まれる。
+    """
+    _week(conn)
+    report = build(config, conn, NOW)
+    last_week = (report.start - timedelta(days=7)).date().isoformat()
+    comment.save(
+        conn, last_week,
+        comment.Comment(body="先週は静かな週でした。", source="本数: 1", model="m"),
+    )
+
+    body = TestClient(create_app(config)).get("/report").text
+    assert "先週は静かな週でした" in body
+    assert last_week.replace("-", "/") in body      # どの週のものか
+    assert "まだ途中なので" in body
+
+
+def test_未来の週の講評は出さない(config, conn) -> None:
+    """過去の週を ?week= で見ているときに、その後に書いた講評は出さない。"""
+    _week(conn)
+    report = build(config, conn, NOW)
+    comment.save(
+        conn, report.start.date().isoformat(),
+        comment.Comment(body="今週の講評です。", source="本数: 1", model="m"),
+    )
+    old = (report.start - timedelta(days=21)).date().isoformat()
+
+    body = TestClient(create_app(config)).get(f"/report?week={old}").text
+    assert "今週の講評です" not in body
+
+
+def test_last_week_は1週前を出す(config, conn, monkeypatch) -> None:
+    """月曜の朝に走るので、--last-week が無いと0本の週を講評してしまう。"""
+    _week(conn)
+    import freming.cli as cli
+    from freming.cli import main
+    monkeypatch.setattr(cli, "load_config", lambda *_a, **_k: config)
+    _fake_anthropic(monkeypatch, "静かな週でした。次に試すこと: 在庫を増やす。")
+
+    # --week 2026-09-14 の1週前 = 09/07 の週（終わっている）に書く。
+    assert main(["report", "--week", "2026-09-14", "--last-week", "--comment"]) == 0
+    assert comment.load(conn, "2026-09-07") is not None
+    assert comment.load(conn, "2026-09-14") is None
+
+
+def test_途中の週には書かせない(config, conn, monkeypatch) -> None:
+    """**「半分に落ち込んだ」と読まれる。** 2026-09-16 に実際に出た。"""
+    _week(conn)
+    import freming.cli as cli
+    from freming.cli import main
+    monkeypatch.setattr(cli, "load_config", lambda *_a, **_k: config)
+    seen = _fake_anthropic(monkeypatch, "今週は1本でした。")
+
+    assert main(["report", "--comment"]) == 2
+    assert seen == [], "APIを呼ばずに止める"
+
+
+def test_講評を消せる(config, conn, monkeypatch) -> None:
+    """読み間違いを書いたものを残さない。"""
+    _week(conn)
+    report = build(config, conn, NOW)
+    week = report.start.date().isoformat()
+    comment.save(conn, week,
+                 comment.Comment(body="消す対象。", source="本数: 1", model="m"))
+
+    import freming.cli as cli
+    from freming.cli import main
+    monkeypatch.setattr(cli, "load_config", lambda *_a, **_k: config)
+    assert main(["report", "--week", week, "--clear-comment"]) == 0
+    assert comment.load(conn, week) is None
 
 
 def test_講評が無くても画面は開く(config, conn) -> None:

@@ -50,7 +50,8 @@ python scripts/check_drive.py        # [2] Drive疎通確認（★ここが通�
 | `python -m freming.cli fill-images --all [--limit 5]` | **他のサイトから探して**足りない画像を足す（画像検索。Cloud Vision の Web Detection が1枚 $0.0035・月1000回まで無料。`--dry-run` で見積もりだけ） |
 | `python -m freming.cli listing-status [--limit 20]` | **掲載ページを開いて、いま買えるのかを確かめる**（費用なし。自動収集が禁止のサイトは開かず「未確認」のまま） |
 | `python -m freming.cli report [--week YYYY-MM-DD]` | 週次レポート（出したものの振り返り・考察）。審査UIの `/report` と同じ中身。費用なし |
-| `python -m freming.cli report --comment` | **その週の講評を Claude に書かせて保存**（週1回・Haiku で1円未満。渡した数字に無い数値が出たら保存しない） |
+| `python -m freming.cli report --last-week --comment` | **終わった週の講評を Claude に書かせて保存**（週1回・Haiku で1円未満。渡した数字に無い数値が出たら、1回書き直させて、それでも直らなければ保存しない）。途中の週には書かせない |
+| `python -m freming.cli report --week YYYY-MM-DD --clear-comment` | その週の講評を消す |
 | `python -m freming.cli post reach [--days 30]` | 公開済みの投稿のリーチを読んで記録（費用なし） |
 | `python -m freming.cli status` | 候補の件数をステータス別に表示 |
 | `python -m freming.collect.editorial --source dezeen` | 同上（モジュール単体実行） |

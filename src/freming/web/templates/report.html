@@ -174,10 +174,16 @@
 {# 講評。**週1の定期実行が書いたものを読むだけ**で、この画面からは
    APIを呼ばない（開くたびに費用が出る）。 #}
 {% if note %}
-  <h2>講評</h2>
+  <h2>講評{% if note_is_other_week %}（{{ note_label }}）{% endif %}</h2>
+  {% if note_is_other_week %}
+    <p class="note">
+      講評は<strong>終わった週</strong>について月曜に書きます。いま見ている
+      週（{{ report.label }}）はまだ途中なので、これは {{ note_label }} の分です。
+    </p>
+  {% endif %}
   <div class="note-body">{{ note["body"] }}</div>
   <p class="note">
-    この文章は<strong>下の数字だけ</strong>を材料に Claude が書いています
+    この文章は<strong>その週の数字だけ</strong>を材料に Claude が書いています
     （{{ note["model"] }} / {{ note["created_at"][:16].replace("T", " ") }}）。
     渡していない数字が本文に出た場合は保存しない仕組みにしてあります。
   </p>
