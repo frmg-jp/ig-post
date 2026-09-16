@@ -97,7 +97,7 @@ def test_リールの選抜がリーチを保存する(db, monkeypatch):
     )
     monkeypatch.setattr(worker, "media_reach", lambda *a, **k: 384)
 
-    picks, picked_by = worker.weekly_picks(
+    picks, _picked_by = worker.weekly_picks(
         cfg, db, "token", "ig", datetime(2026, 9, 14, 10, 0, tzinfo=UTC),
     )
     assert [p.reach for p in picks] == [384]

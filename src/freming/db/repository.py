@@ -968,6 +968,17 @@ def published_with_media(conn: DbConnection, limit: int | None = None) -> list[R
     return conn.execute(f"{sql} LIMIT ?", (limit,)).fetchall()
 
 
+def set_post_note(conn: DbConnection, post_id: int, note: str | None) -> bool:
+    """投稿カルテのメモ。**公開される本文とは別の、中の記録。**"""
+    text = (note or "").strip() or None
+    cursor = conn.execute(
+        "UPDATE posts SET note = ?, note_at = ? WHERE id = ?",
+        (text, _now() if text else None, post_id),
+    )
+    conn.commit()
+    return bool(cursor.rowcount)
+
+
 def posts_for_reach(conn: DbConnection, since: str) -> list[Row]:
     """リーチを読み直す対象。since 以降に公開されたもの。
 

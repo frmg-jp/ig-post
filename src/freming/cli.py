@@ -727,6 +727,36 @@ def _cmd_refetch_images(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_weekly_report(args: argparse.Namespace) -> int:
+    """週次レポートを端末に出す。**DBを読むだけで、外へは出ない。**
+
+    審査UIの /report と同じ中身。画面が開けない場所でも読めるように
+    しておく（納品や採点と同じ考え方）。
+    """
+    from datetime import UTC, datetime
+    from zoneinfo import ZoneInfo
+
+    from freming.db.connection import session
+    from freming.report.weekly import build, render
+
+    cfg = load_config(args.config)
+    setup_logging(cfg.app.log_dir, cfg.app.log_level)
+
+    when = datetime.now(UTC)
+    if args.week:
+        try:
+            zone = ZoneInfo(cfg.instagram.timezone)
+            when = datetime.fromisoformat(args.week).replace(tzinfo=zone)
+        except ValueError:
+            print("--week は YYYY-MM-DD で指定してください。", file=sys.stderr)
+            return 2
+
+    with session(cfg.app.target()) as conn:
+        report = build(cfg, conn, when, limit=args.limit)
+    print(render(report))
+    return 0
+
+
 def _cmd_fill_images(args: argparse.Namespace) -> int:
     """**他のサイトから探して**、足りない画像を足す。
 
@@ -2546,6 +2576,16 @@ def build_parser() -> argparse.ArgumentParser:
         "source-report", help="ソース別の実績（収集→承認の歩留まり）"
     )
     p_sources_report.set_defaults(func=_cmd_sources_report)
+
+    p_weekly = sub.add_parser(
+        "report",
+        help="週次レポート（今週の候補10件＋Pick of the Week。読むだけ・費用なし）",
+    )
+    p_weekly.add_argument(
+        "--week", help="その日を含む週を出す（YYYY-MM-DD）。既定は今週",
+    )
+    p_weekly.add_argument("--limit", type=int, default=10, help="候補の件数（既定10）")
+    p_weekly.set_defaults(func=_cmd_weekly_report)
 
     p_approval = sub.add_parser(
         "approval-report",

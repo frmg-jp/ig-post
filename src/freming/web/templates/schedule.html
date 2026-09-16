@@ -309,6 +309,7 @@
           <a href="{{ row['permalink'] }}" target="_blank" rel="noopener">投稿を開く</a>
         {% endif %}
         {% if row["property_id"] %}<a href="/p/{{ row['property_id'] }}">物件</a>{% endif %}
+        <a href="/posts/{{ row['id'] }}">カルテ</a>
         {% if row["source_url"] %}
           <a href="{{ row['source_url'] }}" target="_blank" rel="noopener">引用元</a>
           <button class="linklike js-copy" type="button"

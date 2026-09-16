@@ -401,6 +401,104 @@ def create_app(
             conn.close()
         return RedirectResponse(safe_back(back, status), status_code=303)
 
+    @app.get("/posts/{post_id}", response_class=HTMLResponse)
+    def post_card(request: Request, post_id: int):
+        """[10] 投稿カルテ。**1投稿について分かることを1画面に集める。**
+
+        採点でどう評価したか / 実際にどれだけ見られたか / 写真は何枚で
+        どこから来たか。これまでは別々の画面（審査・予定・ログ）に散って
+        いて、出したあとに振り返る場所が無かった。
+
+        メモは公開されない。本文（caption）とは別物。
+        """
+        from freming.report.weekly import axes_of
+
+        conn = _conn()
+        try:
+            post = conn.execute(
+                "SELECT * FROM posts WHERE id = ?", (post_id,)
+            ).fetchone()
+            if post is None:
+                return HTMLResponse("その投稿はありません", status_code=404)
+            prop = None
+            if post["property_id"]:
+                prop = conn.execute(
+                    "SELECT * FROM properties WHERE id = ?", (post["property_id"],)
+                ).fetchone()
+            images = []
+            if post["property_id"]:
+                images = conn.execute(
+                    "SELECT position, width, height, source_url, origin_url "
+                    "FROM images WHERE property_id = ? ORDER BY position",
+                    (post["property_id"],),
+                ).fetchall()
+            counts = count_by_status(conn)
+        finally:
+            conn.close()
+
+        return templates.TemplateResponse(
+            request,
+            "post_card.html",
+            {
+                "post": post,
+                "prop": prop,
+                "images": images,
+                "axes": axes_of(prop) if prop is not None else [],
+                "carousel_max": config.instagram.carousel_max,
+                "counts": counts,
+                "status": "report",
+            },
+        )
+
+    @app.post("/posts/{post_id}/note")
+    def save_post_note(post_id: int, note: str = Form("")):
+        """カルテのメモを保存する。**外へは出ない。**"""
+        from freming.db.repository import set_post_note
+
+        conn = _conn()
+        try:
+            set_post_note(conn, post_id, note)
+        finally:
+            conn.close()
+        return RedirectResponse(f"/posts/{post_id}", status_code=303)
+
+    @app.get("/report", response_class=HTMLResponse)
+    def weekly_report(request: Request, week: str | None = None):
+        """[10] 週次レポート。**読むだけ。**外への通信も費用も無い。
+
+        編集方針（WEEKLY GLOBAL ARCHITECTURE REPORT）の形に、手元の
+        候補を並べ直したもの。?week=YYYY-MM-DD で前後の週を見られる。
+        """
+        from datetime import UTC, datetime, timedelta
+
+        from freming.report.weekly import build
+
+        when = datetime.now(UTC)
+        if week:
+            try:
+                when = datetime.fromisoformat(week).replace(tzinfo=UTC)
+            except ValueError:
+                pass  # 壊れた指定は今週として扱う（画面を落とさない）
+
+        conn = _conn()
+        try:
+            report = build(config, conn, when)
+            counts = count_by_status(conn)
+        finally:
+            conn.close()
+
+        return templates.TemplateResponse(
+            request,
+            "report.html",
+            {
+                "report": report,
+                "counts": counts,
+                "status": "report",
+                "prev_week": (report.start - timedelta(days=7)).date().isoformat(),
+                "next_week": (report.start + timedelta(days=7)).date().isoformat(),
+            },
+        )
+
     @app.get("/rules", response_class=HTMLResponse)
     def rules(request: Request):
         """[7] のルール候補。自動適用しないので、ここが唯一の適用経路。"""

@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}投稿カルテ #{{ post["id"] }} — FREMING CURATED{% endblock %}
+{% block body %}
+
+{# 1投稿について分かることを1画面に集める。採点でどう評価したか、実際に
+   どれだけ見られたか、写真は何枚でどこから来たか。**出したあとに
+   振り返る場所**が無かったので作った。 #}
+
+<style>
+  .card2 h2 { margin: 26px 0 6px; }
+  .card2 .meta { font: 12px/1.9 var(--mono); }
+  .card2 table { border-collapse: collapse; width: 100%; font: 12px/1.9 var(--mono); }
+  .card2 td, .card2 th { text-align: left; padding: 4px 10px 4px 0; border-bottom: 1px solid var(--fill); vertical-align: top; }
+  .card2 .num { text-align: right; }
+  .card2 .thumbs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .card2 .thumb { position: relative; width: 120px; }
+  .card2 .thumb img { width: 100%; aspect-ratio: 1; object-fit: cover; background: var(--fill); display: block; }
+  .card2 .thumb .no { position: absolute; top: 0; left: 0; font: 11px/1.8 var(--mono); background: var(--bg); padding: 0 5px; }
+  .card2 .thumb .foreign { position: absolute; top: 0; right: 0; font: 11px/1.8 var(--mono); background: var(--fg); color: var(--on-fill); padding: 0 6px; text-decoration: none; }
+  .card2 .thumb.unused img { opacity: .3; }
+  .card2 pre { white-space: pre-wrap; font: 12px/1.9 var(--mono); border: 1px solid var(--fill); padding: 10px; }
+  .card2 textarea { width: 100%; min-height: 120px; font: 13px/1.8 var(--mono); }
+</style>
+
+<div class="card2">
+
+<h2>投稿カルテ #{{ post["id"] }}</h2>
+<div class="meta">
+  {{ {"planned":"予定","publishing":"投稿中","published":"公開済","failed":"失敗","skipped":"見送り","deleted":"削除"}.get(post["state"], post["state"]) }}
+  ・{{ {"feed":"通常","story":"ストーリーズ","reel":"リール"}.get(post["kind"], post["kind"]) }}
+  ・予定 {{ post["scheduled_at"][:16].replace("T", " ") }}
+  {% if post["published_at"] %}・公開 {{ post["published_at"][:16].replace("T", " ") }}{% endif %}
+  {% if post["permalink"] %}
+    ・<a href="{{ post['permalink'] }}" target="_blank" rel="noopener">投稿を開く</a>
+  {% endif %}
+  ・<a href="/schedule">投稿予定へ</a>
+</div>
+
+<h2>反応</h2>
+<table>
+  <tr>
+    <th>リーチ</th>
+    {# **未取得と 0 を混ぜない。** 取れていないだけかもしれない。 #}
+    <td class="num">{{ post["reach"] if post["reach"] is not none else "—（未取得）" }}</td>
+    <td>
+      {% if post["reach_checked_at"] %}
+        {{ post["reach_checked_at"][:16].replace("T", " ") }} 時点
+      {% else %}
+        <span class="note">まだ一度も読んでいません（post reach で記録されます）</span>
+      {% endif %}
+    </td>
+  </tr>
+</table>
+<p class="note">
+  リーチは時間とともに伸びます。直近30日は毎日読み直しているので、
+  出した直後の数字と後日の数字は違います。
+</p>
+
+{% if prop %}
+  <h2>物件</h2>
+  <table>
+    <tr><th>名前</th><td colspan="2"><a href="/p/{{ prop['id'] }}">{{ prop["display_name"] or prop["title"] }}</a></td></tr>
+    {% if prop["architect"] %}<tr><th>設計</th><td colspan="2">{{ prop["architect"] }}</td></tr>{% endif %}
+    {% if prop["year_built"] %}<tr><th>築年</th><td colspan="2">{{ prop["year_built"] }}</td></tr>{% endif %}
+    {% if prop["style_name"] %}<tr><th>様式</th><td colspan="2">{{ prop["style_name"] }}</td></tr>{% endif %}
+    <tr><th>場所</th><td colspan="2">{{ prop["location_city"] }}{% if prop["location_country"] %}, {{ prop["location_country"] }}{% endif %}</td></tr>
+    {% if prop["price"] %}<tr><th>価格</th><td colspan="2">{{ prop["price"] }}</td></tr>{% endif %}
+    <tr><th>出所</th><td colspan="2"><a href="{{ prop['source_url'] }}" target="_blank" rel="noopener">{{ prop["source"] }}</a></td></tr>
+  </table>
+
+  <h2>採点（{{ "%.0f"|format(prop["score"] or 0) }}点）</h2>
+  {% if axes %}
+    <table>
+      <tr><th>軸</th><th class="num">点</th><th>理由</th></tr>
+      {% for key, raw, reason in axes %}
+        <tr><td>{{ key }}</td><td class="num">{{ "%.0f"|format(raw) }}</td><td>{{ reason }}</td></tr>
+      {% endfor %}
+    </table>
+  {% else %}
+    <p class="note">採点の内訳が残っていません（採点し直すと入ります）。</p>
+  {% endif %}
+  <div class="meta">
+    {% if prop["style_identified"] %}<span class="tag">様式の特定</span>{% endif %}
+    {% if prop["one_of_a_kind"] %}<span class="tag">一点物</span>{% endif %}
+    {% if prop["provenance_visible"] %}<span class="tag">前歴が見える</span>{% endif %}
+  </div>
+{% endif %}
+
+{% if images %}
+  <h2>写真（{{ images|length }}枚 / 出したのは先頭 {{ carousel_max }}枚まで）</h2>
+  <div class="thumbs">
+    {% for img in images %}
+      <div class="thumb {{ '' if loop.index <= carousel_max else 'unused' }}">
+        <img src="{{ img['source_url'] }}" loading="lazy" alt="">
+        <span class="no">{{ loop.index }}</span>
+        {% if img["origin_url"] %}
+          <a class="foreign" href="{{ img['origin_url'] }}" target="_blank"
+             rel="noopener" title="別のサイトから足した写真: {{ img['origin_url'] }}">別</a>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+  <p class="note">
+    「別」は画像検索で見つけた別のページから足した写真です。引用元が1つでは
+    ないので、クレジットを書くときは出所を確かめてください。
+  </p>
+{% endif %}
+
+{% if post["caption"] %}
+  <h2>本文</h2>
+  <pre>{{ post["caption"] }}</pre>
+{% endif %}
+
+<h2>メモ</h2>
+<p class="note">
+  <strong>公開されません。</strong>出したあとに分かったこと（1枚目が弱い、
+  この建築家は反応が良い、文章が長い…）を書いておくと、次の選定で読めます。
+</p>
+<form method="post" action="/posts/{{ post['id'] }}/note">
+  <textarea name="note" placeholder="例：1枚目が引きの外観で弱かった。内観から始めたほうがよさそう。">{{ post["note"] or "" }}</textarea>
+  <div class="actions"><button type="submit">メモを保存</button></div>
+</form>
+{% if post["note_at"] %}
+  <div class="meta">最終更新 {{ post["note_at"][:16].replace("T", " ") }}</div>
+{% endif %}
+
+</div>
+{% endblock %}

@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}週次レポート — FREMING CURATED{% endblock %}
+{% block body %}
+
+{# 編集方針（WEEKLY GLOBAL ARCHITECTURE REPORT）を、手元の候補で組み立てた
+   もの。**外へは一切出ない**——DBを読むだけなので、何度開いても費用は
+   かからず、同じ週は同じ中身になる。 #}
+
+<style>
+  .rep h2 { margin: 28px 0 6px; }
+  .rep .week { font: 12px/1.8 var(--mono); }
+  .rep .nums { font: 12px/1.9 var(--mono); margin: 10px 0 0; }
+  .rep .genre {
+    font: 12px/1.8 var(--mono); margin: 22px 0 6px;
+    border-bottom: 1px solid var(--line); padding-bottom: 4px;
+  }
+  .rep .item { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--fill); }
+  .rep .item img {
+    width: 96px; height: 96px; object-fit: cover; background: var(--fill); flex: none;
+  }
+  .rep .item .body { min-width: 0; }
+  .rep .name { font-size: 15px; }
+  .rep .meta { font: 11px/1.9 var(--mono); }
+  .rep .why { margin-top: 4px; }
+  .rep .pick { border: 2px solid var(--line); padding: 14px; margin-top: 8px; }
+  .rep .check { font: 12px/2 var(--mono); }
+  .rep .check .ng { color: var(--hi); }
+  .rep table { border-collapse: collapse; width: 100%; font: 12px/1.9 var(--mono); }
+  .rep td, .rep th { text-align: left; padding: 4px 8px 4px 0; border-bottom: 1px solid var(--fill); }
+  @media (max-width: 640px) { .rep .item img { width: 64px; height: 64px; } }
+</style>
+
+<div class="rep">
+
+<h2>WEEKLY REPORT</h2>
+<div class="week">
+  {{ report.label }}（{{ report.generated_at.strftime("%m/%d %H:%M") }} 時点）
+  ・<a href="?week={{ prev_week }}">前の週</a>
+  ・<a href="?week={{ next_week }}">次の週</a>
+</div>
+<p class="nums">
+  今週の入荷 {{ report.collected }} 件 ／ 承認 {{ report.approved }} ／
+  非承認 {{ report.rejected }} ／ 公開 {{ report.published|length }}
+  {% if report.reach_total %}／ リーチ計 {{ report.reach_total }}{% endif %}
+</p>
+
+{% if report.pick %}
+  <h2>Pick of the Week</h2>
+  <p class="note">
+    「今週どこか一か所だけ見に行けるなら、どれを選ぶか」。
+    ここに出ているのは<strong>点数がいちばん高い1件</strong>です。
+    選び直すときは下の候補から選んでください。
+  </p>
+  <div class="pick">
+    <div class="name">
+      <a href="/p/{{ report.pick['id'] }}">{{ report.pick["display_name"] or report.pick["title"] }}</a>
+    </div>
+    <div class="meta">
+      {{ "%.0f"|format(report.pick["score"] or 0) }}点
+      {% if report.pick["architect"] %}・{{ report.pick["architect"] }}{% endif %}
+      {% if report.pick["year_built"] %}・{{ report.pick["year_built"] }}{% endif %}
+      {% if report.pick["location_city"] %}・{{ report.pick["location_city"] }}{% endif %}
+      {% if report.pick["location_country"] %}, {{ report.pick["location_country"] }}{% endif %}
+    </div>
+    {% if report.pick["summary"] %}<div class="why">{{ report.pick["summary"] }}</div>{% endif %}
+  </div>
+{% endif %}
+
+<h2>今週の候補（未審査の上位 {{ report.candidates|length }} 件）</h2>
+{% if not report.candidates %}
+  <p class="empty">未審査の候補がありません。収集と採点が回っているか確認してください。</p>
+{% endif %}
+
+{% for section in report.sections %}
+  <div class="genre">{{ section.label }}（{{ section.rows|length }}）</div>
+  {% for row in section.rows %}
+    <div class="item">
+      {% if row["thumbnail_url"] %}<img src="{{ row['thumbnail_url'] }}" loading="lazy" alt="">{% endif %}
+      <div class="body">
+        <div class="name">
+          <a href="/p/{{ row['id'] }}">{{ row["display_name"] or row["title"] }}</a>
+        </div>
+        <div class="meta">
+          #{{ row["id"] }}・{{ "%.0f"|format(row["score"] or 0) }}点
+          {% if row["architect"] %}・{{ row["architect"] }}{% endif %}
+          {% if row["year_built"] %}・Built {{ row["year_built"] }}{% endif %}
+          {% if row["location_city"] %}・{{ row["location_city"] }}{% endif %}
+          {% if row["location_country"] %}, {{ row["location_country"] }}{% endif %}
+          {% if row["price"] %}・{{ row["price"] }}{% endif %}
+        </div>
+        <div class="meta">
+          {% if row["style_identified"] %}<span class="tag">様式</span>{% endif %}
+          {% if row["one_of_a_kind"] %}<span class="tag">一点物</span>{% endif %}
+          {% if row["provenance_visible"] %}<span class="tag">前歴</span>{% endif %}
+          <a href="{{ row['source_url'] }}" target="_blank" rel="noopener">元記事</a>
+          {% if row["listing_url"] %}
+            ・<a href="{{ row['listing_url'] }}" target="_blank" rel="noopener">販売ページ</a>
+          {% endif %}
+        </div>
+        {% if row["summary"] %}<div class="why">{{ row["summary"] }}</div>{% endif %}
+      </div>
+    </div>
+  {% endfor %}
+{% endfor %}
+
+{% if report.published %}
+  <h2>今週出したもの</h2>
+  <table>
+    <tr><th>日付</th><th>物件</th><th>リーチ</th><th></th></tr>
+    {% for row in report.published %}
+      <tr>
+        <td>{{ row["published_at"][:10] }}</td>
+        <td>{{ row["display_name"] or row["title"] or "（物件なし）" }}</td>
+        {# **リーチ未取得と 0 を混ぜない。** 取れていないだけかもしれない。 #}
+        <td>{{ row["reach"] if row["reach"] is not none else "—" }}</td>
+        <td>
+          <a href="/posts/{{ row['id'] }}">カルテ</a>
+          {% if row["permalink"] %}
+            ・<a href="{{ row['permalink'] }}" target="_blank" rel="noopener">投稿</a>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+  </table>
+{% endif %}
+
+<h2>最終チェック</h2>
+<div class="check">
+  {% for check in report.checks %}
+    <div>
+      {% if check.ok %}[○]{% else %}<span class="ng">[要確認]</span>{% endif %}
+      {{ check.label }}{% if check.note %} — {{ check.note }}{% endif %}
+    </div>
+  {% endfor %}
+</div>
+
+<p class="note">
+  ここに出るのは<strong>いま手元にある候補だけ</strong>です。
+  Wallpaper* や The Modern House を読んで世界から探す部分は、
+  収集ソースを増やさないと増えません（この画面では増えません）。
+</p>
+
+</div>
+{% endblock %}
