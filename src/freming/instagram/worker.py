@@ -305,7 +305,7 @@ class WeeklyReel:
     """組み上がった週次リール1本。"""
 
     video: Path
-    winners: list["WeekPick"]
+    winners: list[WeekPick]
     track: object            # reel.build.Track
     caption: str
     result: object           # reel.build.ReelResult
@@ -616,14 +616,14 @@ class PostingWorker:
 __all__ = [
     "PostingError",
     "PostingWorker",
+    "RunResult",
     "WeekPick",
     "WeeklyReel",
     "build_weekly_reel",
-    "last_week",
-    "weekly_picks",
     "describe_error",
+    "last_week",
     "preview",
     "publish_one",
-    "RunResult",
     "run_once",
+    "weekly_picks",
 ]

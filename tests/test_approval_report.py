@@ -221,7 +221,7 @@ def test_比較材料の無い軸の重みは案から取り上げない():
             _row("rejected", 40, story=20, area=80)]
     section = render(analyze(rows, weights), weights).split("重みの案", 1)[1]
 
-    values = [float(p[2]) for p in (l.split() for l in section.splitlines())
+    values = [float(p[2]) for p in (line.split() for line in section.splitlines())
               if len(p) >= 3 and p[0] in weights]
     assert values, "案の表が読めていない"
     # 比較できる3軸が持っていた 0.60 の中で配り直す（1.0 ではない）

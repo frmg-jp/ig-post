@@ -73,21 +73,28 @@ class _Response:
         self.content = [_Block(text)]
 
 
-def _fake_anthropic(monkeypatch, text: str):
-    """Anthropic クライアントを差し替える。**APIは呼ばない。**"""
+def _fake_anthropic(monkeypatch, *texts: str):
+    """Anthropic クライアントを差し替える。**APIは呼ばない。**
+
+    2つ以上渡すと、呼ばれた順に返す（書き直しの確認用）。最後のものは
+    それ以降ずっと返る。
+    """
     import anthropic
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    seen: list[list[dict]] = []
 
     class _Messages:
-        def create(self, **_kwargs):
-            return _Response(text)
+        def create(self, **kwargs):
+            seen.append(kwargs["messages"])
+            return _Response(texts[min(len(seen) - 1, len(texts) - 1)])
 
     class _Client:
         def __init__(self, **_kwargs) -> None:
             self.messages = _Messages()
 
     monkeypatch.setattr(anthropic, "Anthropic", _Client)
+    return seen
 
 
 # --- 材料 -------------------------------------------------------------
@@ -119,9 +126,29 @@ def test_1桁は見逃す() -> None:
 def test_数字が合わない講評は保存しない(config, conn, monkeypatch) -> None:
     """**黙って直さない。** 捨てて、理由を出す。"""
     _week(conn)
-    _fake_anthropic(monkeypatch, "今週はリーチ 9999 でした。")
+    seen = _fake_anthropic(monkeypatch, "今週はリーチ 9999 でした。")
     with pytest.raises(RuntimeError, match="9999"):
         comment.write(config, build(config, conn, NOW))
+    assert len(seen) == 2, "1回だけ書き直させる"
+
+
+def test_書き直しで直れば保存する(config, conn, monkeypatch) -> None:
+    """初回に落ちるのは、たいてい丸め（87→「90近く」）。書き直せば通る。
+
+    **検算を緩めるわけではない。** 直したものも同じ検算にかけている。
+    """
+    _week(conn)
+    seen = _fake_anthropic(
+        monkeypatch,
+        "リーチは390近くでした。",          # 390 は材料に無い（丸め）
+        "リーチは384でした。次に試すこと: 写真を増やす。",
+    )
+    written = comment.write(config, build(config, conn, NOW))
+    assert "384" in written.body
+    assert len(seen) == 2
+    # 書き直しの指示では、落ちた数字を名指しする
+    assert "390" in seen[1][-1]["content"]
+    assert seen[1][1]["role"] == "assistant"   # 前の文も渡している
 
 
 def test_空の返答も保存しない(config, conn, monkeypatch) -> None:

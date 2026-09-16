@@ -84,4 +84,4 @@ def has_insights_scope(token: str) -> bool:
     return True
 
 
-__all__ = ["SCOPE", "MissingInsightsScope", "media_reach", "has_insights_scope"]
+__all__ = ["SCOPE", "MissingInsightsScope", "has_insights_scope", "media_reach"]

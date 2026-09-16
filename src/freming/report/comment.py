@@ -47,9 +47,22 @@ Instagram メディア）の運用担当です。週次の数字を受け取り�
 - 本数が少ないときは、少ないと書く。無理に傾向を見つけない。
 - リーチは時間とともに伸びる。出したばかりの投稿が低いのは当然で、
   それを「弱かった」と書かない。
+- **数字は渡されたものをそのまま書く。** 丸めない（87 を「90近く」と
+  書かない）。位を落とさない（93 を「90点台」と書かない）。割り算や
+  引き算をして新しい数字を作らない。自信が無ければ数字を書かずに、
+  「増えた」「少なかった」と言葉で書く。
 - 日本語。3〜5文、300字以内。見出しも箇条書きも使わず、地の文で書く。
 - 最後に「次に試すこと」を1つだけ、具体的に書く。在庫が無いものは
   勧めない。"""
+
+# 検算に落ちたとき、1回だけ書き直させる。落ちた数字を名指しで返す。
+# **甘くするわけではない。** 直したものも同じ検算にかけ、落ちれば捨てる。
+RETRY = """その文には、渡していない数字が出ています: {stray}
+
+渡した材料に無い数字は書けません。丸めた数（87 を「90近く」）や、
+位を落とした数（93 を「90点台」）、こちらで計算した数（増減の割合）も
+同じです。その数字を材料にあるものへ置き換えるか、数字を使わない
+言い方に直して、講評だけをもう一度書いてください。"""
 
 
 @dataclass
@@ -132,37 +145,60 @@ def unsupported_numbers(body: str, source: str) -> set[str]:
     return {n for n in numbers_in(body) - allowed if len(n.split(".")[0]) >= 2}
 
 
+def _text(response) -> str:
+    for block in response.content:
+        if getattr(block, "type", None) == "text":
+            return block.text.strip()
+    return ""
+
+
 def write(config: Config, report: WeeklyReport) -> Comment:
-    """講評を1本書かせる。**検算に落ちたら例外。**"""
+    """講評を1本書かせる。**検算に落ちたら、1回だけ書き直させて、それでも
+    落ちたら例外。**
+
+    初回に落ちるのは、たいてい丸め（87 を「90近く」）か位落とし（93 を
+    「90点台」）で、書き直させれば通る。2026-09-16 の初回がこれだった。
+    **検算を緩めることはしない。** 直したものも同じ検算にかける。
+    """
     import anthropic
 
     source = build_source(report)
     model = config.scoring.model
     client = anthropic.Anthropic(api_key=config.anthropic_api_key)
-    response = client.messages.create(
-        model=model,
-        max_tokens=MAX_TOKENS,
-        system=SYSTEM,
-        messages=[{"role": "user", "content": source}],
-    )
-    body = ""
-    for block in response.content:
-        if getattr(block, "type", None) == "text":
-            body = block.text.strip()
-            break
-    if not body:
-        raise RuntimeError("講評が空でした")
+    messages: list[dict] = [{"role": "user", "content": source}]
 
-    stray = unsupported_numbers(body, source)
-    if stray:
-        # **黙って直さない。** 数字を書き換えると、何が起きたのか
-        # あとから分からなくなる。捨てて、理由を出す。
-        raise RuntimeError(
-            "渡していない数字が本文に出ました: "
-            + "、".join(sorted(stray))
-            + "。保存しません。"
+    body = ""
+    stray: set[str] = set()
+    for attempt in range(2):
+        response = client.messages.create(
+            model=model,
+            max_tokens=MAX_TOKENS,
+            system=SYSTEM,
+            messages=messages,
         )
-    return Comment(body=body, source=source, model=model)
+        body = _text(response)
+        if not body:
+            raise RuntimeError("講評が空でした")
+
+        stray = unsupported_numbers(body, source)
+        if not stray:
+            return Comment(body=body, source=source, model=model)
+        if attempt == 0:
+            log.warning("講評に渡していない数字が出たので書き直させます: %s",
+                        "、".join(sorted(stray)))
+            messages.append({"role": "assistant", "content": body})
+            messages.append({
+                "role": "user",
+                "content": RETRY.format(stray="、".join(sorted(stray))),
+            })
+
+    # **黙って直さない。** 数字を書き換えると、何が起きたのか
+    # あとから分からなくなる。捨てて、理由を出す。
+    raise RuntimeError(
+        "渡していない数字が本文に出ました: "
+        + "、".join(sorted(stray))
+        + "。書き直させても直らなかったので保存しません。"
+    )
 
 
 # ----------------------------------------------------------------------
@@ -191,6 +227,7 @@ def load(conn: DbConnection, week_start: str):
 
 __all__ = [
     "MAX_TOKENS",
+    "RETRY",
     "SYSTEM",
     "Comment",
     "build_source",

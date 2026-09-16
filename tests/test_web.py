@@ -821,11 +821,9 @@ def test_番地も住所タイトルも無ければ検索リンクを出さな�
 
 def test_画面から見送ると後ろが前に詰まる(config, conn, client):
     """穴を残さない（2026-08-22 の指示）。"""
-    from datetime import UTC, datetime, timedelta
-    from zoneinfo import ZoneInfo
+    from datetime import UTC, datetime
 
     from freming.db.repository import create_post
-
     from freming.instagram.plan import slot_times
 
     # **枠は本番と同じ決め方で取る。** 「明日の9時」と決め打ちにすると、

@@ -60,7 +60,7 @@ def _square_from_upload(
             "SELECT content FROM property_media WHERE property_id = ? AND position = ?",
             (property_id, position),
         ).fetchone()
-    except Exception as exc:  # noqa: BLE001 - 表が無いだけなら投稿は続ける
+    except Exception as exc:
         # **新コードが本番に出てから 0018 が適用されるまでの隙間。**
         # ここで落とすと、手で上げた写真とは無関係な投稿まで全部失敗する
         # （0015 のときに /schedule が同じ理由で 500 になった）。

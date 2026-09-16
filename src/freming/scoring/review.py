@@ -34,8 +34,9 @@ from __future__ import annotations
 import json
 import statistics
 from collections import Counter
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 from freming.values import parse_year
 
@@ -423,7 +424,7 @@ def _suggest(report: ApprovalReport, weights: Mapping[str, float]) -> str:
     lines = [f"重みの案（実績に比例させた配分と、いまの重みの中間 / 合計 {budget:.2f} の中で）", ""]
     lines.append(f"{'軸':<10}{'いま':>7}{'案':>7}   根拠")
     fresh: dict[str, float] = {}
-    for key, stat in sorted(usable.items(), key=lambda kv: -kv[1].gap):
+    for key in (k for k, _ in sorted(usable.items(), key=lambda kv: -kv[1].gap)):
         now = float(weights.get(key, 0.0))
         by_gap = positive[key] / total * budget
         blended = round((now + by_gap) / 2 * 20) / 20   # 0.05 刻み

@@ -820,7 +820,7 @@ def test_カルーセルの子コンテナはキャプションを持たない(m
         "t", "ig1", ["https://e/1", "https://e/2"], "本文", alt_text="alt"
     )
     assert result.media_id == "c4"  # 子2 + 親1 + publish1
-    child1, child2, parent, published = calls
+    child1, _child2, parent, published = calls
     assert child1["is_carousel_item"] == "true" and "caption" not in child1
     assert child1["alt_text"] == "alt"
     assert parent["media_type"] == "CAROUSEL"
@@ -942,8 +942,8 @@ def test_リールのコンテナはvideo_urlを送る(monkeypatch):
 
 def test_リールの動画は配り先に置かれる(db, tmp_path, monkeypatch):
     """組んだ mp4 が post_media に入り、その /m/<token> が Meta に渡ること。"""
-    from freming.instagram.publish import PublishResult
     from freming.instagram import worker as worker_mod
+    from freming.instagram.publish import PublishResult
 
     post_id = create_post(db, "reel", NOW.isoformat())
     video = tmp_path / "reel.mp4"
