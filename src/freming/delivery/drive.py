@@ -205,7 +205,7 @@ class DriveClient:
                 creds.refresh(AuthRequest())
                 _save_token(creds, token_path)
                 return creds
-            except Exception:  # noqa: BLE001 - 失敗の種類を問わず再認証に落とす
+            except Exception:  # 失敗の種類を問わず再認証に落とす
                 log.warning("トークンの更新に失敗しました。再認証します。", exc_info=True)
 
         if not allow_interactive:
