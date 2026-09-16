@@ -377,13 +377,16 @@
        親指で隣を押す）。 */
     header { padding-top: 8px; padding-bottom: 6px; gap: 2px; }
     header .bar { gap: 14px; }
-    /* **ロゴは出さない。** 幅 390px でロゴに 150px 使うと、画面の
-       切り替え（4項目）が右にあふれ、しかも右寄せのせいで**あふれた
-       先頭に指が届かない**（2026-09-16 に実機の並びで確認）。
-       どのサイトかはタブのタイトルとファビコンで分かる。帯2本に全幅を
-       渡したほうが操作できる。 */
-    header h1 { display: none; }
-    nav.sections { margin-left: 0; justify-content: flex-start; }
+    /* **ロゴは残す。** 狭い画面では、ロゴと帯を同じ行に並べない。
+       同じ行に置くと、ロゴに 150px 取られて画面の切り替え（4項目）が
+       右にあふれ、しかも右寄せのせいであふれた先頭に指が届かなかった
+       （2026-09-16 の実機）。**行を分ければ、帯は全幅を使える。**
+         1行目 … ロゴ
+         2行目 … 画面の切り替え（横スクロール）
+         3行目 … 審査タブ（横スクロール） */
+    header .bar { flex-wrap: wrap; }
+    header h1 { font-size: 14px; flex: 1 0 100%; }
+    nav.sections { margin-left: 0; justify-content: flex-start; flex: 1 0 100%; }
     nav { gap: 16px; }
     nav a { padding: 8px 0 6px; }
     /* 帯の右端に地色のぼかしを置き、「まだ先がある」ことを示す。
