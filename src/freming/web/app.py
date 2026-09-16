@@ -412,7 +412,7 @@ def create_app(
         メモは公開されない。本文（caption）とは別物。
         """
         from freming.collect.listing_status import LABELS as STATUS_LABELS
-        from freming.report.weekly import axes_of
+        from freming.report.weekly import TREND_WEEKS, axes_of
 
         conn = _conn()
         try:
@@ -433,6 +433,30 @@ def create_app(
                     "FROM images WHERE property_id = ? ORDER BY position",
                     (post["property_id"],),
                 ).fetchall()
+            # 納品の記録（Drive のフォルダ名）。承認からあとの足取り。
+            delivery = None
+            story = None
+            if post["property_id"]:
+                delivery = conn.execute(
+                    "SELECT folder_name, image_count, delivered_at FROM deliveries "
+                    "WHERE property_id = ?", (post["property_id"],),
+                ).fetchone()
+                # 同じ物件のストーリーズ。出したかどうかはここでしか分からない。
+                story = conn.execute(
+                    "SELECT id, state, published_at FROM posts "
+                    "WHERE property_id = ? AND kind = 'story'",
+                    (post["property_id"],),
+                ).fetchone()
+            # **この投稿が平均と比べてどうだったか。** 数字だけ見ても
+            # 高いのか低いのか分からない。同じ種別の直近8週で比べる。
+            from datetime import UTC, datetime, timedelta
+
+            since = (datetime.now(UTC) - timedelta(weeks=TREND_WEEKS)).isoformat()
+            baseline = conn.execute(
+                "SELECT AVG(reach) AS avg, COUNT(*) AS n FROM posts "
+                "WHERE state = 'published' AND reach IS NOT NULL AND kind = ? "
+                "AND published_at >= ?", (post["kind"], since),
+            ).fetchone()
             counts = count_by_status(conn)
         finally:
             conn.close()
@@ -444,6 +468,12 @@ def create_app(
                 "post": post,
                 "prop": prop,
                 "images": images,
+                "delivery": delivery,
+                "story": story,
+                "baseline_avg": baseline["avg"] if baseline else None,
+                "baseline_n": baseline["n"] if baseline else 0,
+                "trend_weeks": TREND_WEEKS,
+                "foreign_images": sum(1 for i in images if i["origin_url"]),
                 "axes": axes_of(prop) if prop is not None else [],
                 "carousel_max": config.instagram.carousel_max,
                 "status_labels": STATUS_LABELS,
@@ -479,6 +509,8 @@ def create_app(
             KIND_LABELS,
             TREND_WEEKS,
             build,
+            judgement,
+            marks_of,
             name_of,
         )
 
@@ -506,6 +538,8 @@ def create_app(
                 "kind_labels": KIND_LABELS,
                 "trend_weeks": TREND_WEEKS,
                 "name_of": name_of,
+                "judgement": judgement,
+                "marks_of": marks_of,
                 "counts": counts,
                 "status": "report",
                 "prev_week": (report.start - timedelta(days=7)).date().isoformat(),

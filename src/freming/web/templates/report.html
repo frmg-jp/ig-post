@@ -30,11 +30,13 @@
   .rep .post .name { font-size: 16px; line-height: 1.5; }
   .rep .post .meta { font: 11px/1.9 var(--mono); }
   .rep .post .reach { font: 15px/1.6 var(--mono); font-variant-numeric: tabular-nums; }
-  .rep .post .memo {
-    font-size: 13px; line-height: 1.8; margin-top: 6px;
+  /* カルテの抜粋。点数とフラグを1行、判定の理由を1行。 */
+  .rep .post .spec { font: 11px/1.9 var(--mono); margin-top: 4px; }
+  .rep .post .spec .score { font-size: 13px; }
+  .rep .post .why {
+    font-size: 13px; line-height: 1.8; margin-top: 4px;
     border-left: 2px solid var(--line); padding-left: 10px;
   }
-  .rep .post .memo.none { border-left-color: var(--fill); }
 
   .rep .best { border: 2px solid var(--line); padding: 14px; margin-top: 8px; }
   .rep table { border-collapse: collapse; width: 100%; font: 12px/1.9 var(--mono); }
@@ -127,7 +129,9 @@
         ・{{ kind_labels.get(row["kind"], row["kind"]) }}
         {% if row["genre"] %}・{{ genre_labels.get(row["genre"], row["genre"]) }}{% endif %}
         {# リールに「写真 0枚」は意味が無い（動画なので images を持たない）。 #}
-        {% if row["property_id"] %}・写真 {{ row["image_count"] or 0 }}枚{% endif %}
+        {% if row["property_id"] %}
+          ・写真 {{ row["image_count"] or 0 }}枚{% if row["foreign_images"] %}（うち別サイト {{ row["foreign_images"] }}）{% endif %}
+        {% endif %}
         {%- if row["location_city"] or row["location_country"] %}
           ・{{ [row["location_city"], row["location_country"]]|select|join(", ") }}
         {%- endif %}
@@ -138,12 +142,20 @@
           ・<a href="{{ row['permalink'] }}" target="_blank" rel="noopener">投稿</a>
         {% endif %}
       </div>
-      {% if row["note"] %}
-        <div class="memo">{{ row["note"] }}</div>
-      {% else %}
-        <div class="memo none note">
-          メモなし。<a href="/posts/{{ row['id'] }}">カルテ</a>に書いておくと次の選定で読めます。
+      {# **カルテの抜粋。** その投稿が何だったのか・何を評価して出したのかを
+         ここで読み切れるようにする。全部はカルテで。 #}
+      {% if row["property_id"] %}
+        <div class="spec">
+          <span class="score">{{ "%.0f"|format(row["score"] or 0) }}点</span>
+          {% for mark in marks_of(row) %}<span class="tag">{{ mark }}</span>{% endfor %}
+          {% if row["architect"] %}・{{ row["architect"] }}{% endif %}
+          {% if row["year_built"] %}・{{ row["year_built"] }}{% endif %}
+          {% if row["style_name"] %}・{{ row["style_name"] }}{% endif %}
         </div>
+        {% if judgement(row) %}
+          <div class="why">{{ judgement(row) }}</div>
+        {% endif %}
+        <div class="meta"><a href="/posts/{{ row['id'] }}">カルテを開く</a></div>
       {% endif %}
     </div>
   </div>

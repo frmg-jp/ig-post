@@ -130,18 +130,49 @@ def test_いちばん見られた1本(config, conn) -> None:
     assert build(config, conn, NOW).best["id"] == 2
 
 
-def test_カルテのメモが出る(config, conn) -> None:
-    a = _add(conn, "https://a.example.com/1", score=70, genre="architect")
+def test_カルテの抜粋が出る(config, conn) -> None:
+    """**メモではなく、カルテの中身**を抜く。何を評価して出したのか。"""
+    import json
+
+    a = _add(conn, "https://a.example.com/1", score=88, genre="architect",
+             architect="Harold B. Zook", year_built="1938")
+    conn.execute(
+        "UPDATE properties SET score_detail = ?, style_identified = 1, "
+        "one_of_a_kind = 1 WHERE id = ?",
+        (json.dumps({"gate": "", "axes": [
+            {"key": "source", "raw": 80.0, "weight": 0.1, "reason": "ソースA"},
+            {"key": "story", "raw": 90.0, "weight": 0.25, "reason": "設計者が特定できる"},
+        ]}, ensure_ascii=False), a),
+    )
+    conn.commit()
     _post(conn, 1, a, "2026-09-15T00:02:00+00:00", reach=100, note="1枚目が弱い")
+
     text = render(build(config, conn, NOW))
-    assert "1枚目が弱い" in text
+    assert "88点" in text
+    assert "様式の特定" in text and "一点物" in text
+    assert "Harold B. Zook" in text
+    assert "設計者が特定できる" in text      # story 軸の理由
+    assert "1枚目が弱い" not in text          # **メモは出さない**
 
 
-def test_メモが1本も無ければ要確認(config, conn) -> None:
+def test_判定はstory軸から抜く(config, conn) -> None:
+    """他の軸は機械的に決まるので、振り返りの材料にならない。"""
+    import json
+
+    from freming.report.weekly import judgement
+
     a = _add(conn, "https://a.example.com/1", score=70, genre="architect")
+    conn.execute(
+        "UPDATE properties SET score_detail = ? WHERE id = ?",
+        (json.dumps({"axes": [
+            {"key": "genre", "raw": 100.0, "reason": "architect"},
+            {"key": "story", "raw": 90.0, "reason": "1938年築のチューダー様式"},
+        ]}, ensure_ascii=False), a),
+    )
+    conn.commit()
     _post(conn, 1, a, "2026-09-15T00:02:00+00:00", reach=100)
-    check = next(c for c in build(config, conn, NOW).checks if "メモ" in c.label)
-    assert check.ok is False
+    row = build(config, conn, NOW).published[0]
+    assert judgement(row) == "1938年築のチューダー様式"
 
 
 def test_出したものの偏りを見る(config, conn) -> None:
@@ -196,7 +227,8 @@ def test_画面が開く(config, conn) -> None:
     body = TestClient(create_app(config)).get("/report").text
     assert "WEEKLY REPORT" in body
     assert "Grayoaks" in body
-    assert "1枚目が弱い" in body            # カルテの抜粋
+    assert "カルテを開く" in body
+    assert "1枚目が弱い" not in body        # メモはレポートに出さない
 
 
 def test_何も出していない週でも開く(config, conn) -> None:
@@ -303,3 +335,60 @@ def test_空のメモは消える(config, conn) -> None:
 
 def test_無い投稿は404(config) -> None:
     assert TestClient(create_app(config)).get("/posts/999").status_code == 404
+
+
+def test_カルテに経緯が出る(config, conn) -> None:
+    """収集 → 採点 → 審査 → 納品 → 公開 の足取りを1画面に。"""
+    property_id = _add(conn, "https://a.example.com/1", score=82, genre="architect",
+                       display_name="Hezlep House")
+    conn.execute(
+        "UPDATE properties SET collected_at = ?, scored_at = ?, reviewed_at = ?, "
+        "status = 'delivered', score_model = 'claude-haiku-4-5', "
+        "usage_type = '住宅', structure = '木造', building_area = '210 m2', "
+        "site_area = '1,200 m2', photo_credit = 'Studio X', "
+        "summary = '設計者の自邸。オリジナルの木工が残る。' WHERE id = ?",
+        ("2026-09-01T00:00:00+00:00", "2026-09-02T00:00:00+00:00",
+         "2026-09-03T00:00:00+00:00", property_id),
+    )
+    conn.execute(
+        "INSERT INTO deliveries (property_id, folder_name, image_count, delivered_at) "
+        "VALUES (?, 'frmg_ig012', 10, '2026-09-04T00:00:00+00:00')", (property_id,),
+    )
+    _post(conn, 1, property_id, "2026-09-15T00:02:00+00:00", reach=300)
+    conn.execute(
+        "UPDATE posts SET ig_media_id = '18140889871599903' WHERE id = 1"
+    )
+    conn.commit()
+
+    body = TestClient(create_app(config)).get("/posts/1").text
+    assert "経緯" in body
+    assert "claude-haiku-4-5" in body        # 採点に使ったモデル
+    assert "frmg_ig012" in body              # 納品フォルダ
+    assert "18140889871599903" in body       # media_id
+    assert "木造" in body and "210 m2" in body  # 仕様
+    assert "Studio X" in body                # 撮影者
+    assert "設計者の自邸" in body             # 説明
+
+
+def test_カルテは平均と比べる(config, conn) -> None:
+    """数字だけでは高いのか低いのか分からない。"""
+    a = _add(conn, "https://a.example.com/1", score=70, genre="architect")
+    b = _add(conn, "https://a.example.com/2", score=70, genre="loft")
+    _post(conn, 1, a, "2026-09-15T00:02:00+00:00", reach=300)
+    _post(conn, 2, b, "2026-09-10T00:02:00+00:00", reach=100)
+
+    body = TestClient(create_app(config)).get("/posts/1").text
+    assert "平均との差" in body
+
+
+def test_失敗した投稿は理由まで出す(config, conn) -> None:
+    a = _add(conn, "https://a.example.com/1", score=70, genre="architect")
+    conn.execute(
+        "INSERT INTO posts (id, kind, state, scheduled_at, property_id, attempts, error) "
+        "VALUES (1, 'feed', 'failed', ?, ?, 3, 'コンテナが ERROR になりました')",
+        ("2026-09-15T00:02:00+00:00", a),
+    )
+    conn.commit()
+    body = TestClient(create_app(config)).get("/posts/1").text
+    assert "3回" in body
+    assert "コンテナが ERROR" in body

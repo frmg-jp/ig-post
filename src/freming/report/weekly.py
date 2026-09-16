@@ -1,6 +1,6 @@
 """[10] 週次レポート——**出したものがどうだったか**。
 
-    今週出した1本ずつ（写真・リーチ・メモ） → 数字 → 先週との比較 → 気づき
+    今週出した1本ずつ（写真・リーチ・カルテの抜粋） → 数字 → 先週との比較
 
 最初は「未審査の上位10件」を並べていたが、**それは未審査タブの仕事**で、
 週次で見たいことではない。この画面は振り返り——出した投稿が実際にどう
@@ -8,14 +8,14 @@
 
 中身:
 
-  - **今週出したもの**: 1本ずつ、表紙・物件名・リーチ・写真の枚数と、
-    投稿カルテに書いたメモの抜粋
+  - **今週出したもの**: 1本ずつ、表紙・物件名・リーチと、**投稿カルテの
+    抜粋**（点数と判定の理由・設計者・様式・写真の枚数・販売状況）
   - **今週の数字**: 本数・リーチの合計と平均、いちばん見られた1本
   - **先週との比較**: 合計と平均の増減。**リーチは時間とともに伸びる**ので、
     出したばかりの週は不利になる。そう画面にも書く
   - **ジャンル別の平均**（直近8週）: 何が効いているかの手がかり。件数が
     少ないうちは断定しない
-  - **今週の振り返り**: 出したものの偏りと、メモの書き漏れ
+  - **今週の振り返り**: 出したものの偏り
 
 外へは一切出ない（DBを読むだけ）。何度開いても同じ。
 """
@@ -128,14 +128,19 @@ def axes_of(row: Row) -> list[tuple[str, float, str]]:
     ]
 
 
-# 出した1本について読むもの。表紙とメモまで含める（カルテを開かなくても
-# 週の輪郭が分かるように）。
+# 出した1本について読むもの。**カルテの抜粋をここで作れるだけ引く。**
+# カルテを開かなくても、その投稿が何だったのか・何を評価して出したのかが
+# 分かるようにする（2026-09-16 の指摘）。
 _PUBLISHED = """
 SELECT o.id, o.kind, o.published_at, o.permalink, o.reach, o.reach_checked_at,
        o.note, o.property_id,
        p.display_name, p.title, p.genre, p.location_city, p.location_country,
-       p.listing_status, p.score,
+       p.listing_status, p.score, p.score_detail, p.summary,
+       p.architect, p.year_built, p.style_name, p.usage_type,
+       p.style_identified, p.one_of_a_kind, p.provenance_visible,
        (SELECT COUNT(*) FROM images i WHERE i.property_id = p.id) AS image_count,
+       (SELECT COUNT(*) FROM images i WHERE i.property_id = p.id
+         AND i.origin_url IS NOT NULL) AS foreign_images,
        (SELECT i.source_url FROM images i WHERE i.property_id = p.id
          ORDER BY i.position LIMIT 1) AS cover
   FROM posts AS o
@@ -240,7 +245,6 @@ def _checks(report: WeeklyReport) -> list[Check]:
     posts = len(report.published)
     us = report.by_country.get("USA", 0) + report.by_country.get("United States", 0)
     unmeasured = posts - report.measured
-    noted = sum(1 for row in report.published if (row["note"] or "").strip())
     top_genre = report.by_genre.most_common(1)[0] if report.by_genre else None
 
     return [
@@ -259,12 +263,39 @@ def _checks(report: WeeklyReport) -> list[Check]:
             "" if top_genre is None or posts <= 2 or top_genre[1] * 2 <= posts else
             f"{posts} 本中 {top_genre[1]} 本が {GENRE_LABELS.get(top_genre[0], top_genre[0])}",
         ),
-        Check(
-            "振り返りのメモを残したか", posts == 0 or noted > 0,
-            "" if posts == 0 or noted > 0 else
-            "1本も書かれていない。カルテのメモは次の選定で読む唯一の記録",
-        ),
     ]
+
+
+def judgement(row: Row) -> str:
+    """**なぜこれを出したのか**を1行で。採点の story 軸の理由を抜く。
+
+    軸の中で story だけが、LLM が記事を読んで書いた文。他は機械的に
+    決まる（ソースのランク・ジャンル・地域・価格）ので、振り返りの
+    材料にならない。
+    """
+    axes = {key: (raw, reason) for key, raw, reason in axes_of(row)}
+    if "story" in axes and axes["story"][1]:
+        return axes["story"][1]
+    for _key, (_raw, reason) in axes.items():
+        if reason:
+            return reason
+    return ""
+
+
+def marks_of(row: Row) -> list[str]:
+    """承認の実績でいちばん効いていた判定（approval-report 2026-09-04）。"""
+    out = []
+    for key, label in (
+        ("style_identified", "様式の特定"),
+        ("one_of_a_kind", "一点物"),
+        ("provenance_visible", "前歴が見える"),
+    ):
+        try:
+            if row[key]:
+                out.append(label)
+        except (KeyError, IndexError, TypeError):
+            pass
+    return out
 
 
 def name_of(row: Row) -> str:
@@ -307,8 +338,18 @@ def render(report: WeeklyReport) -> str:
                 f"  {(row['published_at'] or '')[:10]}  {name_of(row)[:38]:<38} "
                 f"{reach}{photos}"
             )
-            if (row["note"] or "").strip():
-                lines.append(f"      メモ: {row['note'].strip()[:70]}")
+            bits = []
+            if row["property_id"]:
+                bits.append(f"{float(row['score'] or 0):.0f}点")
+            bits += marks_of(row)
+            for key in ("architect", "year_built", "style_name"):
+                if row[key]:
+                    bits.append(str(row[key]))
+            if bits:
+                lines.append("      " + " / ".join(bits))
+            reason = judgement(row)
+            if reason:
+                lines.append(f"      判定: {reason[:70]}")
 
     if report.genres:
         lines += ["", f"■ ジャンル別の平均リーチ（直近{TREND_WEEKS}週）"]
@@ -338,6 +379,8 @@ __all__ = [
     "WeeklyReport",
     "axes_of",
     "build",
+    "judgement",
+    "marks_of",
     "name_of",
     "render",
     "week_bounds",

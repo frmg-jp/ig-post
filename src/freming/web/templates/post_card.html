@@ -13,6 +13,8 @@
   .card2 td, .card2 th { text-align: left; padding: 4px 10px 4px 0; border-bottom: 1px solid var(--fill); vertical-align: top; }
   /* 見出し列は折らない。狭い画面で「販売状/況」と割れていた。 */
   .card2 th { white-space: nowrap; }
+  /* 軸の名前も折らない（等幅の英字なので、割れると読めない）。 */
+  .card2 table.axes td.k { white-space: nowrap; }
   .card2 .num { text-align: right; }
   .card2 .thumbs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .card2 .thumb { position: relative; width: 120px; }
@@ -57,6 +59,15 @@
       {% endif %}
     </td>
   </tr>
+  {# **数字だけでは高いのか低いのか分からない。** 同じ種別の平均と並べる。 #}
+  {% if baseline_avg and post["reach"] is not none %}
+    <tr>
+      <th>平均との差</th>
+      <td class="num">{{ "%+.0f"|format(post["reach"] - baseline_avg) }}</td>
+      <td>直近{{ trend_weeks }}週の{{ {"feed":"通常","story":"ストーリーズ","reel":"リール"}.get(post["kind"], post["kind"]) }}
+          平均 {{ "%.0f"|format(baseline_avg) }}（{{ baseline_n }}本）</td>
+    </tr>
+  {% endif %}
 </table>
 <p class="note">
   リーチは時間とともに伸びます。直近30日は毎日読み直しているので、
@@ -64,6 +75,51 @@
 </p>
 
 {% if prop %}
+  <h2>経緯</h2>
+  <table>
+    {% if prop["collected_at"] %}
+      <tr><th>収集</th><td colspan="2">{{ prop["collected_at"][:16].replace("T", " ") }}・{{ prop["source"] }}</td></tr>
+    {% endif %}
+    {% if prop["scored_at"] %}
+      <tr><th>採点</th><td colspan="2">
+        {{ prop["scored_at"][:16].replace("T", " ") }}
+        {% if prop["score_model"] %}・{{ prop["score_model"] }}{% endif %}
+      </td></tr>
+    {% endif %}
+    {% if prop["reviewed_at"] %}
+      <tr><th>審査</th><td colspan="2">
+        {{ prop["reviewed_at"][:16].replace("T", " ") }}・{{ prop["status"] }}
+        {% if prop["reject_reason"] %}<br><span class="note">{{ prop["reject_reason"] }}</span>{% endif %}
+      </td></tr>
+    {% endif %}
+    {% if delivery %}
+      <tr><th>納品</th><td colspan="2">
+        {{ (delivery["delivered_at"] or "")[:16].replace("T", " ") }}・{{ delivery["folder_name"] }}
+        （{{ delivery["image_count"] }}枚）
+      </td></tr>
+    {% endif %}
+    <tr><th>予定</th><td colspan="2">{{ post["scheduled_at"][:16].replace("T", " ") }}</td></tr>
+    {% if post["published_at"] %}
+      <tr><th>公開</th><td colspan="2">
+        {{ post["published_at"][:16].replace("T", " ") }}
+        {% if post["ig_media_id"] %}・media_id {{ post["ig_media_id"] }}{% endif %}
+      </td></tr>
+    {% endif %}
+    {% if story %}
+      <tr><th>ストーリーズ</th><td colspan="2">
+        {% if story["published_at"] %}{{ story["published_at"][:16].replace("T", " ") }}・出した
+        {% else %}{{ {"planned":"予定","skipped":"見送り","failed":"失敗"}.get(story["state"], story["state"]) }}{% endif %}
+      </td></tr>
+    {% endif %}
+    {# 失敗は隠さない。何回試して何で落ちたか。 #}
+    {% if post["attempts"] %}
+      <tr><th>試行</th><td colspan="2">
+        {{ post["attempts"] }}回
+        {% if post["error"] %}<br><span class="note">{{ post["error"] }}</span>{% endif %}
+      </td></tr>
+    {% endif %}
+  </table>
+
   <h2>物件</h2>
   <table>
     <tr><th>名前</th><td colspan="2"><a href="/p/{{ prop['id'] }}">{{ prop["display_name"] or prop["title"] }}</a></td></tr>
@@ -71,7 +127,14 @@
     {% if prop["year_built"] %}<tr><th>築年</th><td colspan="2">{{ prop["year_built"] }}</td></tr>{% endif %}
     {% if prop["style_name"] %}<tr><th>様式</th><td colspan="2">{{ prop["style_name"] }}</td></tr>{% endif %}
     <tr><th>場所</th><td colspan="2">{{ [prop["location_city"], prop["location_country"]]|select|join(", ") }}</td></tr>
+    {% if prop["street_address"] %}<tr><th>住所</th><td colspan="2">{{ prop["street_address"] }}</td></tr>{% endif %}
     {% if prop["price"] %}<tr><th>価格</th><td colspan="2">{{ prop["price"] }}</td></tr>{% endif %}
+    {% if prop["usage_type"] %}<tr><th>用途</th><td colspan="2">{{ prop["usage_type"] }}</td></tr>{% endif %}
+    {% if prop["structure"] %}<tr><th>構造</th><td colspan="2">{{ prop["structure"] }}</td></tr>{% endif %}
+    {% if prop["building_area"] %}<tr><th>建物</th><td colspan="2">{{ prop["building_area"] }}</td></tr>{% endif %}
+    {% if prop["site_area"] %}<tr><th>敷地</th><td colspan="2">{{ prop["site_area"] }}</td></tr>{% endif %}
+    {% if prop["photo_credit"] %}<tr><th>撮影</th><td colspan="2">{{ prop["photo_credit"] }}</td></tr>{% endif %}
+    {% if prop["series"] %}<tr><th>企画</th><td colspan="2">{{ prop["series"] }}</td></tr>{% endif %}
     <tr>
       <th>販売状況</th>
       <td colspan="2">
@@ -87,14 +150,28 @@
     </tr>
     {% if prop["mls_number"] %}<tr><th>MLS</th><td colspan="2">{{ prop["mls_number"] }}</td></tr>{% endif %}
     <tr><th>出所</th><td colspan="2"><a href="{{ prop['source_url'] }}" target="_blank" rel="noopener">{{ prop["source"] }}</a></td></tr>
+    {% if prop["listing_url"] %}
+      <tr><th>販売ページ</th><td colspan="2"><a href="{{ prop['listing_url'] }}" target="_blank" rel="noopener">開く</a></td></tr>
+    {% endif %}
   </table>
+
+  {% if prop["summary"] or prop["summary_en"] %}
+    <h2>説明</h2>
+    {% if prop["summary"] %}<p>{{ prop["summary"] }}</p>{% endif %}
+    {% if prop["summary_en"] %}<p class="note">{{ prop["summary_en"] }}</p>{% endif %}
+  {% endif %}
 
   <h2>採点（{{ "%.0f"|format(prop["score"] or 0) }}点）</h2>
   {% if axes %}
-    <table>
-      <tr><th>軸</th><th class="num">点</th><th>理由</th></tr>
+    {# 軸の名前と点は1つの欄にまとめる。分けると、狭い画面で
+       「style_ide / ntified」と語の途中で割れた。 #}
+    <table class="axes">
+      <tr><th>軸</th><th>理由</th></tr>
       {% for key, raw, reason in axes %}
-        <tr><td>{{ key }}</td><td class="num">{{ "%.0f"|format(raw) }}</td><td>{{ reason }}</td></tr>
+        <tr>
+          <td class="k">{{ key }} <span class="num">{{ "%.0f"|format(raw) }}</span></td>
+          <td>{{ reason }}</td>
+        </tr>
       {% endfor %}
     </table>
   {% else %}
@@ -108,7 +185,7 @@
 {% endif %}
 
 {% if images %}
-  <h2>写真（{{ images|length }}枚 / 出したのは先頭 {{ carousel_max }}枚まで）</h2>
+  <h2>写真（{{ images|length }}枚{% if foreign_images %} / うち別サイト {{ foreign_images }}枚{% endif %} / 出したのは先頭 {{ carousel_max }}枚まで）</h2>
   <div class="thumbs">
     {% for img in images %}
       <div class="thumb {{ '' if loop.index <= carousel_max else 'unused' }}">
