@@ -87,6 +87,10 @@ def build_source(report: WeeklyReport) -> str:
         f"リーチ合計: {report.reach_total}（先週 {report.prev_total}）",
         f"1本あたり: {_fmt(report.reach_avg)}（先週 {_fmt(report.prev_avg)}）",
         f"リーチが取れている本数: {report.measured}",
+        # **未取得の本数も渡す。** 画面には出ているのに材料に無かったので、
+        # 「3本が未取得」と書いた講評が検算で捨てられた（2026-09-16）。
+        # 事実は正しいのに落ちる——材料の側の漏れだった。
+        f"リーチが未取得の本数: {len(report.published) - report.measured}",
     ]
     if report.best is not None:
         from freming.report.weekly import name_of
@@ -119,6 +123,15 @@ def build_source(report: WeeklyReport) -> str:
         lines.append("機械的に出した比較:")
         for insight in report.insights:
             lines.append(f"- {insight.headline}（{insight.evidence}）")
+
+    # 振り返りのチェック（偏りなど）。画面に出ている事実なので、材料にも
+    # 入れる。入れないと、正しいことを書いても検算で落ちる。
+    flagged = [c for c in report.checks if c.note]
+    if flagged:
+        lines.append("")
+        lines.append("気になった点:")
+        for check in flagged:
+            lines.append(f"- {check.label}: {check.note}")
 
     lines.append("")
     lines.append(f"未審査の在庫: {report.pending} 件 / "

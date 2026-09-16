@@ -111,6 +111,18 @@ def test_渡すのは数字だけ(config, conn) -> None:
     assert "http" not in source        # URLも渡さない
 
 
+def test_画面に出ている数字は材料にも入れる(config, conn) -> None:
+    """**材料の漏れは、正しい講評を落とす。**
+
+    「3本が未取得」と書いた講評が検算で捨てられた（2026-09-16）。事実は
+    画面に出ていたのに、材料には無かった。
+    """
+    _week(conn)
+    source = comment.build_source(build(config, conn, NOW))
+    assert "リーチが未取得の本数" in source
+    assert "気になった点" in source      # 偏りなどの振り返り
+
+
 # --- 検算 -------------------------------------------------------------
 
 def test_渡していない数字を見つける() -> None:
