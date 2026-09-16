@@ -247,11 +247,17 @@ def test_画面に出る文字に星印を書かない(config, conn) -> None:
     2026-09-16 の実機で「**埋めるために弱い案件を入れない**」と表示されて
     いた。コード中のコメントと、画面に出る文字を混同しない。
     """
-    a = _add(conn, "https://a.example.com/1", score=70, genre="architect")
-    _post(conn, 1, a, "2026-09-15T00:02:00+00:00")
-    for check in build(config, conn, NOW).checks:
+    _posted(conn, 4, genre="adaptive_reuse", reach=400, url_seed=1)
+    _posted(conn, 5, genre="architect", reach=100, images=3, url_seed=2)
+    report = build(config, conn, NOW)
+    for check in report.checks:
         assert "**" not in check.label
         assert "**" not in check.note
+    # 考察も同じ。画面に出る文字はすべて対象
+    for insight in report.insights:
+        assert "**" not in insight.headline
+        assert "**" not in insight.evidence
+        assert "**" not in insight.suggestion
 
 
 # --- 投稿カルテ -------------------------------------------------------
@@ -392,3 +398,88 @@ def test_失敗した投稿は理由まで出す(config, conn) -> None:
     body = TestClient(create_app(config)).get("/posts/1").text
     assert "3回" in body
     assert "コンテナが ERROR" in body
+
+
+# --- 考察 -------------------------------------------------------------
+
+def _posted(conn, n, *, genre, reach, images=10, style=0, one=0, day=1, url_seed=0):
+    """通常投稿を n 本作る（考察の材料）。"""
+    for i in range(n):
+        pid = _add(conn, f"https://a.example.com/t{url_seed}-{genre}-{i}",
+                   score=70, genre=genre)
+        # 出した物件は納品済み。**未審査の在庫には数えない**（本番と同じ）
+        conn.execute(
+            "UPDATE properties SET style_identified = ?, one_of_a_kind = ?, "
+            "status = 'delivered' WHERE id = ?",
+            (style, one, pid),
+        )
+        for pos in range(images):
+            conn.execute(
+                "INSERT INTO images (property_id, source_url, position) VALUES (?, ?, ?)",
+                (pid, f"https://cdn.example.com/{pid}-{pos}.jpg", pos + 1),
+            )
+        post_id = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 AS n FROM posts").fetchone()["n"]
+        _post(conn, post_id, pid, f"2026-09-0{day}T00:02:00+00:00", reach=reach)
+    conn.commit()
+
+
+def test_本数が足りないうちは何も言わない(config, conn) -> None:
+    """**1本の当たり外れを法則にしない。** これが考察の肝。"""
+    _posted(conn, 3, genre="architect", reach=300)
+    insights = build(config, conn, NOW).insights
+    assert len(insights) == 1
+    assert "まだ何も言えません" in insights[0].headline
+    assert "3 本" in insights[0].evidence
+
+
+def test_伸びているジャンルと在庫を出す(config, conn) -> None:
+    _posted(conn, 4, genre="adaptive_reuse", reach=400, url_seed=1)
+    _posted(conn, 5, genre="architect", reach=100, url_seed=2)
+    # 未審査の在庫（提案の材料）
+    _add(conn, "https://a.example.com/stock", score=80, genre="adaptive_reuse")
+
+    insights = build(config, conn, NOW).insights
+    top = next(i for i in insights if "Conversion" in i.headline)
+    assert "400" in top.evidence            # その群の平均
+    assert "1 件" in top.suggestion         # 在庫の件数
+
+
+def test_在庫が無ければそう言う(config, conn) -> None:
+    _posted(conn, 4, genre="adaptive_reuse", reach=400, url_seed=1)
+    _posted(conn, 5, genre="architect", reach=100, url_seed=2)
+    top = next(i for i in build(config, conn, NOW).insights if "Conversion" in i.headline)
+    assert "在庫がありません" in top.suggestion
+
+
+def test_差が小さければ言い切らない(config, conn) -> None:
+    _posted(conn, 5, genre="architect", reach=200, url_seed=1)
+    _posted(conn, 5, genre="loft", reach=205, url_seed=2)
+    insights = build(config, conn, NOW).insights
+    assert any("はっきりした差はありません" in i.headline for i in insights)
+
+
+def test_様式の特定がリーチでも効いていれば言う(config, conn) -> None:
+    _posted(conn, 4, genre="architect", reach=400, style=1, url_seed=1)
+    _posted(conn, 4, genre="architect", reach=100, style=0, url_seed=2)
+    insight = next(i for i in build(config, conn, NOW).insights
+                   if "様式の特定" in i.headline)
+    assert "あり 400" in insight.evidence
+
+
+def test_効いていないときも同じ強さで書く(config, conn) -> None:
+    """**都合の良い方だけ出さない。** 逆向きでも同じように出す。"""
+    _posted(conn, 4, genre="architect", reach=100, one=1, url_seed=1)
+    _posted(conn, 4, genre="architect", reach=400, one=0, url_seed=2)
+    insight = next(i for i in build(config, conn, NOW).insights
+                   if "一点物" in i.headline)
+    assert "効いていません" in insight.headline
+    assert "すぐには変えません" in insight.suggestion
+
+
+def test_考察は画面にも出る(config, conn) -> None:
+    _posted(conn, 4, genre="adaptive_reuse", reach=400, url_seed=1)
+    _posted(conn, 5, genre="architect", reach=100, url_seed=2)
+    body = TestClient(create_app(config)).get("/report").text
+    assert "考察" in body
+    assert "根拠:" in body
+    assert "平均の差だけ" in body        # 因果ではないと断ってある

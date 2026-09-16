@@ -13,6 +13,8 @@
   - **今週の数字**: 本数・リーチの合計と平均、いちばん見られた1本
   - **先週との比較**: 合計と平均の増減。**リーチは時間とともに伸びる**ので、
     出したばかりの週は不利になる。そう画面にも書く
+  - **考察**: 数字の差だけを並べる。**因果は言わない。**本数が足りない
+    うちは「まだ言えない」と書く（MIN_TOTAL / MIN_GROUP）
   - **ジャンル別の平均**（直近8週）: 何が効いているかの手がかり。件数が
     少ないうちは断定しない
   - **今週の振り返り**: 出したものの偏り
@@ -34,6 +36,13 @@ from freming.db.connection import DbConnection, Row
 # ジャンル別の平均を見る期間。短すぎると1本の当たり外れで動く。
 TREND_WEEKS = 8
 
+# **考察を出してよい下限。** これを割っているときは何も言わない。
+# 3本の平均同士を比べても、1本の当たり外れで順位がひっくり返る。
+MIN_GROUP = 3     # 群として比べるのに要る本数
+MIN_TOTAL = 8     # 全体について何か言うのに要る本数
+# 平均どうしの差がこれ未満なら「差がある」とは言わない（比）。
+MIN_LIFT = 1.15
+
 # 見出しに使う日本語。genre の値は scoring/schema.py の GENRES。
 GENRE_LABELS = {
     "architect": "Architect-Designed",
@@ -54,6 +63,21 @@ class Check:
     label: str
     ok: bool
     note: str = ""
+
+
+@dataclass
+class Insight:
+    """数字から言えること。**根拠の数字を必ず持つ。**
+
+    ここに入るのは「AとBで平均がこれだけ違った」という観測だけで、
+    因果ではない。写真の枚数が多い投稿が伸びていたとしても、枚数が
+    理由とは限らない（枚数を出せる物件は、そもそも写真が良い）。
+    提案は「次に試す価値がある」までにとどめる。
+    """
+
+    headline: str
+    evidence: str
+    suggestion: str = ""
 
 
 @dataclass
@@ -80,6 +104,7 @@ class WeeklyReport:
     genres: list[GenreStat] = field(default_factory=list)
     by_country: Counter = field(default_factory=Counter)
     by_genre: Counter = field(default_factory=Counter)
+    insights: list[Insight] = field(default_factory=list)
     # 在庫は1行だけ。**並べない**（未審査タブで見る）。
     pending: int = 0
     approved_waiting: int = 0
@@ -202,6 +227,7 @@ def build(config: Config, conn: DbConnection, now: datetime | None = None) -> We
         "SELECT COUNT(*) AS n FROM properties WHERE status IN ('approved', 'delivered')"
     ).fetchone()["n"]
 
+    report.insights = _insights(conn, end)
     report.checks = _checks(report)
     return report
 
@@ -234,6 +260,125 @@ def _genre_stats(conn: DbConnection, end: datetime) -> list[GenreStat]:
         for genre, values in buckets.items()
     ]
     return sorted(stats, key=lambda s: s.reach_avg, reverse=True)
+
+
+# 考察の材料。**通常投稿だけ**を見る。リールは作り方も出し方も違うので、
+# 同じ土俵に乗せると平均が意味を失う。
+_TREND_ROWS = """
+SELECT o.reach AS reach, o.published_at AS published_at,
+       p.genre AS genre, p.style_identified AS style_identified,
+       p.one_of_a_kind AS one_of_a_kind,
+       (SELECT COUNT(*) FROM images i WHERE i.property_id = p.id) AS image_count
+  FROM posts AS o
+  JOIN properties AS p ON p.id = o.property_id
+ WHERE o.state = 'published' AND o.kind = 'feed' AND o.reach IS NOT NULL
+   AND o.published_at >= ? AND o.published_at < ?
+"""
+
+
+def _avg(values: list[int]) -> float:
+    return sum(values) / len(values) if values else 0.0
+
+
+def _compare(
+    rows: list[Row], pick, label_yes: str, label_no: str,
+) -> tuple[float, float, int, int] | None:
+    """条件を満たす群と満たさない群の平均。**どちらも足りなければ None。**"""
+    yes = [int(r["reach"]) for r in rows if pick(r)]
+    no = [int(r["reach"]) for r in rows if not pick(r)]
+    if len(yes) < MIN_GROUP or len(no) < MIN_GROUP:
+        return None
+    return _avg(yes), _avg(no), len(yes), len(no)
+
+
+def _insights(conn: DbConnection, end: datetime) -> list[Insight]:
+    """**数字の差だけを並べる。** 因果は言わない。
+
+    本数が足りないうちは「まだ言えない」と書く。ここで無理に傾向を
+    書くと、1本の当たり外れが法則として残り、次の選定を歪める。
+    """
+    since = (end - timedelta(weeks=TREND_WEEKS)).astimezone(UTC).isoformat()
+    rows = conn.execute(
+        _TREND_ROWS, (since, end.astimezone(UTC).isoformat())
+    ).fetchall()
+
+    if len(rows) < MIN_TOTAL:
+        return [Insight(
+            "まだ何も言えません",
+            f"直近{TREND_WEEKS}週でリーチが取れている通常投稿は {len(rows)} 本。"
+            f"比べるには全体で {MIN_TOTAL} 本、群ごとに {MIN_GROUP} 本が要ります",
+            "毎日の記録が溜まれば自動で出ます。待つのが正解です",
+        )]
+
+    overall = _avg([int(r["reach"]) for r in rows])
+    out: list[Insight] = []
+
+    # 1. ジャンル。いちばん高い群が全体平均を超えていれば、在庫を当たる。
+    buckets: dict[str, list[int]] = defaultdict(list)
+    for row in rows:
+        buckets[row["genre"] or "unknown"].append(int(row["reach"]))
+    usable = {g: v for g, v in buckets.items() if len(v) >= MIN_GROUP}
+    if usable:
+        genre, values = max(usable.items(), key=lambda kv: _avg(kv[1]))
+        if _avg(values) >= overall * MIN_LIFT:
+            label = GENRE_LABELS.get(genre, genre)
+            stock = conn.execute(
+                "SELECT COUNT(*) AS n FROM properties "
+                "WHERE status = 'pending' AND genre = ? AND score IS NOT NULL",
+                (genre,),
+            ).fetchone()["n"]
+            out.append(Insight(
+                f"{label} が伸びています",
+                f"平均 {_avg(values):.0f}（{len(values)}本）／ 全体 {overall:.0f}"
+                f"（{len(rows)}本）",
+                f"未審査に {label} が {stock} 件あります。来週の枠をここから埋めると、"
+                "同じ傾向が続くかを確かめられます" if stock else
+                f"ただし未審査に {label} の在庫がありません。収集ソースを増やす話になります",
+            ))
+
+    # 2. 写真の枚数。**枚数が理由とは限らない**——枚数を出せる物件は、
+    #    そもそも写真が良いことが多い。観測として並べるにとどめる。
+    many = _compare(rows, lambda r: (r["image_count"] or 0) >= 8, "", "")
+    if many:
+        high, low, n_high, n_low = many
+        if high >= low * MIN_LIFT or low >= high * MIN_LIFT:
+            better = "多い方" if high > low else "少ない方"
+            out.append(Insight(
+                f"写真の枚数は{better}が伸びています",
+                f"8枚以上 {high:.0f}（{n_high}本）／ 7枚以下 {low:.0f}（{n_low}本）",
+                "枚数が理由とは限りません（枚数を出せる物件は写真も良い）。"
+                "足りない物件を先に埋めると、どちらなのか切り分けられます"
+                if high > low else "",
+            ))
+
+    # 3. 承認の実績で効いていた判定が、リーチでも効いているか。
+    for key, label in (("style_identified", "様式の特定"), ("one_of_a_kind", "一点物")):
+        pair = _compare(rows, lambda r, k=key: bool(r[k]), "", "")
+        if not pair:
+            continue
+        yes, no, n_yes, n_no = pair
+        if yes >= no * MIN_LIFT:
+            out.append(Insight(
+                f"{label}があるものが伸びています",
+                f"あり {yes:.0f}（{n_yes}本）／ なし {no:.0f}（{n_no}本）",
+                f"審査の基準（{label}を重く見る）が、リーチでも裏づけられています",
+            ))
+        elif no >= yes * MIN_LIFT:
+            out.append(Insight(
+                f"{label}は、リーチでは効いていません",
+                f"あり {yes:.0f}（{n_yes}本）／ なし {no:.0f}（{n_no}本）",
+                "審査の基準は承認の実績から決めたものです。すぐには変えません。"
+                "本数が増えても同じ向きが続くなら、そのとき見直します",
+            ))
+
+    if not out:
+        out.append(Insight(
+            "はっきりした差はありません",
+            f"直近{TREND_WEEKS}週 {len(rows)}本・平均 {overall:.0f}。"
+            f"群ごとの差が {int((MIN_LIFT - 1) * 100)}% 未満",
+            "いまのところ、どれを出しても同じくらい見られています",
+        ))
+    return out
 
 
 def _checks(report: WeeklyReport) -> list[Check]:
@@ -351,6 +496,14 @@ def render(report: WeeklyReport) -> str:
             if reason:
                 lines.append(f"      判定: {reason[:70]}")
 
+    if report.insights:
+        lines += ["", "■ 考察"]
+        for insight in report.insights:
+            lines.append(f"  {insight.headline}")
+            lines.append(f"    根拠: {insight.evidence}")
+            if insight.suggestion:
+                lines.append(f"    次に: {insight.suggestion}")
+
     if report.genres:
         lines += ["", f"■ ジャンル別の平均リーチ（直近{TREND_WEEKS}週）"]
         for stat in report.genres:
@@ -373,9 +526,12 @@ def render(report: WeeklyReport) -> str:
 __all__ = [
     "GENRE_LABELS",
     "KIND_LABELS",
+    "MIN_GROUP",
+    "MIN_TOTAL",
     "TREND_WEEKS",
     "Check",
     "GenreStat",
+    "Insight",
     "WeeklyReport",
     "axes_of",
     "build",

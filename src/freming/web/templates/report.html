@@ -45,6 +45,11 @@
   .rep .check { font: 12px/2 var(--mono); }
   .rep .check .ng { color: var(--hi); }
   .rep .stock { font: 12px/1.9 var(--mono); }
+  /* 考察。見出し・根拠・次の一手を縦に積む。 */
+  .rep .insight { padding: 12px 0; border-bottom: 1px solid var(--fill); }
+  .rep .insight .head { font-size: 16px; line-height: 1.6; }
+  .rep .insight .ev { font: 11px/1.9 var(--mono); }
+  .rep .insight .sug { font-size: 13px; line-height: 1.8; margin-top: 4px; }
 
   @media (max-width: 640px) {
     .rep .nums { gap: 18px; }
@@ -160,6 +165,23 @@
     </div>
   </div>
 {% endfor %}
+
+<h2>考察</h2>
+{% for insight in report.insights %}
+  <div class="insight">
+    <div class="head">{{ insight.headline }}</div>
+    <div class="ev">根拠: {{ insight.evidence }}</div>
+    {% if insight.suggestion %}<div class="sug">{{ insight.suggestion }}</div>{% endif %}
+  </div>
+{% endfor %}
+<p class="note">
+  {# **因果を言わない。** 「AのほうがBより平均が高かった」までが事実で、
+     Aが理由かどうかは分からない。ここを混ぜると、1本の当たり外れが
+     法則として残り、次の選定を歪める。 #}
+  ここに出るのは<strong>平均の差だけ</strong>です。理由まで示すものではありません
+  （写真が多い投稿が伸びていても、枚数が理由とは限りません——枚数を出せる物件は、
+  そもそも写真が良いことが多い）。本数が足りないときは「まだ言えません」と出ます。
+</p>
 
 {% if report.genres %}
   <h2>ジャンル別の平均リーチ（直近{{ trend_weeks }}週）</h2>
