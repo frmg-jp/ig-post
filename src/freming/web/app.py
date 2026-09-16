@@ -504,6 +504,7 @@ def create_app(
         from datetime import UTC, datetime, timedelta
 
         from freming.collect.listing_status import LABELS as STATUS_LABELS
+        from freming.report import comment as weekly_comment
         from freming.report.weekly import (
             GENRE_LABELS,
             KIND_LABELS,
@@ -524,6 +525,9 @@ def create_app(
         conn = _conn()
         try:
             report = build(config, conn, when)
+            # **画面からはAPIを呼ばない。** 週1の定期実行が書いたものを
+            # 読むだけ。開くたびに呼ぶと、見るだけで費用が出る。
+            note = weekly_comment.load(conn, report.start.date().isoformat())
             counts = count_by_status(conn)
         finally:
             conn.close()
@@ -533,6 +537,7 @@ def create_app(
             "report.html",
             {
                 "report": report,
+                "note": note,
                 "status_labels": STATUS_LABELS,
                 "genre_labels": GENRE_LABELS,
                 "kind_labels": KIND_LABELS,

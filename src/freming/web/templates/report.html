@@ -50,6 +50,11 @@
   .rep .insight .head { font-size: 16px; line-height: 1.6; }
   .rep .insight .ev { font: 11px/1.9 var(--mono); }
   .rep .insight .sug { font-size: 13px; line-height: 1.8; margin-top: 4px; }
+  /* 講評。読み物なので、幅を詰めて本文の書体で置く。 */
+  .rep .note-body {
+    font-size: 15px; line-height: 2; max-width: 46em;
+    border-left: 2px solid var(--line); padding-left: 14px; margin-top: 8px;
+  }
 
   @media (max-width: 640px) {
     .rep .nums { gap: 18px; }
@@ -165,6 +170,18 @@
     </div>
   </div>
 {% endfor %}
+
+{# 講評。**週1の定期実行が書いたものを読むだけ**で、この画面からは
+   APIを呼ばない（開くたびに費用が出る）。 #}
+{% if note %}
+  <h2>講評</h2>
+  <div class="note-body">{{ note["body"] }}</div>
+  <p class="note">
+    この文章は<strong>下の数字だけ</strong>を材料に Claude が書いています
+    （{{ note["model"] }} / {{ note["created_at"][:16].replace("T", " ") }}）。
+    渡していない数字が本文に出た場合は保存しない仕組みにしてあります。
+  </p>
+{% endif %}
 
 <h2>考察</h2>
 {% for insight in report.insights %}

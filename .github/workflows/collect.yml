@@ -149,6 +149,25 @@ jobs:
         continue-on-error: true
         run: python -m freming.cli listing-status --limit 20
 
+      # **週に1回だけ、講評を書かせる。** 月曜だけ走る（この定期実行は
+      # 毎日 00:00 UTC = 09:00 JST なので、月曜の朝に出る）。
+      #
+      # 画面（/report）からはAPIを呼ばない。開くたびに呼ぶと、見るだけで
+      # 費用が出る。ここで書いたものをDBに置き、画面は読むだけにする。
+      # Haiku で1回1円未満。既にその週の講評があれば何もしない。
+      #
+      # **渡していない数字が本文に出たら保存しない**（report/comment.py）。
+      # 失敗しても収集を止める理由にはしない。
+      - name: 週次レポートの講評
+        if: ${{ github.event_name == 'schedule' }}
+        continue-on-error: true
+        run: |
+          if [ "$(date -u +%u)" = "1" ]; then
+            python -m freming.cli report --comment
+          else
+            echo "月曜だけ書きます（今日は $(date -u +%A)）"
+          fi
+
       # 投稿の予定を3日先まで並べる。**投稿はしない。** 投稿するのは
       # 審査UI側（Meta が画像を取りに来る先が審査UIだから）。ここで
       # 予定だけ作っておくと、人が朝いちで「投稿予定」を見て止められる。

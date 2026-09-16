@@ -806,6 +806,7 @@ def _cmd_weekly_report(args: argparse.Namespace) -> int:
     from zoneinfo import ZoneInfo
 
     from freming.db.connection import session
+    from freming.report import comment
     from freming.report.weekly import build, render
 
     cfg = load_config(args.config)
@@ -822,7 +823,29 @@ def _cmd_weekly_report(args: argparse.Namespace) -> int:
 
     with session(cfg.app.target()) as conn:
         report = build(cfg, conn, when)
-    print(render(report))
+        week_start = report.start.date().isoformat()
+        print(render(report))
+
+        existing = comment.load(conn, week_start)
+        if args.comment:
+            # **週に1回だけ。** 画面を開くたびには呼ばない（web/app.py は
+            # 保存されたものを読むだけ）。同じ週に何度も書かせない。
+            if existing is not None and not args.force:
+                print(f"\n（{week_start} の講評は既にあります。書き直すなら --force）")
+            else:
+                try:
+                    written = comment.write(cfg, report)
+                except Exception as exc:  # noqa: BLE001 - 理由をそのまま出す
+                    print(f"\n講評を書けませんでした: {exc}", file=sys.stderr)
+                    return 1
+                comment.save(conn, week_start, written)
+                existing = comment.load(conn, week_start)
+
+        if existing is not None:
+            print("\n■ 講評")
+            for line in str(existing["body"]).splitlines():
+                print(f"  {line}")
+            print(f"  （{existing['model']} / {str(existing['created_at'])[:16]}）")
     return 0
 
 
@@ -2682,6 +2705,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_weekly.add_argument(
         "--week", help="その日を含む週を出す（YYYY-MM-DD）。既定は今週",
+    )
+    p_weekly.add_argument(
+        "--comment", action="store_true",
+        help="**講評を書かせて保存する**（Claude を1回呼ぶ。1円未満）",
+    )
+    p_weekly.add_argument(
+        "--force", action="store_true", help="その週の講評が既にあっても書き直す",
     )
     p_weekly.set_defaults(func=_cmd_weekly_report)
 

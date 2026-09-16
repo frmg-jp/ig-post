@@ -32,6 +32,7 @@ on:
           - post-reach         # 直近の投稿のリーチを読んで記録（費用なし）
           - listing-status     # **いま買えるのかを掲載ページで確認**（費用なし）
           - weekly-report      # 週次レポートを出す（読むだけ・費用なし）
+          - weekly-comment     # **講評を書かせる**（Claude を1回。1円未満）
           - exchange-ig-code   # 受け取った code をトークンに換える（費用なし）
           - check-ig-token     # トークンの疎通とスコープ（費用なし）
           - ig-media           # **アカウントの実際の投稿**を新しい順に出す（費用なし）
@@ -166,6 +167,14 @@ jobs:
                 $( [ -n "$YES" ] || echo --dry-run )
               ;;
             weekly-report)    python -m freming.cli report ;;
+            # 「本当に実行する」を入れると、その週の講評があっても書き直す。
+            weekly-comment)
+              if [ -n "$YES" ]; then
+                python -m freming.cli report --comment --force
+              else
+                python -m freming.cli report --comment
+              fi
+              ;;
             # 「対象の上限」に件数を入れると、承認された物件をその数だけ
             # 現物で並べる（プロンプトの実例を書き直す材料）。
             approval-report)
