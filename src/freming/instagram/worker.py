@@ -223,9 +223,10 @@ def weekly_picks(
             for picks in by_day.values():
                 for pick in picks:
                     pick.reach = media_reach(token, pick.media_id)
-                    # **読んだ数字をその場で捨てない。** 2026-09-15 まで、
-                    # 毎週ここでリーチを読みながら1件も保存しておらず、
-                    # 「先週と比べてどうだったか」が一度も言えなかった。
+                    # **読んだ数字をその場で捨てない。** 2026-09-01 に
+                    # この選抜を書き直したとき、記録する処理だけが一緒に
+                    # 落ちていた（import だけが残っていた）。以降2週間、
+                    # 毎週読みながら1件も保存していない。
                     # 予定表に無い投稿（手で出したもの）は何も起きない。
                     record_reach_by_media(conn, pick.media_id, pick.reach)
             picked_by = "reach"

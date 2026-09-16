@@ -1006,8 +1006,12 @@ def record_reach_by_media(conn: DbConnection, media_id: str, reach: int | None) 
 
     週次リールの選抜は**アカウントの実物**を見るので、手で出した投稿も
     混ざる（予定表に行が無い）。**読んだ数字をその場で捨てない**ために、
-    引ける行にだけ書く。2026-09-15 まで、選抜で読んだリーチは1件も
-    保存されていなかった（record_reach を誰も呼んでいなかった）。
+    引ける行にだけ書く。
+
+    2026-09-01 に選抜を「予定表から」から「アカウントの実物から」へ
+    書き直したとき、**記録する処理だけが一緒に落ちた**（record_reach の
+    呼び出しが消え、import だけが残った）。それ以降の2週間、毎週読んだ
+    数字は1つも保存されていない。08/31 以前の値はDBに残っている。
     """
     cursor = conn.execute(
         "UPDATE posts SET reach = ?, reach_checked_at = ? WHERE ig_media_id = ?",
