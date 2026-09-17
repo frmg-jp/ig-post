@@ -451,11 +451,39 @@ def test_在庫が無ければそう言う(config, conn) -> None:
     assert "在庫がありません" in top.suggestion
 
 
-def test_差が小さければ言い切らない(config, conn) -> None:
+def test_差が小さくても黙らない(config, conn) -> None:
+    """**毎週かならず何か出す。** 以前は「はっきりした差はありません」の
+    1行で終わっていたが、この規模では毎週それになり、欄として死んでいた
+    （2026-09-17 の指摘）。差が小さいことは札で示す。
+    """
     _posted(conn, 5, genre="architect", reach=200, url_seed=1)
     _posted(conn, 5, genre="loft", reach=205, url_seed=2)
     insights = build(config, conn, NOW).insights
-    assert any("はっきりした差はありません" in i.headline for i in insights)
+    assert insights, "何も出さないのは禁止"
+    assert any("どれを出しても同じくらい" in i.headline for i in insights)
+    # 差が小さいので「傾向」は名乗らない
+    assert all(i.strength != "傾向" for i in insights)
+
+
+def test_小さい差も仮説として出す(config, conn) -> None:
+    """**少しの差でも、向きが出ていれば言う。** 確度は札で示す。"""
+    _posted(conn, 4, genre="architect", reach=220, style=1, url_seed=1)
+    _posted(conn, 4, genre="architect", reach=200, style=0, url_seed=2)
+    insight = next(i for i in build(config, conn, NOW).insights
+                   if "様式の特定" in i.headline)
+    assert insight.strength == "仮説"          # 15%未満なので「傾向」ではない
+    assert "差 10%" in insight.evidence
+    assert "1本の当たり外れで消える" in insight.evidence
+    assert insight.suggestion                  # 次の一手は必ず添える
+
+
+def test_差の大きい順に並ぶ(config, conn) -> None:
+    _posted(conn, 4, genre="architect", reach=400, style=1, url_seed=1)
+    _posted(conn, 4, genre="loft", reach=100, style=0, url_seed=2)
+    insights = build(config, conn, NOW).insights
+    lifts = [i.lift for i in insights]
+    assert lifts == sorted(lifts, reverse=True)
+    assert len(insights) <= 3
 
 
 def test_様式の特定がリーチでも効いていれば言う(config, conn) -> None:

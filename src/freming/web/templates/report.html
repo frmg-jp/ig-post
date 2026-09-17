@@ -50,6 +50,13 @@
   .rep .insight .head { font-size: 16px; line-height: 1.6; }
   .rep .insight .ev { font: 11px/1.9 var(--mono); }
   .rep .insight .sug { font-size: 13px; line-height: 1.8; margin-top: 4px; }
+  /* 確度の札。**弱い根拠を強く見せない**ための目印。 */
+  .rep .insight .badge {
+    display: inline-block; vertical-align: 2px; margin-right: 6px;
+    font: 11px/1 var(--mono); padding: 4px 6px; border: 1px solid var(--line);
+  }
+  .rep .insight .s-傾向 { border-color: var(--ink); }
+  .rep .insight .s-参考 { opacity: .55; }
   /* 講評。読み物なので、幅を詰めて本文の書体で置く。 */
   .rep .note-body {
     font-size: 15px; line-height: 2; max-width: 46em;
@@ -192,7 +199,10 @@
 <h2>考察</h2>
 {% for insight in report.insights %}
   <div class="insight">
-    <div class="head">{{ insight.headline }}</div>
+    <div class="head">
+      {% if insight.strength %}<span class="badge s-{{ insight.strength }}">{{ insight.strength }}</span>{% endif %}
+      {{ insight.headline }}
+    </div>
     <div class="ev">根拠: {{ insight.evidence }}</div>
     {% if insight.suggestion %}<div class="sug">{{ insight.suggestion }}</div>{% endif %}
   </div>
@@ -203,7 +213,16 @@
      法則として残り、次の選定を歪める。 #}
   ここに出るのは<strong>平均の差だけ</strong>です。理由まで示すものではありません
   （写真が多い投稿が伸びていても、枚数が理由とは限りません——枚数を出せる物件は、
-  そもそも写真が良いことが多い）。本数が足りないときは「まだ言えません」と出ます。
+  そもそも写真が良いことが多い）。
+</p>
+<p class="note">
+  {# **小さい差も出す。ただし小さいことは隠さない。** 以前は 15% を
+     超えたものだけを出していたので、毎週「はっきりした差はありません」
+     しか出なかった（2026-09-17 の指摘）。 #}
+  札の意味 —
+  <strong>傾向</strong>: 群ごと{{ min_group }}本以上あって差も大きい。次の選定に使えます。
+  <strong>仮説</strong>: 向きは出ているが、1本の当たり外れで消える程度の差です。
+  <strong>参考</strong>: ほぼ差がありません（<em>差が無いこと</em>も情報として出しています）。
 </p>
 
 {% if report.genres %}

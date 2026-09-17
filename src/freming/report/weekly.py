@@ -36,12 +36,25 @@ from freming.db.connection import DbConnection, Row
 # ジャンル別の平均を見る期間。短すぎると1本の当たり外れで動く。
 TREND_WEEKS = 8
 
-# **考察を出してよい下限。** これを割っているときは何も言わない。
-# 3本の平均同士を比べても、1本の当たり外れで順位がひっくり返る。
-MIN_GROUP = 3     # 群として比べるのに要る本数
-MIN_TOTAL = 8     # 全体について何か言うのに要る本数
-# 平均どうしの差がこれ未満なら「差がある」とは言わない（比）。
-MIN_LIFT = 1.15
+# **考察は毎週かならず何か出す。** 以前は「全体8本・群ごと3本・差15%」を
+# 割ると何も言わずに「はっきりした差はありません」だけを出していた。
+# 本数がこの規模では毎週それになり、欄として死んでいた（2026-09-17 の指摘）。
+#
+# いまは**差の大きい順に並べて、確度の札を貼って出す。** 断定はしないが、
+# 黙りもしない。札の意味:
+#
+#   傾向 … 群ごと MIN_GROUP 本以上、差が LIFT_TREND 以上。次の選定に使える
+#   仮説 … 差が LIFT_HINT 以上。1本の当たり外れで消える程度の差
+#   参考 … それ未満、または群が小さい。**今のところ差は無い**という情報
+MIN_PAIR = 2      # 比べるのに最低これだけ要る（これ未満は出さない）
+MIN_GROUP = 3     # 「傾向」を名乗れる本数
+MIN_TOTAL = 6     # 全体について何か言うのに要る本数
+LIFT_TREND = 1.15  # これ以上なら「傾向」
+LIFT_HINT = 1.05   # これ以上なら「仮説」
+TOP_INSIGHTS = 3   # 出す数。多すぎると全部が薄くなる
+
+# 互換のため残す（外から参照されている）。
+MIN_LIFT = LIFT_TREND
 
 # 見出しに使う日本語。genre の値は scoring/schema.py の GENRES。
 GENRE_LABELS = {
@@ -73,11 +86,16 @@ class Insight:
     因果ではない。写真の枚数が多い投稿が伸びていたとしても、枚数が
     理由とは限らない（枚数を出せる物件は、そもそも写真が良い）。
     提案は「次に試す価値がある」までにとどめる。
+
+    strength は確度の札（傾向／仮説／参考）。**小さい差も出すが、
+    小さいことを隠さない。**
     """
 
     headline: str
     evidence: str
     suggestion: str = ""
+    strength: str = ""
+    lift: float = 1.0
 
 
 @dataclass
@@ -268,6 +286,9 @@ _TREND_ROWS = """
 SELECT o.reach AS reach, o.published_at AS published_at,
        p.genre AS genre, p.style_identified AS style_identified,
        p.one_of_a_kind AS one_of_a_kind,
+       p.provenance_visible AS provenance_visible,
+       p.architect AS architect, p.year_built_value AS year_built_value,
+       p.location_country AS location_country, p.score AS score,
        (SELECT COUNT(*) FROM images i WHERE i.property_id = p.id) AS image_count
   FROM posts AS o
   JOIN properties AS p ON p.id = o.property_id
@@ -280,22 +301,232 @@ def _avg(values: list[int]) -> float:
     return sum(values) / len(values) if values else 0.0
 
 
-def _compare(
-    rows: list[Row], pick, label_yes: str, label_no: str,
-) -> tuple[float, float, int, int] | None:
-    """条件を満たす群と満たさない群の平均。**どちらも足りなければ None。**"""
+@dataclass
+class Split:
+    """2つに割って平均を比べた結果。**高い方を left に寄せてある。**"""
+
+    left: str          # 高かった側の名前
+    right: str         # 低かった側の名前
+    left_avg: float
+    right_avg: float
+    n_left: int
+    n_right: int
+
+    @property
+    def lift(self) -> float:
+        return self.left_avg / self.right_avg if self.right_avg else 1.0
+
+    @property
+    def gap_pct(self) -> int:
+        return round((self.lift - 1) * 100)
+
+    @property
+    def n_min(self) -> int:
+        return min(self.n_left, self.n_right)
+
+    @property
+    def strength(self) -> str:
+        """**確度の札。** 小さい差も出すが、小さいことを隠さない。"""
+        if self.n_min >= MIN_GROUP and self.lift >= LIFT_TREND:
+            return "傾向"
+        if self.lift >= LIFT_HINT:
+            return "仮説"
+        return "参考"
+
+    @property
+    def evidence(self) -> str:
+        line = (f"{self.left} {self.left_avg:.0f}（{self.n_left}本）／ "
+                f"{self.right} {self.right_avg:.0f}（{self.n_right}本）"
+                f"／ 差 {self.gap_pct}%")
+        if self.strength == "傾向":
+            return line
+        if self.strength == "仮説":
+            return line + "。1本の当たり外れで消える程度の差です"
+        return line + "。ほぼ差はありません"
+
+
+def _split(rows: list[Row], pick, left: str, right: str) -> Split | None:
+    """条件で2つに割る。**どちらかが MIN_PAIR 本未満なら比べない。**
+
+    以前は MIN_GROUP（3本）未満を切っていたが、それだと出る週がほとんど
+    無かった。2本ずつでも並べて、確度の札で弱さを示すほうが読める。
+    """
     yes = [int(r["reach"]) for r in rows if pick(r)]
     no = [int(r["reach"]) for r in rows if not pick(r)]
-    if len(yes) < MIN_GROUP or len(no) < MIN_GROUP:
+    if len(yes) < MIN_PAIR or len(no) < MIN_PAIR:
         return None
-    return _avg(yes), _avg(no), len(yes), len(no)
+    a, b = _avg(yes), _avg(no)
+    if a >= b:
+        return Split(left, right, a, b, len(yes), len(no))
+    return Split(right, left, b, a, len(no), len(yes))
+
+
+def _median(values: list[float]) -> float:
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    if not ordered:
+        return 0.0
+    if len(ordered) % 2:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) / 2
+
+
+def _stock(conn: DbConnection, where: str, params: tuple = ()) -> int:
+    """未審査でいますぐ回せる在庫。**提案に「何件あるか」を添えるため。**"""
+    try:
+        return int(conn.execute(
+            "SELECT COUNT(*) AS n FROM properties "
+            f"WHERE status = 'pending' AND score IS NOT NULL AND {where}",
+            params,
+        ).fetchone()["n"])
+    except Exception:  # noqa: BLE001 - 列が無い環境でも考察は出す
+        return 0
+
+
+def _axes(conn: DbConnection, rows: list[Row]) -> list[Insight]:
+    """**割れる軸を全部試して、差の大きい順に並べる。**
+
+    以前は軸ごとに「15%を超えたら出す」としていたので、この規模だと
+    どれも超えず、毎週「はっきりした差はありません」だけが出ていた。
+    いまは超えなくても出し、確度の札（傾向／仮説／参考）で弱さを示す。
+    """
+    out: list[Insight] = []
+
+    def add(split: Split | None, headline, suggestion) -> None:
+        if split is None:
+            return
+        out.append(Insight(
+            headline=headline(split),
+            evidence=split.evidence,
+            suggestion=suggestion(split),
+            strength=split.strength,
+            lift=split.lift,
+        ))
+
+    # 1. ジャンル。いちばん平均が高い群 vs それ以外。在庫の件数を添える。
+    buckets: dict[str, list[int]] = defaultdict(list)
+    for row in rows:
+        buckets[row["genre"] or "unknown"].append(int(row["reach"]))
+    usable = {g: v for g, v in buckets.items() if len(v) >= MIN_PAIR}
+    if usable:
+        top = max(usable, key=lambda g: _avg(usable[g]))
+        label = GENRE_LABELS.get(top, top)
+        stock = _stock(conn, "genre = ?", (top,))
+        add(
+            _split(rows, lambda r: (r["genre"] or "unknown") == top, label, "それ以外"),
+            lambda s: (f"{label} が他より見られています" if s.left == label
+                       else f"{label} は他ほど見られていません"),
+            lambda s: (
+                f"未審査に {label} が {stock} 件あります。来週の枠を"
+                f"ここから多めに取ると、同じ向きが続くか確かめられます"
+                if s.left == label and stock else
+                f"未審査に {label} の在庫がありません。収集ソースを増やす話になります"
+                if s.left == label else
+                f"{label} の枠を減らして、他のジャンルに回す価値があります"
+            ),
+        )
+
+    # 2. 写真の枚数。**枚数が理由とは限らない**——枚数を出せる物件は、
+    #    そもそも写真が良いことが多い。
+    thin = _stock(conn, "id IN (SELECT property_id FROM images GROUP BY "
+                        "property_id HAVING COUNT(*) <= 7)")
+    add(
+        _split(rows, lambda r: (r["image_count"] or 0) >= 8, "8枚以上", "7枚以下"),
+        lambda s: f"写真は{s.left}のほうが見られています",
+        lambda s: (
+            f"枚数が理由とは限りません（枚数を出せる物件は写真も良い）。"
+            f"7枚以下の在庫が {thin} 件あります。画像補完で枚数を揃えてから出すと、"
+            f"どちらなのか切り分けられます" if s.left == "8枚以上" and thin else
+            "枚数が理由とは限りません。枚数の少ない物件を避けずに出して確かめられます"
+        ),
+    )
+
+    # 3. 承認の実績で効いていた判定が、リーチでも効いているか。
+    for key, label in (
+        ("style_identified", "様式の特定"),
+        ("one_of_a_kind", "一点物"),
+        ("provenance_visible", "前歴が見える"),
+    ):
+        add(
+            _split(rows, lambda r, k=key: bool(r[k]), f"{label}あり", f"{label}なし"),
+            lambda s, label=label: (
+                f"{label}があるほうが見られています" if s.left.endswith("あり")
+                else f"{label}は、リーチでは効いていません"
+            ),
+            lambda s, label=label: (
+                f"審査で{label}を重く見ているのは、リーチの側からも支持されています"
+                if s.left.endswith("あり") else
+                "審査の基準は承認の実績から決めたものです。すぐには変えません。"
+                "本数が増えても同じ向きが続くなら、そのとき見直します"
+            ),
+        )
+
+    # 4. 国。米国に偏りやすいので、偏りが得なのか損なのかを見る。
+    add(
+        _split(rows, lambda r: (r["location_country"] or "") == "United States",
+               "米国", "米国以外"),
+        lambda s: f"{s.left}のほうが見られています",
+        lambda s: (
+            "出しているものの多くが米国です。米国以外を増やすと本数の偏りは"
+            "直りますが、リーチは下がるかもしれません" if s.left == "米国" else
+            "米国以外を増やす理由になります。いまは米国が多いので、"
+            "枠を分けて試す価値があります"
+        ),
+    )
+
+    # 5. 築年。古いほうが効くのか、新しいほうが効くのか。
+    years = [int(r["year_built_value"]) for r in rows if r["year_built_value"]]
+    if len(years) >= MIN_PAIR * 2:
+        line = int(_median([float(y) for y in years]))
+        add(
+            _split(rows,
+                   lambda r: bool(r["year_built_value"])
+                   and int(r["year_built_value"]) < line,
+                   f"{line}年より前", f"{line}年以降"),
+            lambda s: f"築年は{s.left}のほうが見られています",
+            lambda s: f"来週の枠を{s.left}に寄せると、続くかどうかが分かります",
+        )
+
+    # 6. 設計者名。名前が立つ物件のほうが強いのか。
+    add(
+        _split(rows, lambda r: bool((r["architect"] or "").strip()),
+               "設計者が分かる", "設計者が不明"),
+        lambda s: f"{s.left}ほうが見られています",
+        lambda s: (
+            "設計者名が本文の見出しに立ちます。名前のある物件を優先する価値があります"
+            if s.left == "設計者が分かる" else
+            "設計者名は、いまのところリーチとは結びついていません"
+        ),
+    )
+
+    # 7. 採点。**審査の点数が、実際の反応と合っているか。**
+    scores = [float(r["score"]) for r in rows if r["score"] is not None]
+    if len(scores) >= MIN_PAIR * 2:
+        line = _median(scores)
+        add(
+            _split(rows,
+                   lambda r: r["score"] is not None and float(r["score"]) >= line,
+                   f"{line:.0f}点以上", f"{line:.0f}点未満"),
+            lambda s: (
+                "点数が高いものほど見られています" if s.left.endswith("以上")
+                else "点数とリーチは逆向きです"
+            ),
+            lambda s: (
+                "採点が反応を当てられています。いまの基準を続けて問題ありません"
+                if s.left.endswith("以上") else
+                "点数の高いものが伸びていません。採点が見ている軸と、"
+                "実際に見られる理由がずれている可能性があります"
+            ),
+        )
+
+    return out
 
 
 def _insights(conn: DbConnection, end: datetime) -> list[Insight]:
-    """**数字の差だけを並べる。** 因果は言わない。
+    """**毎週かならず何か出す。** 断定はしないが、黙りもしない。
 
-    本数が足りないうちは「まだ言えない」と書く。ここで無理に傾向を
-    書くと、1本の当たり外れが法則として残り、次の選定を歪める。
+    差の大きい順に {TOP_INSIGHTS} 本まで並べ、それぞれに確度の札を貼る。
+    小さい差も出すが、**小さいことは隠さない**（「仮説」「参考」と書く）。
     """
     since = (end - timedelta(weeks=TREND_WEEKS)).astimezone(UTC).isoformat()
     rows = conn.execute(
@@ -306,77 +537,33 @@ def _insights(conn: DbConnection, end: datetime) -> list[Insight]:
         return [Insight(
             "まだ何も言えません",
             f"直近{TREND_WEEKS}週でリーチが取れている通常投稿は {len(rows)} 本。"
-            f"比べるには全体で {MIN_TOTAL} 本、群ごとに {MIN_GROUP} 本が要ります",
+            f"比べるには全体で {MIN_TOTAL} 本が要ります",
             "毎日の記録が溜まれば自動で出ます。待つのが正解です",
+            strength="参考",
         )]
 
     overall = _avg([int(r["reach"]) for r in rows])
-    out: list[Insight] = []
-
-    # 1. ジャンル。いちばん高い群が全体平均を超えていれば、在庫を当たる。
-    buckets: dict[str, list[int]] = defaultdict(list)
-    for row in rows:
-        buckets[row["genre"] or "unknown"].append(int(row["reach"]))
-    usable = {g: v for g, v in buckets.items() if len(v) >= MIN_GROUP}
-    if usable:
-        genre, values = max(usable.items(), key=lambda kv: _avg(kv[1]))
-        if _avg(values) >= overall * MIN_LIFT:
-            label = GENRE_LABELS.get(genre, genre)
-            stock = conn.execute(
-                "SELECT COUNT(*) AS n FROM properties "
-                "WHERE status = 'pending' AND genre = ? AND score IS NOT NULL",
-                (genre,),
-            ).fetchone()["n"]
-            out.append(Insight(
-                f"{label} が伸びています",
-                f"平均 {_avg(values):.0f}（{len(values)}本）／ 全体 {overall:.0f}"
-                f"（{len(rows)}本）",
-                f"未審査に {label} が {stock} 件あります。来週の枠をここから埋めると、"
-                "同じ傾向が続くかを確かめられます" if stock else
-                f"ただし未審査に {label} の在庫がありません。収集ソースを増やす話になります",
-            ))
-
-    # 2. 写真の枚数。**枚数が理由とは限らない**——枚数を出せる物件は、
-    #    そもそも写真が良いことが多い。観測として並べるにとどめる。
-    many = _compare(rows, lambda r: (r["image_count"] or 0) >= 8, "", "")
-    if many:
-        high, low, n_high, n_low = many
-        if high >= low * MIN_LIFT or low >= high * MIN_LIFT:
-            better = "多い方" if high > low else "少ない方"
-            out.append(Insight(
-                f"写真の枚数は{better}が伸びています",
-                f"8枚以上 {high:.0f}（{n_high}本）／ 7枚以下 {low:.0f}（{n_low}本）",
-                "枚数が理由とは限りません（枚数を出せる物件は写真も良い）。"
-                "足りない物件を先に埋めると、どちらなのか切り分けられます"
-                if high > low else "",
-            ))
-
-    # 3. 承認の実績で効いていた判定が、リーチでも効いているか。
-    for key, label in (("style_identified", "様式の特定"), ("one_of_a_kind", "一点物")):
-        pair = _compare(rows, lambda r, k=key: bool(r[k]), "", "")
-        if not pair:
-            continue
-        yes, no, n_yes, n_no = pair
-        if yes >= no * MIN_LIFT:
-            out.append(Insight(
-                f"{label}があるものが伸びています",
-                f"あり {yes:.0f}（{n_yes}本）／ なし {no:.0f}（{n_no}本）",
-                f"審査の基準（{label}を重く見る）が、リーチでも裏づけられています",
-            ))
-        elif no >= yes * MIN_LIFT:
-            out.append(Insight(
-                f"{label}は、リーチでは効いていません",
-                f"あり {yes:.0f}（{n_yes}本）／ なし {no:.0f}（{n_no}本）",
-                "審査の基準は承認の実績から決めたものです。すぐには変えません。"
-                "本数が増えても同じ向きが続くなら、そのとき見直します",
-            ))
+    found = sorted(_axes(conn, rows), key=lambda i: i.lift, reverse=True)
+    out = found[:TOP_INSIGHTS]
 
     if not out:
-        out.append(Insight(
-            "はっきりした差はありません",
+        # どの軸も割れなかった（全部が同じ属性）。それ自体が読める情報。
+        return [Insight(
+            "比べられる軸がありません",
             f"直近{TREND_WEEKS}週 {len(rows)}本・平均 {overall:.0f}。"
-            f"群ごとの差が {int((MIN_LIFT - 1) * 100)}% 未満",
-            "いまのところ、どれを出しても同じくらい見られています",
+            "ジャンル・写真の枚数・判定のどれも、片側に寄っています",
+            "違う種類のものを混ぜて出すと、何が効くのかが見えるようになります",
+            strength="参考",
+        )]
+
+    # 全部が「参考」だったときだけ、そう明記する。**黙って終わらない。**
+    if all(i.strength == "参考" for i in out):
+        out.insert(0, Insight(
+            "どれを出しても同じくらい見られています",
+            f"直近{TREND_WEEKS}週 {len(rows)}本・平均 {overall:.0f}。"
+            f"いちばん大きい差でも {out[0].lift * 100 - 100:.0f}%",
+            "いまは何を出すかより、本数と写真の枚数を安定させるほうが効きます",
+            strength="参考",
         ))
     return out
 
@@ -499,7 +686,8 @@ def render(report: WeeklyReport) -> str:
     if report.insights:
         lines += ["", "■ 考察"]
         for insight in report.insights:
-            lines.append(f"  {insight.headline}")
+            mark = f"[{insight.strength}] " if insight.strength else ""
+            lines.append(f"  {mark}{insight.headline}")
             lines.append(f"    根拠: {insight.evidence}")
             if insight.suggestion:
                 lines.append(f"    次に: {insight.suggestion}")
@@ -526,12 +714,17 @@ def render(report: WeeklyReport) -> str:
 __all__ = [
     "GENRE_LABELS",
     "KIND_LABELS",
+    "LIFT_HINT",
+    "LIFT_TREND",
     "MIN_GROUP",
+    "MIN_PAIR",
     "MIN_TOTAL",
+    "TOP_INSIGHTS",
     "TREND_WEEKS",
     "Check",
     "GenreStat",
     "Insight",
+    "Split",
     "WeeklyReport",
     "axes_of",
     "build",

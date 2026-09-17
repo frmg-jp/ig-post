@@ -508,6 +508,7 @@ def create_app(
         from freming.report.weekly import (
             GENRE_LABELS,
             KIND_LABELS,
+            MIN_GROUP,
             TREND_WEEKS,
             build,
             judgement,
@@ -557,6 +558,7 @@ def create_app(
                 "note": note,
                 "note_label": note_label,
                 "note_is_other_week": note_is_other_week,
+                "min_group": MIN_GROUP,
                 "status_labels": STATUS_LABELS,
                 "genre_labels": GENRE_LABELS,
                 "kind_labels": KIND_LABELS,
