@@ -481,9 +481,28 @@ def test_差の大きい順に並ぶ(config, conn) -> None:
     _posted(conn, 4, genre="architect", reach=400, style=1, url_seed=1)
     _posted(conn, 4, genre="loft", reach=100, style=0, url_seed=2)
     insights = build(config, conn, NOW).insights
-    lifts = [i.lift for i in insights]
-    assert lifts == sorted(lifts, reverse=True)
-    assert len(insights) <= 3
+    order = {"傾向": 0, "仮説": 1, "参考": 2}
+    keys = [(order[i.strength], -i.lift) for i in insights]
+    assert keys == sorted(keys), "確度が先、差の大きさは後"
+    assert len(insights) <= 4
+
+
+def test_確かな差が薄い群の大きな差より上に来る(config, conn) -> None:
+    """**片側2本の40%より、両側10本の20%を先に出す。**"""
+    # 様式: 10本 vs 10本、差20% → 傾向
+    _posted(conn, 10, genre="architect", reach=240, style=1, url_seed=1)
+    _posted(conn, 10, genre="architect", reach=200, style=0, url_seed=2)
+    # 一点物: 2本だけ大きく外れる → 仮説
+    conn.execute("UPDATE properties SET one_of_a_kind = 0")
+    conn.execute(
+        "UPDATE properties SET one_of_a_kind = 1 WHERE id IN "
+        "(SELECT id FROM properties ORDER BY id LIMIT 2)"
+    )
+    conn.commit()
+
+    insights = build(config, conn, NOW).insights
+    assert insights[0].strength == "傾向"
+    assert "様式が特定できる" in insights[0].headline
 
 
 def test_様式の特定がリーチでも効いていれば言う(config, conn) -> None:

@@ -51,7 +51,11 @@ MIN_GROUP = 3     # 「傾向」を名乗れる本数
 MIN_TOTAL = 6     # 全体について何か言うのに要る本数
 LIFT_TREND = 1.15  # これ以上なら「傾向」
 LIFT_HINT = 1.05   # これ以上なら「仮説」
-TOP_INSIGHTS = 3   # 出す数。多すぎると全部が薄くなる
+TOP_INSIGHTS = 4   # 出す数。多すぎると全部が薄くなる
+
+# 並べる順。**確度が先、差の大きさは後。** 差だけで並べると、片側2本の
+# 大きな差が、両側10本の確かな差より上に来る。
+_STRENGTH_ORDER = {"傾向": 0, "仮説": 1, "参考": 2}
 
 # 互換のため残す（外から参照されている）。
 MIN_LIFT = LIFT_TREND
@@ -547,7 +551,10 @@ def _insights(conn: DbConnection, end: datetime) -> list[Insight]:
         )]
 
     overall = _avg([int(r["reach"]) for r in rows])
-    found = sorted(_axes(conn, rows), key=lambda i: i.lift, reverse=True)
+    found = sorted(
+        _axes(conn, rows),
+        key=lambda i: (_STRENGTH_ORDER.get(i.strength, 9), -i.lift),
+    )
     out = found[:TOP_INSIGHTS]
 
     if not out:
