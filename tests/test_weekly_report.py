@@ -470,7 +470,7 @@ def test_小さい差も仮説として出す(config, conn) -> None:
     _posted(conn, 4, genre="architect", reach=220, style=1, url_seed=1)
     _posted(conn, 4, genre="architect", reach=200, style=0, url_seed=2)
     insight = next(i for i in build(config, conn, NOW).insights
-                   if "様式の特定" in i.headline)
+                   if "様式が特定できる" in i.headline)
     assert insight.strength == "仮説"          # 15%未満なので「傾向」ではない
     assert "差 10%" in insight.evidence
     assert "1本の当たり外れで消える" in insight.evidence
@@ -490,8 +490,10 @@ def test_様式の特定がリーチでも効いていれば言う(config, conn)
     _posted(conn, 4, genre="architect", reach=400, style=1, url_seed=1)
     _posted(conn, 4, genre="architect", reach=100, style=0, url_seed=2)
     insight = next(i for i in build(config, conn, NOW).insights
-                   if "様式の特定" in i.headline)
-    assert "あり 400" in insight.evidence
+                   if "様式が特定できる" in i.headline)
+    assert "様式が特定できるもの 400（4本）" in insight.evidence
+    assert insight.strength == "傾向"
+    assert "逆向き" not in insight.headline
 
 
 def test_効いていないときも同じ強さで書く(config, conn) -> None:
@@ -500,7 +502,9 @@ def test_効いていないときも同じ強さで書く(config, conn) -> None:
     _posted(conn, 4, genre="architect", reach=400, one=0, url_seed=2)
     insight = next(i for i in build(config, conn, NOW).insights
                    if "一点物" in i.headline)
-    assert "効いていません" in insight.headline
+    # **都合の良い方だけ出さない。** 逆向きだと分かるように書く。
+    assert "一点物でないもののほうが平均が高い" in insight.headline
+    assert "審査の基準とは逆向き" in insight.headline
     assert "すぐには変えません" in insight.suggestion
 
 

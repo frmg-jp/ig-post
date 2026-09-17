@@ -340,9 +340,12 @@ class Split:
                 f"／ 差 {self.gap_pct}%")
         if self.strength == "傾向":
             return line
-        if self.strength == "仮説":
-            return line + "。1本の当たり外れで消える程度の差です"
-        return line + "。ほぼ差はありません"
+        if self.strength == "参考":
+            return line + "。ほぼ差はありません"
+        # **どこが弱いのかを書く。** 差が小さいのか、片側が薄いのか。
+        if self.n_min < MIN_GROUP:
+            return line + f"。片側が{self.n_min}本しかないので、1本の入れ替わりで消えます"
+        return line + "。1本の当たり外れで消える程度の差です"
 
 
 def _split(rows: list[Row], pick, left: str, right: str) -> Split | None:
@@ -414,8 +417,7 @@ def _axes(conn: DbConnection, rows: list[Row]) -> list[Insight]:
         stock = _stock(conn, "genre = ?", (top,))
         add(
             _split(rows, lambda r: (r["genre"] or "unknown") == top, label, "それ以外"),
-            lambda s: (f"{label} が他より見られています" if s.left == label
-                       else f"{label} は他ほど見られていません"),
+            lambda s: f"{s.left} のほうが平均が高い",
             lambda s: (
                 f"未審査に {label} が {stock} 件あります。来週の枠を"
                 f"ここから多めに取ると、同じ向きが続くか確かめられます"
@@ -432,7 +434,7 @@ def _axes(conn: DbConnection, rows: list[Row]) -> list[Insight]:
                         "property_id HAVING COUNT(*) <= 7)")
     add(
         _split(rows, lambda r: (r["image_count"] or 0) >= 8, "8枚以上", "7枚以下"),
-        lambda s: f"写真は{s.left}のほうが見られています",
+        lambda s: f"写真が{s.left}のほうが平均が高い",
         lambda s: (
             f"枚数が理由とは限りません（枚数を出せる物件は写真も良い）。"
             f"7枚以下の在庫が {thin} 件あります。画像補完で枚数を揃えてから出すと、"
@@ -442,20 +444,21 @@ def _axes(conn: DbConnection, rows: list[Row]) -> list[Insight]:
     )
 
     # 3. 承認の実績で効いていた判定が、リーチでも効いているか。
-    for key, label in (
-        ("style_identified", "様式の特定"),
-        ("one_of_a_kind", "一点物"),
-        ("provenance_visible", "前歴が見える"),
+    #    **札の対を明示する。** 「前歴が見える」＋「なし」を繋ぐと
+    #    「前歴が見えるなし」になっていた（2026-09-17）。
+    for key, yes_label, no_label in (
+        ("style_identified", "様式が特定できるもの", "様式が特定できないもの"),
+        ("one_of_a_kind", "一点物", "一点物でないもの"),
+        ("provenance_visible", "前歴が見えるもの", "前歴が見えないもの"),
     ):
         add(
-            _split(rows, lambda r, k=key: bool(r[k]), f"{label}あり", f"{label}なし"),
-            lambda s, label=label: (
-                f"{label}があるほうが見られています" if s.left.endswith("あり")
-                else f"{label}は、リーチでは効いていません"
+            _split(rows, lambda r, k=key: bool(r[k]), yes_label, no_label),
+            lambda s, y=yes_label: f"{s.left}のほうが平均が高い" + (
+                "" if s.left == y else "（審査の基準とは逆向き）"
             ),
-            lambda s, label=label: (
-                f"審査で{label}を重く見ているのは、リーチの側からも支持されています"
-                if s.left.endswith("あり") else
+            lambda s, y=yes_label: (
+                f"審査で「{y}」を重く見ているのは、リーチの側からも支持されています"
+                if s.left == y else
                 "審査の基準は承認の実績から決めたものです。すぐには変えません。"
                 "本数が増えても同じ向きが続くなら、そのとき見直します"
             ),
@@ -465,7 +468,7 @@ def _axes(conn: DbConnection, rows: list[Row]) -> list[Insight]:
     add(
         _split(rows, lambda r: (r["location_country"] or "") == "United States",
                "米国", "米国以外"),
-        lambda s: f"{s.left}のほうが見られています",
+        lambda s: f"{s.left}のほうが平均が高い",
         lambda s: (
             "出しているものの多くが米国です。米国以外を増やすと本数の偏りは"
             "直りますが、リーチは下がるかもしれません" if s.left == "米国" else
@@ -483,15 +486,15 @@ def _axes(conn: DbConnection, rows: list[Row]) -> list[Insight]:
                    lambda r: bool(r["year_built_value"])
                    and int(r["year_built_value"]) < line,
                    f"{line}年より前", f"{line}年以降"),
-            lambda s: f"築年は{s.left}のほうが見られています",
+            lambda s: f"築年が{s.left}のほうが平均が高い",
             lambda s: f"来週の枠を{s.left}に寄せると、続くかどうかが分かります",
         )
 
     # 6. 設計者名。名前が立つ物件のほうが強いのか。
     add(
         _split(rows, lambda r: bool((r["architect"] or "").strip()),
-               "設計者が分かる", "設計者が不明"),
-        lambda s: f"{s.left}ほうが見られています",
+               "設計者が分かる", "設計者が不明な"),
+        lambda s: f"{s.left}もののほうが平均が高い",
         lambda s: (
             "設計者名が本文の見出しに立ちます。名前のある物件を優先する価値があります"
             if s.left == "設計者が分かる" else
@@ -508,8 +511,9 @@ def _axes(conn: DbConnection, rows: list[Row]) -> list[Insight]:
                    lambda r: r["score"] is not None and float(r["score"]) >= line,
                    f"{line:.0f}点以上", f"{line:.0f}点未満"),
             lambda s: (
-                "点数が高いものほど見られています" if s.left.endswith("以上")
-                else "点数とリーチは逆向きです"
+                f"点数が{s.left}のほうが平均が高い" + (
+                    "" if s.left.endswith("以上") else "（採点とは逆向き）"
+                )
             ),
             lambda s: (
                 "採点が反応を当てられています。いまの基準を続けて問題ありません"
