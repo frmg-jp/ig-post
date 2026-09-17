@@ -259,6 +259,53 @@ def test_途中の週には書かせない(config, conn, monkeypatch) -> None:
     assert seen == [], "APIを呼ばずに止める"
 
 
+def test_過去にさかのぼって書ける(config, conn, monkeypatch) -> None:
+    """**仕組みを入れる前の週にも書ける。** 数字は全部残っている。"""
+    _week(conn)
+    # 2週前にも1本出していた
+    property_id = insert_candidate(
+        conn,
+        Candidate(
+            source="wowhaus", source_rank="A", source_url="https://a.example.com/old",
+            title="Old House", content_text="...", is_for_sale=1,
+            location_country="France", location_city="Lyon",
+        ),
+    )
+    conn.execute(
+        "UPDATE properties SET score = 70, genre = 'loft', "
+        "display_name = 'Old House', status = 'delivered' WHERE id = ?",
+        (property_id,),
+    )
+    conn.execute(
+        "INSERT INTO posts (id, kind, state, scheduled_at, published_at, property_id, reach) "
+        "VALUES (2, 'feed', 'published', ?, ?, ?, 120)",
+        ("2026-09-02T00:02:00+00:00", "2026-09-02T00:02:00+00:00", property_id),
+    )
+    conn.commit()
+
+    import freming.cli as cli
+    from freming.cli import main
+    monkeypatch.setattr(cli, "load_config", lambda *_a, **_k: config)
+    _fake_anthropic(monkeypatch, "静かな週でした。次に試すこと: 本数を増やす。")
+
+    assert main(["report", "--week", "2026-09-14", "--backfill", "3"]) == 0
+    assert comment.load(conn, "2026-08-31") is not None     # 出した週には書く
+    assert comment.load(conn, "2026-09-07") is None         # 出していない週は飛ばす
+
+
+def test_さかのぼりは途中の週に書かない(config, conn, monkeypatch) -> None:
+    _week(conn)
+    import freming.cli as cli
+    from freming.cli import main
+    monkeypatch.setattr(cli, "load_config", lambda *_a, **_k: config)
+    seen = _fake_anthropic(monkeypatch, "今週は1本でした。")
+
+    # いまの週（2026-09-14〜）は途中。--backfill は1週前から見るので触らない
+    assert main(["report", "--backfill", "1"]) == 0
+    assert comment.load(conn, "2026-09-14") is None
+    assert seen == []
+
+
 def test_講評を消せる(config, conn, monkeypatch) -> None:
     """読み間違いを書いたものを残さない。"""
     _week(conn)
@@ -275,11 +322,36 @@ def test_講評を消せる(config, conn, monkeypatch) -> None:
 
 
 def test_講評が無くても画面は開く(config, conn) -> None:
-    """**画面からはAPIを呼ばない。** 無ければ出さないだけ。"""
+    """**画面からはAPIを呼ばない。** 無ければ「まだありません」と出すだけ。"""
     _week(conn)
     body = TestClient(create_app(config)).get("/report").text
-    assert body.count("<h2>講評</h2>") == 0
+    assert "この週の講評はまだありません" in body
     assert "WEEKLY REPORT" in body
+
+
+def test_講評と考察は1つの欄(config, conn, monkeypatch) -> None:
+    """**分けない。** 読みたいものが2か所に散っていた（2026-09-17 の指摘）。"""
+    _week(conn)
+    report = build(config, conn, NOW)
+    comment.save(conn, report.start.date().isoformat(),
+                 comment.Comment(body="この週は静かでした。", source="本数: 1", model="m"))
+
+    body = TestClient(create_app(config)).get("/report").text
+    assert body.count("<h2>考察</h2>") == 0       # 別見出しにしない
+    assert body.count("講評") >= 1
+    # 講評の欄が「今週出したもの」より上に来る
+    assert body.index("この週は静かでした") < body.index("今週出したもの")
+
+
+def test_長い注意書きはトグルに畳む(config, conn) -> None:
+    """毎週同じ文が数字のすぐ下を占めていた。**消さずに畳む。**"""
+    _week(conn)
+    body = TestClient(create_app(config)).get("/report").text
+    assert "<summary>この数字の読み方</summary>" in body
+    fold = body.index("この数字の読み方")
+    assert "リーチは時間とともに伸びます" in body[fold:]   # 中に入っている
+    # 畳まれている（open を付けない）
+    assert 'class="fold" open' not in body
 
 
 def test_同じ週に二度書かない(config, conn, monkeypatch) -> None:

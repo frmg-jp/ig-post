@@ -57,6 +57,17 @@
   }
   .rep .insight .s-傾向 { border-color: var(--ink); }
   .rep .insight .s-参考 { opacity: .55; }
+  /* 毎週同じ注意書き。**消さずに畳む。** */
+  .rep .fold { margin: 14px 0 4px; }
+  .rep .fold > summary {
+    cursor: pointer; font: 12px/1.9 var(--mono); opacity: .7;
+    padding: 6px 0; list-style: none;
+  }
+  .rep .fold > summary::-webkit-details-marker { display: none; }
+  .rep .fold > summary::before { content: "▸ "; }
+  .rep .fold[open] > summary::before { content: "▾ "; }
+  .rep .fold > summary:hover { opacity: 1; }
+  .rep .fold p.note:first-of-type { margin-top: 0; }
   /* 講評。読み物なので、幅を詰めて本文の書体で置く。 */
   .rep .note-body {
     font-size: 15px; line-height: 2; max-width: 46em;
@@ -100,15 +111,65 @@
     </div>
   </div>
 </div>
-<p class="note">
-  {# **リーチは時間とともに伸びる。** 出したばかりの週は不利になる。
-     これを書いておかないと、毎週「今週は落ちた」と読める。 #}
-  リーチは時間とともに伸びます。今週出したばかりの投稿はまだ伸びる途中なので、
-  先週との差はその分を差し引いて読んでください。
-  {% if report.measured < report.published|length %}
-    <strong>{{ report.published|length - report.measured }}本はまだ数字が取れていません</strong>（平均には入れていません）。
+{# **講評と考察はここに1つで置く。** 以前は注意書きがこの位置を占めていて、
+   読みたいもの（講評・考察）はページの下のほうにあった（2026-09-17 の
+   指摘）。注意書きは毎週同じ文なので、下のトグルに畳んだ。 #}
+<h2>講評{% if note and note_is_other_week %}（{{ note_label }}）{% endif %}</h2>
+{% if note %}
+  {% if note_is_other_week %}
+    <p class="note">
+      講評は<strong>終わった週</strong>について月曜に書きます。いま見ている
+      週（{{ report.label }}）はまだ途中なので、これは {{ note_label }} の分です。
+    </p>
   {% endif %}
-</p>
+  <div class="note-body">{{ note["body"] }}</div>
+{% else %}
+  <p class="note">この週の講評はまだありません（月曜の朝に書きます）。</p>
+{% endif %}
+
+{% for insight in report.insights %}
+  <div class="insight">
+    <div class="head">
+      {% if insight.strength %}<span class="badge s-{{ insight.strength }}">{{ insight.strength }}</span>{% endif %}
+      {{ insight.headline }}
+    </div>
+    <div class="ev">根拠: {{ insight.evidence }}</div>
+    {% if insight.suggestion %}<div class="sug">{{ insight.suggestion }}</div>{% endif %}
+  </div>
+{% endfor %}
+
+{# 毎週同じ文なので畳む。**消しはしない**——数字の読み方を間違えると、
+   毎週「今週は落ちた」と読める。 #}
+<details class="fold">
+  <summary>この数字の読み方</summary>
+  <p class="note">
+    リーチは時間とともに伸びます。今週出したばかりの投稿はまだ伸びる途中なので、
+    先週との差はその分を差し引いて読んでください。
+    {% if report.measured < report.published|length %}
+      <strong>{{ report.published|length - report.measured }}本はまだ数字が取れていません</strong>（平均には入れていません）。
+    {% endif %}
+  </p>
+  {% if note %}
+    <p class="note">
+      講評は<strong>その週の数字だけ</strong>を材料に Claude が書いています
+      （{{ note["model"] }} / {{ note["created_at"][:16].replace("T", " ") }}）。
+      渡していない数字が本文に出た場合は保存しない仕組みにしてあります。
+    </p>
+  {% endif %}
+  <p class="note">
+    {# **因果を言わない。** 「AのほうがBより平均が高かった」までが事実で、
+       Aが理由かどうかは分からない。 #}
+    考察に出るのは<strong>平均の差だけ</strong>です。理由まで示すものではありません
+    （写真が多い投稿が伸びていても、枚数が理由とは限りません——枚数を出せる物件は、
+    そもそも写真が良いことが多い）。
+  </p>
+  <p class="note">
+    札の意味 —
+    <strong>傾向</strong>: 群ごと{{ min_group }}本以上あって差も大きい。次の選定に使えます。
+    <strong>仮説</strong>: 向きは出ているが、1本の当たり外れで消える程度の差です。
+    <strong>参考</strong>: ほぼ差がありません（<em>差が無いこと</em>も情報として出しています）。
+  </p>
+</details>
 
 {% if report.best %}
   <h2>いちばん見られた1本</h2>
@@ -177,53 +238,6 @@
     </div>
   </div>
 {% endfor %}
-
-{# 講評。**週1の定期実行が書いたものを読むだけ**で、この画面からは
-   APIを呼ばない（開くたびに費用が出る）。 #}
-{% if note %}
-  <h2>講評{% if note_is_other_week %}（{{ note_label }}）{% endif %}</h2>
-  {% if note_is_other_week %}
-    <p class="note">
-      講評は<strong>終わった週</strong>について月曜に書きます。いま見ている
-      週（{{ report.label }}）はまだ途中なので、これは {{ note_label }} の分です。
-    </p>
-  {% endif %}
-  <div class="note-body">{{ note["body"] }}</div>
-  <p class="note">
-    この文章は<strong>その週の数字だけ</strong>を材料に Claude が書いています
-    （{{ note["model"] }} / {{ note["created_at"][:16].replace("T", " ") }}）。
-    渡していない数字が本文に出た場合は保存しない仕組みにしてあります。
-  </p>
-{% endif %}
-
-<h2>考察</h2>
-{% for insight in report.insights %}
-  <div class="insight">
-    <div class="head">
-      {% if insight.strength %}<span class="badge s-{{ insight.strength }}">{{ insight.strength }}</span>{% endif %}
-      {{ insight.headline }}
-    </div>
-    <div class="ev">根拠: {{ insight.evidence }}</div>
-    {% if insight.suggestion %}<div class="sug">{{ insight.suggestion }}</div>{% endif %}
-  </div>
-{% endfor %}
-<p class="note">
-  {# **因果を言わない。** 「AのほうがBより平均が高かった」までが事実で、
-     Aが理由かどうかは分からない。ここを混ぜると、1本の当たり外れが
-     法則として残り、次の選定を歪める。 #}
-  ここに出るのは<strong>平均の差だけ</strong>です。理由まで示すものではありません
-  （写真が多い投稿が伸びていても、枚数が理由とは限りません——枚数を出せる物件は、
-  そもそも写真が良いことが多い）。
-</p>
-<p class="note">
-  {# **小さい差も出す。ただし小さいことは隠さない。** 以前は 15% を
-     超えたものだけを出していたので、毎週「はっきりした差はありません」
-     しか出なかった（2026-09-17 の指摘）。 #}
-  札の意味 —
-  <strong>傾向</strong>: 群ごと{{ min_group }}本以上あって差も大きい。次の選定に使えます。
-  <strong>仮説</strong>: 向きは出ているが、1本の当たり外れで消える程度の差です。
-  <strong>参考</strong>: ほぼ差がありません（<em>差が無いこと</em>も情報として出しています）。
-</p>
 
 {% if report.genres %}
   <h2>ジャンル別の平均リーチ（直近{{ trend_weeks }}週）</h2>

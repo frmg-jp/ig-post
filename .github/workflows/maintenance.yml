@@ -33,6 +33,7 @@ on:
           - listing-status     # **いま買えるのかを掲載ページで確認**（費用なし）
           - weekly-report      # 週次レポートを出す（読むだけ・費用なし）
           - weekly-comment     # **講評を書かせる**（Claude を1回。1円未満）
+          - weekly-comment-backfill # **過去の週の講評をまとめて書く**（「対象の上限」に週数）
           - weekly-comment-clear # 講評を消す（「対象の上限」に週の月曜）
           - exchange-ig-code   # 受け取った code をトークンに換える（費用なし）
           - check-ig-token     # トークンの疎通とスコープ（費用なし）
@@ -178,6 +179,13 @@ jobs:
               else
                 python -m freming.cli report --last-week --comment
               fi
+              ;;
+            # **過去にさかのぼって講評を書く。**「対象の上限」に週数
+            # （空なら12週）。1週あたり1円未満。既にある週は飛ばす。
+            weekly-comment-backfill)
+              N="${{ github.event.inputs.limit }}"
+              python -m freming.cli report --backfill "${N:-12}" \
+                $( [ -n "$YES" ] && echo --force )
               ;;
             # 講評を消す。「対象の上限」にその週の月曜（YYYY-MM-DD）。
             # 空なら今週。読み間違いを書いたものを残さないため。

@@ -796,6 +796,56 @@ def _cmd_listing_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _backfill_comments(cfg, conn, when, weeks: int, force: bool) -> int:
+    """**過去の週にさかのぼって講評を書く。**
+
+    仕組みを入れたのが 2026-09-16 なので、それ以前の週には講評が無い。
+    数字は全部残っているので、あとから書ける（1週あたり1円未満）。
+
+    守ること:
+      - **終わった週だけ。** 進行中の週は途中の数字になる
+      - **出した投稿が無い週は飛ばす。** 書くことが無い
+      - 既にある週は飛ばす（--force で書き直す）
+      - 1週でも失敗したら、そこで止めずに次へ。理由はその場で出す
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from freming.report import comment
+    from freming.report.weekly import build
+
+    wrote = skipped = failed = 0
+    # 直近の終わった週から、古いほうへ。
+    for back in range(1, weeks + 1):
+        report = build(cfg, conn, when - timedelta(days=7 * back))
+        week = report.start.date().isoformat()
+
+        if report.end > datetime.now(UTC):
+            print(f"{week}  まだ途中の週なので飛ばします")
+            skipped += 1
+            continue
+        if not report.published:
+            print(f"{week}  出した投稿がありません")
+            skipped += 1
+            continue
+        if comment.load(conn, week) is not None and not force:
+            print(f"{week}  既にあります")
+            skipped += 1
+            continue
+
+        try:
+            written = comment.write(cfg, report)
+        except Exception as exc:  # noqa: BLE001 - 1週の失敗で止めない
+            print(f"{week}  書けませんでした: {exc}", file=sys.stderr)
+            failed += 1
+            continue
+        comment.save(conn, week, written)
+        wrote += 1
+        print(f"{week}  {len(report.published)}本 / {written.body}")
+
+    print(f"\n書いた {wrote} / 飛ばした {skipped} / 書けなかった {failed}")
+    return 0
+
+
 def _cmd_weekly_report(args: argparse.Namespace) -> int:
     """週次レポートを端末に出す。**DBを読むだけで、外へは出ない。**
 
@@ -826,6 +876,9 @@ def _cmd_weekly_report(args: argparse.Namespace) -> int:
         when = when - timedelta(days=7)
 
     with session(cfg.app.target()) as conn:
+        if getattr(args, "backfill", 0):
+            return _backfill_comments(cfg, conn, when, int(args.backfill), args.force)
+
         report = build(cfg, conn, when)
         week_start = report.start.date().isoformat()
         print(render(report))
@@ -2738,6 +2791,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_weekly.add_argument(
         "--clear-comment", action="store_true",
         help="その週の講評を消す（読み間違いを書いたものを残さない）",
+    )
+    p_weekly.add_argument(
+        "--backfill", type=int, default=0, metavar="N",
+        help="**過去N週にさかのぼって講評を書く**（1週あたり1円未満）。"
+             "終わった週・投稿がある週・まだ講評が無い週だけ",
     )
     p_weekly.set_defaults(func=_cmd_weekly_report)
 
