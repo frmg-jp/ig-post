@@ -37,6 +37,7 @@ from freming.db.repository import (
     claim_due_post,
     fail_post,
     finish_post,
+    next_due_at,
     record_reach_by_media,
     set_permalink,
 )
@@ -569,13 +570,32 @@ def run_once(
 
 
 class PostingWorker:
-    """予定を定期的に見て投稿するスレッド。納品ワーカーと同じ作り。"""
+    """予定を見て投稿するスレッド。**次の予定まで寝る。**
+
+    以前は `poll_interval_sec`（60秒）で回り続けていた。Render は
+    Starter で24時間動いているので、**DBが一度も休止せず**、Neon の
+    計算時間の無料枠を使い切って全部止まった（2026-09-17）。投稿を
+    定刻に出すために常駐させたことが、そのままDBを起こし続けていた。
+
+    いまは次の予定時刻まで寝る。1日1本なら1日数回しか起きない。
+    定刻は守る——寝る長さは「次の予定まで」なので遅れない。
+
+    **予定が変わったら起こすこと**（`wake()`）。寝ている間にUIで予定を
+    前倒しされると、古い予定時刻まで気づけない。納品ワーカーと同じ作り。
+    """
 
     def __init__(self, config: Config) -> None:
         self.config = config
         self._stopping = threading.Event()
+        self._wakeup = threading.Event()
         self._thread: threading.Thread | None = None
         self.last_error: str | None = None
+        # 次にいつ起きるか（画面に出して、寝たまま忘れられていないか見る）
+        self.sleeping_until: datetime | None = None
+
+    def wake(self) -> None:
+        """**予定を変えたら呼ぶ。** 寝ているワーカーを今すぐ起こす。"""
+        self._wakeup.set()
 
     @property
     def running(self) -> bool:
@@ -585,32 +605,90 @@ class PostingWorker:
         if self.running:
             return
         self._stopping.clear()
+        self._wakeup.clear()
         self._thread = threading.Thread(target=self._run, name="freming-posting", daemon=True)
         self._thread.start()
         log.info(
-            "自動投稿を開始しました（巡回間隔 %.0f 秒）",
-            self.config.instagram.poll_interval_sec,
+            "自動投稿を開始しました（次の予定まで寝ます。最長 %.0f 分）",
+            self.config.instagram.max_sleep_sec / 60,
         )
 
     def stop(self) -> None:
         self._stopping.set()
+        self._wakeup.set()
         if self._thread is not None:
             self._thread.join(timeout=10)
+
+    def _sleep_for(
+        self, conn: DbConnection, now: datetime, progressed: bool = False
+    ) -> float:
+        """次の予定まで何秒寝るか。
+
+        **上限は max_sleep_sec。** 予定が1本も無くても、たまには起きて
+        見に行く（外から予定を入れられることがある）。
+
+        **進めないときは短く回らない。** 予定時刻を過ぎているのに1本も
+        出せていないのは、たいてい設定の問題（トークン切れ、
+        public_base_url 未設定、担当する種別が空）で、待っても直らない。
+        ここで60秒ごとに回り続けると、**直らないまま24時間DBを起こし
+        続ける**——2026-09-17 に全部止めたのがこれ。だから諦めて長く寝る。
+        次の巡回で人が直していれば、そこで出る。
+
+        出せた直後だけは短く回る。同じ時刻にもう1本溜まっていることが
+        あるので、それは続けて出す。
+        """
+        floor = float(self.config.instagram.poll_interval_sec)
+        ceiling = float(self.config.instagram.max_sleep_sec)
+        try:
+            at = next_due_at(
+                conn,
+                self.config.instagram.max_attempts,
+                tuple(self.config.instagram.worker_kinds),
+            )
+        except Exception:  # noqa: BLE001 - 読めなければ長めに寝る（枠切れのこともある）
+            return ceiling
+        if at is None:
+            return ceiling
+        try:
+            due = datetime.fromisoformat(at)
+        except ValueError:
+            return ceiling
+        if due.tzinfo is None:
+            due = due.replace(tzinfo=UTC)
+
+        remaining = (due - now).total_seconds()
+        if remaining <= floor:
+            # 時間が来ている。出せたなら続けて次を見る。出せていないなら
+            # 待っても直らないので長く寝る。
+            return floor if progressed else ceiling
+        return min(ceiling, remaining)
 
     def _run(self) -> None:
         while not self._stopping.is_set():
             conn = None
+            delay = float(self.config.instagram.poll_interval_sec)
             try:
                 conn = connect(self.config.app.target())
-                run_once(self.config, conn)
+                result = run_once(self.config, conn)
                 self.last_error = None
+                # **投稿したあとに測る。** 前に測ると、いま出した1本が
+                # まだ planned に見えて 0 秒になる。
+                delay = self._sleep_for(
+                    conn, datetime.now(UTC), progressed=result.done > 0
+                )
             except Exception as exc:  # ワーカーは1回の失敗で死なせない
                 self.last_error = describe_error(exc)
                 log.exception("投稿ワーカーで例外が出ました")
             finally:
                 if conn is not None:
                     conn.close()
-            self._stopping.wait(self.config.instagram.poll_interval_sec)
+
+            self.sleeping_until = datetime.now(UTC) + timedelta(seconds=delay)
+            log.info("次の巡回まで %.0f 分寝ます", delay / 60)
+            # **起こされたら即やり直す。** 予定が変わったときにUIが呼ぶ。
+            self._wakeup.wait(delay)
+            self._wakeup.clear()
+            self.sleeping_until = None
 
 
 __all__ = [

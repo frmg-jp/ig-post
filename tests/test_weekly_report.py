@@ -224,7 +224,9 @@ def test_画面が開く(config, conn) -> None:
     a = _add(conn, "https://a.example.com/1", score=70, genre="architect",
              display_name="Grayoaks")
     _post(conn, 1, a, "2026-09-15T00:02:00+00:00", reach=131, note="1枚目が弱い")
-    body = TestClient(create_app(config)).get("/report").text
+    # **週を明示する。** 既定は「今日を含む週」なので、指定しないと
+    # 実行した日によって中身が変わり、毎週勝手に落ちる（2026-09-25）。
+    body = TestClient(create_app(config)).get("/report?week=2026-09-16").text
     assert "WEEKLY REPORT" in body
     assert "Grayoaks" in body
     assert "カルテを開く" in body

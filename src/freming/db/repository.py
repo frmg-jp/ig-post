@@ -889,6 +889,28 @@ def claim_due_post(
     return row
 
 
+def next_due_at(conn: DbConnection, max_attempts: int, kinds: tuple[str, ...] = ()) -> str | None:
+    """**次に出す予定の時刻。** 無ければ None。
+
+    投稿ワーカーが「次はいつ起きればいいか」を知るために使う。これが
+    無いと固定間隔で回すしかなく、DBを起こし続けることになる
+    （2026-09-17 に Neon の計算時間の無料枠を使い切った原因）。
+
+    claim_due_post と同じ条件で見る。片方だけ直すとズレる。
+    """
+    where = ["state = 'planned'", "attempts < ?"]
+    params: list = [max_attempts]
+    if kinds:
+        marks = ",".join("?" for _ in kinds)
+        where.append(f"kind IN ({marks})")
+        params.extend(kinds)
+    row = conn.execute(
+        f"SELECT MIN(scheduled_at) AS at FROM posts WHERE {' AND '.join(where)}",
+        tuple(params),
+    ).fetchone()
+    return str(row["at"]) if row and row["at"] else None
+
+
 def finish_post(conn: DbConnection, post_id: int, media_id: str, container_id: str) -> None:
     conn.execute(
         "UPDATE posts SET state = 'published', ig_media_id = ?, ig_container_id = ?, "

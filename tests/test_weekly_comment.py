@@ -293,17 +293,26 @@ def test_過去にさかのぼって書ける(config, conn, monkeypatch) -> None
     assert comment.load(conn, "2026-09-07") is None         # 出していない週は飛ばす
 
 
-def test_さかのぼりは途中の週に書かない(config, conn, monkeypatch) -> None:
+def test_さかのぼりは進行中の週に書かない(config, conn, monkeypatch) -> None:
+    """**進行中の週は途中の数字になる。**
+
+    日付を固定しない。「今日を含む週には書かない」が確かめたいことで、
+    特定の日付を書くと、その週が過去になった時点で意味を失う
+    （実際 2026-09-25 にそれで落ちた）。
+    """
+    from datetime import UTC, datetime
+
+    from freming.report.weekly import week_bounds
+
     _week(conn)
     import freming.cli as cli
     from freming.cli import main
     monkeypatch.setattr(cli, "load_config", lambda *_a, **_k: config)
-    seen = _fake_anthropic(monkeypatch, "今週は1本でした。")
+    _fake_anthropic(monkeypatch, "この週は静かでした。")
 
-    # いまの週（2026-09-14〜）は途中。--backfill は1週前から見るので触らない
-    assert main(["report", "--backfill", "1"]) == 0
-    assert comment.load(conn, "2026-09-14") is None
-    assert seen == []
+    assert main(["report", "--backfill", "4"]) == 0
+    this_week = week_bounds(config, datetime.now(UTC))[0].date().isoformat()
+    assert comment.load(conn, this_week) is None
 
 
 def test_講評を消せる(config, conn, monkeypatch) -> None:

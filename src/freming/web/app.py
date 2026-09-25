@@ -188,6 +188,27 @@ def create_app(
                 poster.stop()
 
     app = FastAPI(title="FREMING CURATED 審査", lifespan=lifespan)
+
+    # **予定を触ったら投稿ワーカーを起こす。**
+    #
+    # ワーカーは次の予定時刻まで寝る（DBを起こし続けないため。2026-09-17 に
+    # 60秒ポーリングで Neon の無料枠を使い切って全部止まった）。寝ている
+    # 間に画面で予定を前倒しされると、古い予定時刻まで気づけない。
+    #
+    # **1か所で受ける。** 経路ごとに呼ぶと、新しい経路を足したときに
+    # 付け忘れる。余分に起こしても、見て寝るだけで害はない。
+    @app.middleware("http")
+    async def _wake_poster(request: Request, call_next):
+        response = await call_next(request)
+        if (
+            poster is not None
+            and request.method == "POST"
+            and request.url.path.startswith("/posts")
+            and response.status_code < 400
+        ):
+            poster.wake()
+        return response
+
     if auth is not None:
         app.add_middleware(BasicAuthMiddleware, auth=auth)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
