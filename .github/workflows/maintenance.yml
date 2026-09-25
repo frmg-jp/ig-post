@@ -240,7 +240,15 @@ jobs:
               python -m freming.cli instagram media $LIMIT
               ;;
             post-replan)      python -m freming.cli post replan ;;
-            post-reschedule)  python -m freming.cli post reschedule ;;
+            # 「対象の上限」に YYYY-MM-DD を入れると、リールをその日以降の
+            # 最初の回へ送る（通常投稿は今日からの空き枠に順に入る）。
+            # 止まっていた明けは、次の月曜だと「先週の投稿」が無くて
+            # リールを作れないことがある。
+            post-reschedule)
+              R="${{ github.event.inputs.limit }}"
+              python -m freming.cli post reschedule \
+                $( [ -n "$R" ] && echo --reel-from "$R" )
+              ;;
             post-plan)
               python -m freming.cli post plan
               python -m freming.cli post show

@@ -650,6 +650,19 @@ class InstagramConfig(BaseModel):
     # 使い切って全部止まった（2026-09-17）。短くするときは請求を見ること。
     max_sleep_sec: float = 1800.0
     max_attempts: int = 3
+    # **これより古い枠は出さない。**
+    #
+    # 止まっていた間に溜まった予定を、復旧した瞬間にまとめて出さない
+    # ための歯止め。2026-09-17 から9日間DBが落ちて9本が溜まり、繋がった
+    # 瞬間に全部が数分で出るところだった。
+    #
+    # 古いものは planned のまま置き、`post reschedule` で先の枠へ送る。
+    # **捨てはしない**（消すと postable_properties の判定から外れ、
+    # 二度と投稿候補に戻らない）。
+    #
+    # 通常の遅れは max_sleep_sec（30分）までなので、6時間あれば
+    # 「少し遅れた」は通り、「昨日の枠」は止まる。
+    stale_after_hours: float = 6.0
     # 投稿時刻（JST の HH:MM）。並びがそのまま1日の投稿順になる。
     post_times: list[str] = Field(default_factory=lambda: ["09:00", "13:00", "20:00"])
     timezone: str = "Asia/Tokyo"

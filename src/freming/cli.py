@@ -1738,10 +1738,23 @@ def _cmd_post(args: argparse.Namespace) -> int:
             free = [s for s in slots if s.isoformat() not in taken]
 
             moved = 0
+            # **リールを送る先。** 既定は次の回だが、--reel-from を渡すと
+            # その日以降の最初の回にする。止まっていた明けは、次の月曜だと
+            # 「先週の投稿」が無くて作れないことがある（2026-09-26）。
+            reel_base = now
+            if getattr(args, "reel_from", None):
+                try:
+                    reel_base = datetime.fromisoformat(args.reel_from).replace(
+                        tzinfo=zone
+                    ) - timedelta(seconds=1)
+                except ValueError:
+                    print("--reel-from は YYYY-MM-DD で指定してください。", file=sys.stderr)
+                    return 2
+
             for row in targets:
                 if row["kind"] == KIND_REEL:
                     # リールは曜日が決まっている。次の回に送る。
-                    target = next_reel_time(cfg, now)
+                    target = next_reel_time(cfg, reel_base)
                 elif free:
                     target = free.pop(0)
                 else:
@@ -2713,6 +2726,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_post.add_argument(
         "--kind", action="append", choices=["feed", "story", "reel"],
         help="扱う種別。既定は config の worker_kinds。複数指定できる",
+    )
+    p_post.add_argument(
+        "--reel-from", metavar="YYYY-MM-DD",
+        help="reschedule で、リールをこの日以降の最初の回へ送る（既定は次の回）",
     )
     p_post.set_defaults(func=_cmd_post)
 

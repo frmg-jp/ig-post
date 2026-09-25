@@ -40,6 +40,7 @@ from freming.db.repository import (
     next_due_at,
     record_reach_by_media,
     set_permalink,
+    stale_planned_posts,
 )
 from freming.instagram import media
 from freming.instagram.caption import build_alt_text, build_reel_caption
@@ -531,9 +532,26 @@ def run_once(
     ig_id = "（dry-run）" if dry_run else account_id(record.value)
     done = 0
     failed = 0
+    # **古すぎる枠は出さない。** 止まっていた間に溜まったものを、復旧した
+    # 瞬間にまとめて出さないため（2026-09-17 の停止で9本が溜まった）。
+    # 出さずに planned のまま残す。動かすのは `post reschedule` の仕事。
+    not_before = (
+        now - timedelta(hours=config.instagram.stale_after_hours)
+    ).isoformat()
+    stale = [
+        row for row in stale_planned_posts(conn, not_before)
+        if row["kind"] in allowed and int(row["attempts"] or 0) < config.instagram.max_attempts
+    ]
+    if stale:
+        log.warning(
+            "**枠が古いので出しません（%d件）。** post reschedule で先の枠へ送ってください: %s",
+            len(stale),
+            "、".join(f'{r["id"]}（{r["scheduled_at"][:16]}）' for r in stale[:10]),
+        )
+
     while limit is None or done < limit:
         post = claim_due_post(
-            conn, now.isoformat(), config.instagram.max_attempts, allowed
+            conn, now.isoformat(), config.instagram.max_attempts, allowed, not_before
         )
         if post is None:
             return RunResult(done, failed)
@@ -644,6 +662,9 @@ class PostingWorker:
                 conn,
                 self.config.instagram.max_attempts,
                 tuple(self.config.instagram.worker_kinds),
+                # **古い枠は出さないので、起きる理由にもしない。**
+                # ここを揃えないと、溜まった古い予定を見て短く回り続ける。
+                (now - timedelta(hours=self.config.instagram.stale_after_hours)).isoformat(),
             )
         except Exception:  # noqa: BLE001 - 読めなければ長めに寝る（枠切れのこともある）
             return ceiling

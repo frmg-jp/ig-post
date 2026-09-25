@@ -854,7 +854,11 @@ def set_scheduled_at(conn: DbConnection, post_id: int, when: str) -> bool:
 
 
 def claim_due_post(
-    conn: DbConnection, now: str, max_attempts: int, kinds: tuple[str, ...] = ()
+    conn: DbConnection,
+    now: str,
+    max_attempts: int,
+    kinds: tuple[str, ...] = (),
+    not_before: str | None = None,
 ) -> Row | None:
     """時間が来た予定を1件だけ取り、publishing にして返す。
 
@@ -864,9 +868,19 @@ def claim_due_post(
 
     kinds を渡すと、その種別だけを取る。**動かす場所を分けるために使う。**
     リールは ffmpeg が要るので、審査UI（Render）では作れない。
+
+    not_before を渡すと、**それより古い枠は取らない。** 止まっていた間に
+    溜まった予定を、復旧した瞬間にまとめて出さないため。2026-09-17 から
+    9日間DBが落ちていて、9本が「時間を過ぎた予定」として残った。この
+    歯止めが無いと、繋がった瞬間に全部が数分で出る（`post reschedule`
+    のコメントには危険と書いてあったが、止める仕掛けは無かった）。
+    古い予定は planned のまま置く。動かすのは `post reschedule` の仕事。
     """
     where = ["state = 'planned'", "scheduled_at <= ?", "attempts < ?"]
     params: list = [now, max_attempts]
+    if not_before is not None:
+        where.append("scheduled_at >= ?")
+        params.append(not_before)
     if kinds:
         marks = ",".join("?" for _ in kinds)
         where.append(f"kind IN ({marks})")
@@ -889,7 +903,12 @@ def claim_due_post(
     return row
 
 
-def next_due_at(conn: DbConnection, max_attempts: int, kinds: tuple[str, ...] = ()) -> str | None:
+def next_due_at(
+    conn: DbConnection,
+    max_attempts: int,
+    kinds: tuple[str, ...] = (),
+    not_before: str | None = None,
+) -> str | None:
     """**次に出す予定の時刻。** 無ければ None。
 
     投稿ワーカーが「次はいつ起きればいいか」を知るために使う。これが
@@ -900,6 +919,9 @@ def next_due_at(conn: DbConnection, max_attempts: int, kinds: tuple[str, ...] = 
     """
     where = ["state = 'planned'", "attempts < ?"]
     params: list = [max_attempts]
+    if not_before is not None:
+        where.append("scheduled_at >= ?")
+        params.append(not_before)
     if kinds:
         marks = ",".join("?" for _ in kinds)
         where.append(f"kind IN ({marks})")

@@ -220,3 +220,69 @@ def test_読むだけでは起こさない(config, conn, monkeypatch) -> None:
         client.get("/schedule")
         client.get("/healthz")
     assert calls["wake"] == 0
+
+
+# --- 溜まった予定を一斉に出さない ---------------------------------------
+
+def test_古い枠は出さない(config, conn) -> None:
+    """**2026-09-17 の停止で9本が溜まった。**
+
+    DBが戻った瞬間に全部が数分で出るところだった。`post reschedule` の
+    コメントには危険と書いてあったのに、止める仕掛けが無かった。
+    """
+    from freming.db.repository import claim_due_post
+
+    old = (NOW - timedelta(days=3)).isoformat()
+    conn.execute(
+        "INSERT INTO posts (id, kind, state, scheduled_at, attempts) "
+        "VALUES (1, 'feed', 'planned', ?, 0)", (old,),
+    )
+    conn.commit()
+
+    cutoff = (NOW - timedelta(hours=config.instagram.stale_after_hours)).isoformat()
+    assert claim_due_post(conn, NOW.isoformat(), 3, ("feed",), cutoff) is None
+    # **消さない。** 消すと二度と投稿候補に戻らない
+    row = conn.execute("SELECT state FROM posts WHERE id = 1").fetchone()
+    assert row["state"] == "planned"
+
+
+def test_少し遅れたものは出す(config, conn) -> None:
+    """通常の遅れ（最長30分）で止めてしまっては、ただ出なくなる。"""
+    from freming.db.repository import claim_due_post
+
+    late = (NOW - timedelta(minutes=40)).isoformat()
+    conn.execute(
+        "INSERT INTO posts (id, kind, state, scheduled_at, attempts) "
+        "VALUES (1, 'feed', 'planned', ?, 0)", (late,),
+    )
+    conn.commit()
+
+    cutoff = (NOW - timedelta(hours=config.instagram.stale_after_hours)).isoformat()
+    assert claim_due_post(conn, NOW.isoformat(), 3, ("feed",), cutoff) is not None
+
+
+def test_古い枠は起きる理由にもしない(config, conn) -> None:
+    """揃えないと、溜まった古い予定を見て短く回り続ける。"""
+    _plan(conn, 1, NOW - timedelta(days=3))
+    worker = PostingWorker(config)
+    assert worker._sleep_for(conn, NOW) == config.instagram.max_sleep_sec
+
+
+def test_run_onceは溜まった分を一斉に出さない(config, conn, monkeypatch) -> None:
+    """**ここが本番の被害になるところ。** 9本が数分で出る。"""
+    from freming.instagram import worker as mod
+
+    for i in range(9):
+        _plan(conn, i + 1, NOW - timedelta(days=9 - i))
+    monkeypatch.setattr(mod, "load_token", lambda _c: type("R", (), {"value": "t"})())
+    monkeypatch.setattr(mod, "account_id", lambda _t: "ig1")
+    published = []
+    monkeypatch.setattr(
+        mod, "publish_one",
+        lambda *a, **k: published.append(a[2]["id"]),
+    )
+    config.instagram.public_base_url = "https://example.com"
+
+    result = mod.run_once(config, conn, now=NOW)
+    assert published == [], f"{len(published)}本が一斉に出た"
+    assert result.done == 0
