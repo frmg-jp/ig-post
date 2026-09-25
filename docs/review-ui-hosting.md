@@ -3,6 +3,39 @@
 審査UIをブラウザから開ける場所に置いて、二人で審査する。DBは既に
 Neon で共有されているので、同じ一覧・同じ承認状態を見ることになる。
 
+## どのアカウントに何があるか（2026-09-26 に追記）
+
+**サービスが止まったとき、どこを見ればいいのか分からなくなった。**
+9日間の停止のあいだ、Render のアカウントを探すのに時間を使った。
+別々のアカウントに分かれていて、覚えていられる形になっていなかった。
+
+| 何 | どこ | 入り方 |
+|---|---|---|
+| **Render**（審査UI `freming-curated-review`） | ワークスペースは **`frmg-jp` の GitHub** に紐づく | ログイン画面で **Continue with GitHub**。**GitHub に `frmg-jp` でログインした状態で**押すこと（`isseisawada` で押すと別アカウントに入る） |
+| **Neon**（Postgres `frmg-igpost` / Singapore） | **isseisawada@gmail.com** | メールでログイン |
+| GitHub リポジトリ | `frmg-jp/ig-post`（**個人アカウント。組織ではない**） | — |
+| Google Cloud（画像検索の Vision） | プロジェクト `frmg-ig-post` | GitHub Actions から Workload Identity 連携 |
+
+**`sawada@yadokari.net` にも Render アカウントがあるが、別物**（`daily-briefing-key`
+だけが入っていて、FREMING のサービスは無い）。ここを探しても見つからない。
+
+**パスワードや鍵はここに書かない。** 書くのは「どこを見るか」だけ。
+
+## 動いているコードを外から確かめる
+
+ダッシュボードに入れなくても、`/healthz` が答える。**認証は要らない。**
+
+```
+curl -sS https://freming-curated-review.onrender.com/healthz
+{"status":"ok","commit":"a71a81e","started_at":"2026-09-25T21:35:27+00:00"}
+```
+
+- `commit` … いま動いているコード（Render が入れる `RENDER_GIT_COMMIT`）
+- `started_at` … プロセスの起動時刻。デプロイが入ったかはこれで分かる
+
+**自動デプロイは効いている**（2026-09-25 に実測。push から **71秒**で
+`commit` が入れ替わった）。手で押す必要は普段ない。
+
 ## 決めたこと
 
 - ホスティングは **Render**。ブラウザだけで設定でき、GitHub のリポジトリを
