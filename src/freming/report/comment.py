@@ -55,6 +55,8 @@ Instagram メディア）の運用担当です。週次の数字を受け取り�
 - **「今週」と書かない。** 講評を書くのは終わった週についてで、読む人は
   次の週の途中で読む。「この週は」と書く。
 - 日本語。3〜5文、300字以内。見出しも箇条書きも使わず、地の文で書く。
+- **記号で強調しない。** ** や __ や # は使わない。画面にはそのまま
+  星印として出る（2026-09-26 に実際に出た）。強調したいことは語順で書く。
 - 最後に「次に試すこと」を1つだけ、具体的に書く。在庫が無いものは
   勧めない。"""
 
@@ -177,10 +179,26 @@ def unsupported_numbers(body: str, source: str) -> set[str]:
     return _checked(body) - numbers_in(source)
 
 
+def plain(text: str) -> str:
+    """マークダウンの強調記号を落とす。**画面にそのまま出るため。**
+
+    プロンプトで「使うな」と書いてあるが、守られないことがある
+    （2026-09-26 に `**米国以外の国で…**` がそのまま保存された）。
+    言い回しの縛りだけに頼らない——検算と同じ考え方で、出たものを直す。
+
+    消すのは強調の記号だけ。**数字も語も変えない**（検算の前に通すので、
+    ここで中身を書き換えると検算が意味を失う）。
+    """
+    out = text.replace("**", "").replace("__", "")
+    lines = [line.lstrip("#").lstrip() if line.lstrip().startswith("#") else line
+             for line in out.splitlines()]
+    return "\n".join(lines).strip()
+
+
 def _text(response) -> str:
     for block in response.content:
         if getattr(block, "type", None) == "text":
-            return block.text.strip()
+            return plain(block.text)
     return ""
 
 
@@ -298,6 +316,7 @@ __all__ = [
     "load",
     "load_latest",
     "numbers_in",
+    "plain",
     "save",
     "unsupported_numbers",
     "write",

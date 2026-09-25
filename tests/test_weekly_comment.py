@@ -384,3 +384,27 @@ def test_同じ週に二度書かない(config, conn, monkeypatch) -> None:
     monkeypatch.setattr(comment, "write", _counting)
     assert main(["report", "--week", "2026-09-16", "--comment"]) == 0
     assert calls["n"] == 0        # 既にあるので呼ばない
+
+
+# --- 画面に出る形 -------------------------------------------------------
+
+def test_強調記号を落とす() -> None:
+    """**画面には星印がそのまま出る。** 2026-09-26 に実際に保存された。"""
+    assert comment.plain("次に試すことは**米国以外**です。") == "次に試すことは米国以外です。"
+    assert comment.plain("## 見出し\n本文") == "見出し\n本文"
+    assert comment.plain("__強い__") == "強い"
+
+
+def test_強調記号を落としても数字は変えない() -> None:
+    """**検算の前に通すので、ここで中身を変えると検算が意味を失う。**"""
+    body = "リーチは**384**でした。"
+    cleaned = comment.plain(body)
+    assert comment.numbers_in(cleaned) == {"384"}
+
+
+def test_書いたものに記号が残らない(config, conn, monkeypatch) -> None:
+    _week(conn)
+    _fake_anthropic(monkeypatch, "この週は**1本**、リーチは384でした。")
+    written = comment.write(config, build(config, conn, NOW))
+    assert "**" not in written.body
+    assert "384" in written.body
