@@ -110,10 +110,16 @@ def test_approving_is_closed_too(guarded) -> None:
 
 
 def test_health_check_stays_open(guarded) -> None:
-    """ホスティング側の死活監視は資格情報を送らない。中身は返さない。"""
+    """ホスティング側の死活監視は資格情報を送らない。**中身は返さない。**
+
+    返すのは状態と、動いているコードの目印（短縮コミットIDと起動時刻）
+    だけ。物件のデータも件数も資格情報も出さない。
+    """
     response = guarded.get("/healthz")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    body = response.json()
+    assert body["status"] == "ok"
+    assert set(body) == {"status", "commit", "started_at"}
 
 
 # ----------------------------------------------------------------------

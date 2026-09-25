@@ -14,8 +14,10 @@ Basic 認証をかける（web/auth.py）。認証なしで外向けに待ち受
 from __future__ import annotations
 
 import json
+import os
 import secrets
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -50,6 +52,11 @@ from freming.web.auth import BasicAuth, BasicAuthMiddleware, credentials_from_en
 from freming.web.flags import flag
 
 log = get_logger(__name__)
+
+# このプロセスが起きた時刻。/healthz が返す。**デプロイが入ったかを
+# 外から見るため**（2026-09-26、Render のダッシュボードに入れず、
+# 暴発を止める修正が本番に届いているか確認できなくなった）。
+STARTED_AT = datetime.now(UTC).isoformat(timespec="seconds")
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 # ファビコンなどの静的ファイル。frmg.jp の実物を置いてある。
@@ -221,8 +228,25 @@ def create_app(
 
     @app.get("/healthz")
     def healthz():
-        """ホスティング側の死活監視用。認証を通さないので中身は返さない。"""
-        return {"status": "ok"}
+        """ホスティング側の死活監視用。**認証を通さない。**
+
+        `commit` と `started_at` を返す。**どのコードが動いているかを、
+        ダッシュボードに入らずに確かめるため。**
+
+        2026-09-26、Render のアカウントが分からず「投稿の暴発を止める
+        修正が本番に入っているか」を確認できなくなった。デプロイされた
+        かどうかを外から見る手段がこれまで無かった。
+
+        出すのは短いコミットIDと起動時刻だけ。**秘密は返さない**（DBの
+        接続先も、資格情報も、件数も出さない）。コミットIDはリポジトリが
+        非公開なので、これだけでは何も開けない。
+        """
+        return {
+            "status": "ok",
+            # Render が自動で入れる。ローカルや他の環境では空になる。
+            "commit": os.environ.get("RENDER_GIT_COMMIT", "")[:7],
+            "started_at": STARTED_AT,
+        }
 
     @app.get("/ig/callback", response_class=HTMLResponse)
     def instagram_callback(

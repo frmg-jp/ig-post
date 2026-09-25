@@ -1288,3 +1288,35 @@ def test_入力欄は16px未満にしない(client) -> None:
     """iOS Safari は 16px 未満の入力にフォーカスすると画面を拡大する。"""
     body = client.get("/").text
     assert "textarea { font-size: 16px; }" in body
+
+
+def test_healthz_は動いているコードを名乗る(config) -> None:
+    """**ダッシュボードに入らずにデプロイを確かめるため。**
+
+    2026-09-26、Render のアカウントが分からず「投稿の暴発を止める修正が
+    本番に届いているか」を確認できなくなった。外から見る手段が無かった。
+
+    出すのは短いコミットIDと起動時刻だけ。**秘密は返さない。**
+    """
+    import os
+
+    os.environ["RENDER_GIT_COMMIT"] = "abcdef1234567890"
+    try:
+        body = TestClient(create_app(config)).get("/healthz").json()
+    finally:
+        del os.environ["RENDER_GIT_COMMIT"]
+
+    assert body["status"] == "ok"
+    assert body["commit"] == "abcdef1"          # 短縮形だけ
+    assert body["started_at"]
+    # **秘密も件数も出さない。** 認証を通さない経路なので
+    assert set(body) == {"status", "commit", "started_at"}
+
+
+def test_healthz_は認証なしで開く(config) -> None:
+    """ホスティング側の死活監視が通らないと、勝手に再起動される。"""
+    from freming.web.auth import BasicAuth
+
+    app = create_app(config, auth=BasicAuth("u", "p"))
+    assert TestClient(app).get("/healthz").status_code == 200
+    assert TestClient(app).get("/").status_code == 401
