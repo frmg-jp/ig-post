@@ -1920,10 +1920,22 @@ def _cmd_post(args: argparse.Namespace) -> int:
                 if field in keys:
                     print(f"  {field:<16}{row[field]}")
 
+            # **失敗の理由をここで出す。** DBには持っているのに、これまで
+            # 画面（審査UI）でしか読めなかった。2026-09-26、復旧後の初投稿が
+            # failed になったとき、理由を読むのに審査UIの資格情報が要り、
+            # 切り分けが止まった。**記録しているなら、読めるようにする。**
+            if "error" in keys and row["error"]:
+                print("\n■ 失敗の理由（最後の試行）")
+                for line in str(row["error"]).splitlines():
+                    print(f"  {line}")
+
             media_id = row["ig_media_id"] if "ig_media_id" in keys else None
             if not media_id:
                 print("\n**media_id が記録されていません。** 投稿は成立して"
                       "いないのに published になっている可能性があります。")
+                if row["state"] == "failed":
+                    print("  コンテナも作れていないなら、Meta へ最初の1回が"
+                          "届いていません（トークン・画像URL・アカウントの制限）。")
                 return 0
 
             record = load_token(conn)
