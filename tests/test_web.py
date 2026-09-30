@@ -790,6 +790,16 @@ def test_削除すると一覧から消え候補にも戻らない(config, conn,
     assert postable_properties(conn, 10) == []
 
 
+def test_削除すると置いてあった画像も消える(config, conn, client):
+    """出さない予定の画像・動画は、消さないと二度と消えない（2026-09-30）。"""
+    from freming.instagram.media import load_media, store_media
+
+    post_id = _planned_post(conn)
+    token = store_media(conn, post_id, b"preview", mime="video/mp4", position=99)
+    client.post(f"/posts/{post_id}/delete", follow_redirects=False)
+    assert load_media(conn, token) is None
+
+
 def test_抽出した番地で検索リンクを作る(config, conn, client):
     """記事の Location から番地が取れていれば、それを検索に渡す。"""
     _planned_post(conn)

@@ -1089,7 +1089,8 @@ def create_app(
     def delete_post_route(post_id: int):
         """予定から消す。**候補には戻さない**（行は deleted として残し、
         この物件が再び予定に載るのを防ぐ）。重複や誤登録を外すためのもの。
-        投稿中の行だけは触らない。"""
+        投稿中の行だけは触らない。置いてあった画像・動画も消す。"""
+        from freming.db.repository import drop_post_media
         from freming.instagram.plan import compact
 
         conn = _conn()
@@ -1099,6 +1100,8 @@ def create_app(
                 "WHERE id = ? AND state != 'publishing'",
                 (post_id,),
             )
+            if cursor.rowcount:
+                drop_post_media(conn, post_id)
             conn.commit()
             if cursor.rowcount:
                 compact(config, conn)

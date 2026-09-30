@@ -954,14 +954,53 @@ def fail_post(conn: DbConnection, post_id: int, error: str, max_attempts: int) -
     return state
 
 
+DROPPED_STATES = ("skipped", "deleted")
+"""出さないと決まった状態。この予定のために置いた画像・動画は要らない。"""
+
+
+def drop_post_media(conn: DbConnection, post_id: int) -> int:
+    """出さないと決めた予定の画像・動画を消す。commit は呼び出し側。
+
+    **消さないと二度と消えない。** 置いた行を消すのは投稿が済んだとき
+    （worker の purge_media）だけで、見送った予定の分は残り続けていた。
+    リールの試写は1本10MB前後あり、見送るたびに溜まる（2026-09-30、
+    post 48 の試写が残って判明）。
+
+    消しても困らない: 画像は投稿する瞬間に作り直す（worker の
+    _publish_feed / _publish_story / _publish_reel）。見送りを戻しても、
+    出すときにまた置かれる。
+    """
+    cursor = conn.execute("DELETE FROM post_media WHERE post_id = ?", (post_id,))
+    return cursor.rowcount or 0
+
+
+def purge_dropped_media(conn: DbConnection) -> int:
+    """見送り・削除になった予定に残っている画像・動画をまとめて消す。
+
+    drop_post_media を入れる前に見送った分の掃除。毎週の試写を置く前に
+    呼んでいる（cli の reel preview --stash）。戻り値は消した件数。
+    """
+    marks = ", ".join("?" for _ in DROPPED_STATES)
+    cursor = conn.execute(
+        f"DELETE FROM post_media WHERE post_id IN "
+        f"(SELECT id FROM posts WHERE state IN ({marks}))",
+        DROPPED_STATES,
+    )
+    conn.commit()
+    return cursor.rowcount or 0
+
+
 def skip_post(conn: DbConnection, post_id: int) -> bool:
-    """予定表から外す。投稿済みには効かない。"""
+    """予定表から外す。投稿済みには効かない。置いてあった画像・動画も消す。"""
     cursor = conn.execute(
         "UPDATE posts SET state = 'skipped' WHERE id = ? AND state IN ('planned', 'failed')",
         (post_id,),
     )
+    changed = bool(cursor.rowcount)
+    if changed:
+        drop_post_media(conn, post_id)
     conn.commit()
-    return bool(cursor.rowcount)
+    return changed
 
 
 def abandon_post(conn: DbConnection, post_id: int) -> None:
@@ -971,6 +1010,7 @@ def abandon_post(conn: DbConnection, post_id: int) -> None:
     claim_due_post を通った行は既に publishing なので、こちらで落とす。
     """
     conn.execute("UPDATE posts SET state = 'skipped' WHERE id = ?", (post_id,))
+    drop_post_media(conn, post_id)
     conn.commit()
 
 

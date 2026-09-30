@@ -212,6 +212,72 @@ def test_知らない_tokenは何も返さない(db):
     assert media.load_media(db, "ないよ") is None
 
 
+# --- 出さない予定の画像を残さない（2026-09-30） -------------------------
+# 置いた行を消すのは投稿が済んだときだけで、見送った予定の分は残り続けた。
+# リールの試写は1本10MB前後あり、見送るたびに Neon の無料枠を食う。
+def test_見送ると置いてあった画像も消える(db):
+    property_id = _property(db)
+    post_id = create_post(db, "reel", NOW.isoformat(), property_id=property_id)
+    token = media.store_media(db, post_id, b"preview", mime="video/mp4", position=99)
+    assert skip_post(db, post_id) is True
+    assert media.load_media(db, token) is None
+
+
+def test_見送れなかったときは画像を消さない(db):
+    """**投稿中の画像は Meta が取りに来ている最中かもしれない。** 見送りが
+    効かない状態（publishing）で消すと、その投稿が落ちる。"""
+    property_id = _property(db)
+    post_id = create_post(db, "feed", NOW.isoformat(), property_id=property_id)
+    claimed = claim_due_post(db, NOW.isoformat(), 3)
+    assert claimed["id"] == post_id
+    token = media.store_media(db, post_id, b"fetching")
+    assert skip_post(db, post_id) is False
+    assert media.load_media(db, token) is not None
+
+
+def test_見送りを戻しても出せる(db):
+    """消しても困らないことの確認。画像は出す瞬間に置き直すので、
+    見送り→戻す のあとも取り出せて、新しく置ける。"""
+    property_id = _property(db)
+    post_id = create_post(db, "feed", NOW.isoformat(), property_id=property_id)
+    media.store_media(db, post_id, b"old")
+    skip_post(db, post_id)
+    assert retry_post(db, post_id) is True
+    assert claim_due_post(db, NOW.isoformat(), 3)["id"] == post_id
+    token = media.store_media(db, post_id, b"new")
+    assert media.load_media(db, token) == (b"new", "image/jpeg")
+
+
+def test_出さないと決めたときも画像を消す(db):
+    from freming.db.repository import abandon_post
+
+    property_id = _property(db)
+    post_id = create_post(db, "story", NOW.isoformat(), property_id=property_id)
+    token = media.store_media(db, post_id, b"vertical")
+    abandon_post(db, post_id)
+    assert media.load_media(db, token) is None
+
+
+def test_以前の見送りに残った画像はまとめて消せる(db):
+    """drop_post_media を入れる前に見送った分（post 48 の試写）の掃除。
+    **予定・投稿中・失敗の画像には触らない。**"""
+    from freming.db.repository import purge_dropped_media
+
+    kept, gone = [], []
+    for state in ("planned", "publishing", "failed", "skipped", "deleted"):
+        property_id = _property(db, f"house {state}")
+        post_id = create_post(db, "feed", NOW.isoformat(), property_id=property_id)
+        # 見送りの経路を通さずに状態だけ変える（以前のデータの再現）
+        db.execute("UPDATE posts SET state = ? WHERE id = ?", (state, post_id))
+        db.commit()
+        token = media.store_media(db, post_id, state.encode())
+        (gone if state in ("skipped", "deleted") else kept).append(token)
+
+    assert purge_dropped_media(db) == 2
+    assert all(media.load_media(db, t) is None for t in gone)
+    assert all(media.load_media(db, t) is not None for t in kept)
+
+
 def test_ストーリーズ用に縦へ組み替わる(tmp_path):
     square = Image.new("RGB", (1080, 1080), "#334455")
     path = tmp_path / "s.jpg"

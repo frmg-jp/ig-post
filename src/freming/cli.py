@@ -2294,11 +2294,17 @@ def _cmd_reel_preview(cfg, args: argparse.Namespace) -> int:
         # **投稿はしない。**
         #
         # 置いた行は投稿が済むと purge_media が消す。出さないと決めた
-        # ときは reel preview --clear-stash で消せる。
+        # ときは見送り（post skip）で消える（repository.drop_post_media）。
         from freming.db.connection import session as _session
+        from freming.db.repository import purge_dropped_media
         from freming.instagram.media import purge_media, store_media
 
         with _session(cfg.app.target()) as conn:
+            # 見送りで消すようにする前に残った分の掃除。**以前の見送りの
+            # 試写は、これが無いと二度と消えない**（2026-09-30 の post 48）。
+            swept = purge_dropped_media(conn)
+            if swept:
+                print(f"見送った予定に残っていた画像・動画を {swept} 件消しました。")
             row = conn.execute(
                 "SELECT id FROM posts WHERE kind = 'reel' AND state = 'planned' "
                 "ORDER BY scheduled_at LIMIT 1"
