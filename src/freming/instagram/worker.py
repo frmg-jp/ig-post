@@ -497,6 +497,7 @@ def run_once(
     limit: int | None = None,
     dry_run: bool = False,
     kinds: tuple[str, ...] | None = None,
+    include_stale: bool = False,
 ) -> RunResult:
     """時間が来た予定を順に投稿する。
 
@@ -510,7 +511,17 @@ def run_once(
 
     kinds を渡すとその種別だけを扱う。既定は config の worker_kinds。
     リールは ffmpeg が要るので、審査UI（Render）では担当しない。
+
+    include_stale を立てると、古い枠でも出す（**人が押したとき専用**）。
+    古い枠を出さない歯止めは、無人のワーカーが復旧した瞬間にまとめて
+    出すのを防ぐためのもの。人が押す経路まで止めると、**リールが毎週
+    出せなくなる**（2026-09-29 判明。試写は定期実行で 19:00 から3〜10時間
+    遅れて組まれ、人が見て押す頃には必ず6時間を過ぎている）。
+    **limit 無しでは立てられない。** まとめて出るのを防ぐ役目を、件数の
+    上限に引き継がせるため。
     """
+    if include_stale and limit is None:
+        raise ValueError("include_stale は limit と一緒に使うこと（まとめて出さないため）")
     now = now or datetime.now(UTC)
     record = load_token(conn)
     if record is None:
@@ -535,14 +546,20 @@ def run_once(
     # **古すぎる枠は出さない。** 止まっていた間に溜まったものを、復旧した
     # 瞬間にまとめて出さないため（2026-09-17 の停止で9本が溜まった）。
     # 出さずに planned のまま残す。動かすのは `post reschedule` の仕事。
-    not_before = (
+    not_before: str | None = (
         now - timedelta(hours=config.instagram.stale_after_hours)
     ).isoformat()
     stale = [
         row for row in stale_planned_posts(conn, not_before)
         if row["kind"] in allowed and int(row["attempts"] or 0) < config.instagram.max_attempts
     ]
-    if stale:
+    if include_stale:
+        # 人が押した。古い枠も出す（件数の上限は limit が守る）。
+        if stale:
+            log.info("古い枠も対象にします（人が押した経路）: %s",
+                     "、".join(f'{r["id"]}（{r["scheduled_at"][:16]}）' for r in stale[:10]))
+        not_before = None
+    elif stale:
         log.warning(
             "**枠が古いので出しません（%d件）。** post reschedule で先の枠へ送ってください: %s",
             len(stale),

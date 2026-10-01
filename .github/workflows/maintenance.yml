@@ -318,10 +318,14 @@ jobs:
               # 通常は審査UI（Render）の常駐ワーカーが 09:00 に出す。
               # ここはその取りこぼしを人が出し直すための経路で、
               # 1回につき1本だけにしてある（まとめて出ない）。
+              #
+              # --include-stale: **人が押した経路なので、6時間を過ぎた枠も出す。**
+              # 古い枠を止める歯止めは無人のワーカー用。ここまで止めると、
+              # 出し直したいときに出せない（--limit 1 が一斉に出るのを防ぐ）。
               if [ -n "$YES" ]; then
-                python -m freming.cli post run --kind feed --limit 1
+                python -m freming.cli post run --kind feed --limit 1 --include-stale
               else
-                python -m freming.cli post run --kind feed --limit 1 --dry-run
+                python -m freming.cli post run --kind feed --limit 1 --include-stale --dry-run
               fi
               python -m freming.cli post show
               ;;

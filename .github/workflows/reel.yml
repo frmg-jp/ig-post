@@ -126,8 +126,13 @@ jobs:
       # `--limit 1` は**溜まった予定がまとめて出るのを防ぐ**ため。定期実行を
       # 止めていた間の枠（08/31 など）が残っており、上限を付けないと次に
       # 動いたとき2本続けて公開される。
+      #
+      # `--include-stale` は**6時間を過ぎた枠も出す**ため。試写は定期実行で
+      # 19:00 から3〜10時間遅れて組まれ、人が見て押す頃には必ず6時間を
+      # 過ぎている。付けないと**毎週弾かれる**（2026-09-29 判明、post 48）。
+      # 古い枠を止める歯止めは無人のワーカー用で、ここは人が押す経路。
       - name: リールを投稿
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'publish' }}
         run: |
-          python -m freming.cli post run --kind reel --limit 1 \
+          python -m freming.cli post run --kind reel --limit 1 --include-stale \
             ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}

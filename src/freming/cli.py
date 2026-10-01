@@ -2113,9 +2113,14 @@ def _cmd_post(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 1
+        if args.include_stale and args.limit is None:
+            print("--include-stale は --limit と一緒に指定してください。"
+                  "上限なしだと、溜まった予定がまとめて出ます。", file=sys.stderr)
+            return 2
         result = run_once(
             cfg, conn, limit=args.limit, dry_run=args.dry_run,
             kinds=tuple(args.kind) if args.kind else None,
+            include_stale=args.include_stale,
         )
         done = result.done
         if done:
@@ -2744,6 +2749,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_post.add_argument(
         "--kind", action="append", choices=["feed", "story", "reel"],
         help="扱う種別。既定は config の worker_kinds。複数指定できる",
+    )
+    p_post.add_argument(
+        "--include-stale", action="store_true",
+        help="run で、時刻を6時間以上過ぎた予定も出す。**人が押す経路専用**"
+             "（--limit 必須。無人のワーカーには付けない）",
     )
     p_post.add_argument(
         "--reel-from", metavar="YYYY-MM-DD",

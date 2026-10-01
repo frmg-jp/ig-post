@@ -286,3 +286,78 @@ def test_run_onceは溜まった分を一斉に出さない(config, conn, monkey
     result = mod.run_once(config, conn, now=NOW)
     assert published == [], f"{len(published)}本が一斉に出た"
     assert result.done == 0
+
+
+# --- 人が押した経路では古い枠も出す（2026-10-01） ---------------------
+# 古い枠を止める歯止めが、人が押すリールの公開まで止めていた。試写は
+# 定期実行で 19:00 から3〜10時間遅れて組まれ、人が見て押す頃には必ず
+# 6時間を過ぎている。**毎週弾かれる作りだった**（2026-09-29、post 48）。
+
+def _fake_publish(monkeypatch) -> list:
+    from freming.instagram import worker as mod
+
+    monkeypatch.setattr(mod, "load_token", lambda _c: type("R", (), {"value": "t"})())
+    monkeypatch.setattr(mod, "account_id", lambda _t: "ig1")
+    published: list = []
+    monkeypatch.setattr(mod, "publish_one", lambda *a, **k: published.append(a[2]["id"]))
+    return published
+
+
+def test_人が押せば古いリールも出る(config, conn, monkeypatch) -> None:
+    """月曜 19:00 の枠を、火曜の朝に人が押して出す。いつもの流れ。"""
+    from freming.instagram import worker as mod
+
+    published = _fake_publish(monkeypatch)
+    config.instagram.public_base_url = "https://example.com"
+    _plan(conn, 48, NOW - timedelta(hours=14), kind="reel")
+
+    result = mod.run_once(config, conn, now=NOW, limit=1, kinds=("reel",),
+                          include_stale=True)
+    assert published == [48]
+    assert result.done == 1
+
+
+def test_人が押しても1本だけ(config, conn, monkeypatch) -> None:
+    """**歯止めの役目は件数の上限が引き継ぐ。** 9本溜まっていても1本。"""
+    from freming.instagram import worker as mod
+
+    published = _fake_publish(monkeypatch)
+    config.instagram.public_base_url = "https://example.com"
+    for i in range(9):
+        _plan(conn, i + 1, NOW - timedelta(days=9 - i))
+
+    mod.run_once(config, conn, now=NOW, limit=1, include_stale=True)
+    assert published == [1], "古い順に1本だけ"
+
+
+def test_上限なしでは古い枠を出せない(config, conn) -> None:
+    """上限なしで歯止めを外すと、2026-09-17 の9本がまとめて出る形に戻る。"""
+    from freming.instagram import worker as mod
+
+    with pytest.raises(ValueError):
+        mod.run_once(config, conn, now=NOW, include_stale=True)
+
+
+def test_常駐ワーカーは古い枠を出さないまま(config, conn, monkeypatch) -> None:
+    """**無人の経路は変えていない。** PostingWorker は include_stale を渡さない。"""
+    import inspect
+
+    from freming.instagram import worker as mod
+
+    source = inspect.getsource(PostingWorker)
+    assert "include_stale" not in source
+    published = _fake_publish(monkeypatch)
+    config.instagram.public_base_url = "https://example.com"
+    _plan(conn, 48, NOW - timedelta(hours=14), kind="reel")
+    mod.run_once(config, conn, now=NOW, limit=1, kinds=("reel",))
+    assert published == []
+
+
+def test_CLIは上限なしの指定を断る(config, monkeypatch, capsys) -> None:
+    from freming import cli
+
+    monkeypatch.setattr(cli, "load_config", lambda *_a, **_k: config)
+    config.instagram.public_base_url = "https://example.com"
+    code = cli.main(["post", "run", "--include-stale"])
+    assert code == 2
+    assert "--limit" in capsys.readouterr().err
