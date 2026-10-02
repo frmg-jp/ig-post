@@ -18,8 +18,11 @@ import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
+import httpx
+
 from freming.config import Config, load_config
 from freming.db.connection import DbConnection, Row, connect
+from freming.db.repository import delivery_queue, record_delivery_failure
 from freming.delivery.drive import DriveClient, DriveError, build_client
 from freming.images.fetch import NoImagesFound, fetch_images
 from freming.images.process import process_property_images
@@ -170,15 +173,31 @@ def deliver_approved(
     drive: DriveClient | None = None,
     http: HttpClient | None = None,
 ) -> DeliverStats:
-    """承認済みで未納品の物件をまとめて納品する。"""
+    """承認済みで未納品の物件をまとめて納品する。
+
+    **審査UIの自動納品と同じ順番・同じ歯止めで拾う**（repository の
+    delivery_queue）。未試行を先に、失敗した物件は待ち時間を置いて
+    後ろに回し、max_attempts 回失敗したら自動では触らず審査UIの
+    「再試行」に任せる。
+
+    以前はここだけ素のスコア順で10件取っていた。画像の取れない物件が
+    毎回先頭を埋め、後ろの物件に順番が回らなかった。2026-09-29〜10-02 の
+    4日間、承認済み47件を残して納品が0件になり、10/07 から投稿が
+    止まるところだった。
+
+    **1件の失敗で全体を止めない。** 掲載ページが 403 を返す（WowHaus は
+    データセンターのIPを拒否する）と、以前は例外がここを素通りして
+    プログラムごと終わっていた。毎時の納品が毎回同じ物件で落ちていた。
+    """
     stats = DeliverStats()
-    rows = conn.execute(
-        "SELECT * FROM properties WHERE status = 'approved' "
-        "ORDER BY score DESC, id LIMIT ?",
-        (limit or 20,),
-    ).fetchall()
+    rows = delivery_queue(
+        conn,
+        limit=limit or 20,
+        max_attempts=config.delivery.max_attempts,
+        retry_after_sec=config.delivery.retry_after_sec,
+    )
     if not rows:
-        log.info("納品対象がありません（承認済みで未納品の候補なし）")
+        log.info("納品対象がありません（承認済みで、いま試せる候補なし）")
         return stats
 
     owns_http = http is None
@@ -194,8 +213,21 @@ def deliver_approved(
             except NoImagesFound as exc:
                 log.error("画像が用意できませんでした: property_id=%s (%s)", row["id"], exc)
                 stats.no_images += 1
+                if not dry_run:
+                    record_delivery_failure(conn, int(row["id"]), f"画像なし: {exc}")
+                continue
+            except httpx.HTTPError as exc:
+                # 掲載ページそのものが開けない（403 など）。この物件だけの問題。
+                log.error("掲載ページを開けませんでした: property_id=%s (%s)",
+                          row["id"], str(exc).splitlines()[0])
+                stats.failed += 1
+                if not dry_run:
+                    record_delivery_failure(
+                        conn, int(row["id"]), f"掲載ページ: {str(exc).splitlines()[0]}"
+                    )
                 continue
             except DriveError as exc:
+                # Drive 側の問題は物件のせいではない。後回しにしない。
                 log.error("Driveへの納品に失敗: property_id=%s (%s)", row["id"], exc)
                 stats.failed += 1
                 continue

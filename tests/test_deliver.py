@@ -277,3 +277,137 @@ def test_meta_without_series_is_blank(config, conn) -> None:
     property_id = _approved(conn)
     row = conn.execute("SELECT * FROM properties WHERE id = ?", (property_id,)).fetchone()
     assert "series: \n" in build_meta(row, 10, config.series_label(row["series"]))
+
+
+# --- 1件の失敗で納品全体を止めない（2026-10-02） -----------------------
+# 9/29〜10/02 の4日間、納品が0件だった。承認済みが47件あるのに、
+# (1) WowHaus の 403 で毎回プログラムごと落ち、(2) 画像の取れない物件が
+# スコア順で毎回先頭を埋めていた。予定が組めず 10/07 から投稿が止まる
+# ところだった。
+
+FORBIDDEN_URL = "https://example.com/forbidden/"
+
+
+def _forbidden_http() -> FakeHttp:
+    import httpx
+
+    http = FakeHttp()
+    real_get = http.get
+
+    def get(url: str, **kwargs):
+        if url == FORBIDDEN_URL:
+            request = httpx.Request("GET", url)
+            raise httpx.HTTPStatusError(
+                "Client error '403 Forbidden'", request=request,
+                response=httpx.Response(403, request=request),
+            )
+        return real_get(url, **kwargs)
+
+    http.get = get
+    return http
+
+
+def _set_score(conn, property_id: int, score: float) -> None:
+    conn.execute("UPDATE properties SET score = ? WHERE id = ?", (score, property_id))
+    conn.commit()
+
+
+def test_掲載ページが開けなくても次の物件へ進む(config, conn) -> None:
+    """**403 の1件で全体を止めない。** 以前は例外が素通りして終わっていた。"""
+    blocked = _approved(conn, FORBIDDEN_URL)
+    ok = _approved(conn)
+    _set_score(conn, blocked, 99.0)   # 先に試される側を落ちる物件にする
+
+    stats = deliver_approved(config, conn, drive=FakeDrive(), http=_forbidden_http())
+
+    assert stats.failed == 1
+    assert [d.property_id for d in stats.delivered] == [ok]
+
+
+def test_失敗した物件は理由を残して後回しにする(config, conn) -> None:
+    """審査UIの自動納品と同じ記録を残す。画面の「再試行」がそのまま効く。"""
+    blocked = _approved(conn, FORBIDDEN_URL)
+    deliver_approved(config, conn, drive=FakeDrive(), http=_forbidden_http())
+
+    row = conn.execute(
+        "SELECT status, delivery_attempts, delivery_attempted_at, delivery_error "
+        "FROM properties WHERE id = ?", (blocked,),
+    ).fetchone()
+    assert row["status"] == "approved"   # 見送りにはしない。人の判断を変えない
+    assert row["delivery_attempts"] == 1
+    assert row["delivery_attempted_at"] is not None
+    assert "403" in row["delivery_error"]
+
+
+def test_失敗し続ける物件が後ろの順番を奪わない(config, conn) -> None:
+    """**ここが4日間止まった本体。** 件数の枠を、毎回失敗する物件が埋めていた。"""
+    blocked = _approved(conn, FORBIDDEN_URL)
+    ok = _approved(conn)
+    _set_score(conn, blocked, 99.0)
+    http = _forbidden_http()
+
+    first = deliver_approved(config, conn, limit=1, drive=FakeDrive(), http=http)
+    assert first.failed == 1 and first.delivered == []
+    # 2回目は、直近に失敗した物件を飛ばして後ろに順番が回る
+    second = deliver_approved(config, conn, limit=1, drive=FakeDrive(), http=http)
+    assert [d.property_id for d in second.delivered] == [ok]
+
+
+def test_画像なしも記録する(config, conn) -> None:
+    empty = _approved(conn, "https://example.com/empty/")
+    http = FakeHttp()
+    http.pages["https://example.com/empty/"] = _Response("<article></article>", "text/html")
+    deliver_approved(config, conn, drive=FakeDrive(), http=http)
+
+    row = conn.execute(
+        "SELECT delivery_error FROM properties WHERE id = ?", (empty,)
+    ).fetchone()
+    assert row["delivery_error"].startswith("画像なし")
+
+
+def test_待ち時間が過ぎれば試し直す(config, conn) -> None:
+    """**一度の失敗で外さない。** 相手サイトの一時的な不調もある。"""
+    from datetime import UTC, datetime, timedelta
+
+    blocked = _approved(conn, FORBIDDEN_URL)
+    old = datetime.now(UTC) - timedelta(seconds=config.delivery.retry_after_sec + 60)
+    conn.execute(
+        "UPDATE properties SET delivery_attempts = 1, delivery_attempted_at = ? "
+        "WHERE id = ?", (old.isoformat(), blocked),
+    )
+    conn.commit()
+
+    stats = deliver_approved(config, conn, drive=FakeDrive(), http=_forbidden_http())
+    assert stats.failed == 1, "待ち時間が過ぎたのでもう一度試す"
+
+
+def test_上限まで失敗したら自動では触らない(config, conn) -> None:
+    """延々と相手サイトを叩かない。審査UIの「再試行」で人が戻す。"""
+    blocked = _approved(conn, FORBIDDEN_URL)
+    conn.execute(
+        "UPDATE properties SET delivery_attempts = ? WHERE id = ?",
+        (config.delivery.max_attempts, blocked),
+    )
+    conn.commit()
+
+    stats = deliver_approved(config, conn, drive=FakeDrive(), http=_forbidden_http())
+    assert stats.failed == 0 and stats.delivered == []
+
+
+def test_Driveの失敗は物件のせいにしない(config, conn) -> None:
+    """Drive が落ちているだけなら、復旧したらすぐ納品してほしい。"""
+    property_id = _approved(conn)
+    deliver_approved(config, conn, drive=FakeDrive(fail_on_upload=True), http=FakeHttp())
+    row = conn.execute(
+        "SELECT delivery_attempts FROM properties WHERE id = ?", (property_id,)
+    ).fetchone()
+    assert row["delivery_attempts"] == 0
+
+
+def test_dry_runでは失敗を記録しない(config, conn) -> None:
+    blocked = _approved(conn, FORBIDDEN_URL)
+    deliver_approved(config, conn, dry_run=True, drive=FakeDrive(), http=_forbidden_http())
+    row = conn.execute(
+        "SELECT delivery_attempts FROM properties WHERE id = ?", (blocked,)
+    ).fetchone()
+    assert row["delivery_attempts"] == 0
