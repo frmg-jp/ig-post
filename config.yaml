@@ -39,7 +39,10 @@ editorial_sources:
   - key: wowhaus
     name: "WowHaus"
     rank: A
-    enabled: true
+    # **2026-10-03 に停止。取り込んだ分も削除した（ユーザー判断）。**
+    # データセンター（GitHub Actions）からの記事の取得を 403 で拒否する。
+    # 承認9件が1件も納品・投稿できなかった。再開しない。
+    enabled: false
     assume_for_sale: true
     feeds:
       - "https://www.wowhaus.co.uk/feed/"
@@ -100,7 +103,11 @@ editorial_sources:
   - key: thespaces
     name: "The Spaces"
     rank: B
-    enabled: true
+    # **2026-10-03 に停止。取り込んだ分も削除した（ユーザー判断）。**
+    # 画像の配信元 cdn.thespaces.com の robots.txt が画像の取得を禁止して
+    # いる。承認14件が1件も納品・投稿できなかった。再開しない。
+    # （以下は停止前の調査記録として残す）
+    enabled: false
     # 2026-08-03 の collect --explain（記事ページ取得あり）:
     #   10件 / 1.1本/日（8日分）/ 候補6件 → 審査 週4.7件
     # 6件すべて2点、残り4件（音楽・美術・デザイン評論・家具）は0点。

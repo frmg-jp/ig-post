@@ -23,6 +23,7 @@ on:
           - source-report      # ソース別の歩留まり（費用なし）
           - approval-report    # **承認の実績からスコア付けを検証**（読むだけ・費用なし）
           - post-show          # 投稿予定の一覧（費用なし）
+          - remove-source      # **ソースの物件をまとめて削除**（「対象の上限」にソースのkey。納品済みは残る）
           - post-show-all      # 60日先までの予定（窓の外に置いた行を見る。費用なし）
           - post-skip          # 予定を見送りにする（「対象の上限」に post_id）
           - post-unskip        # 見送りを予定に戻す（「対象の上限」に post_id）
@@ -201,6 +202,17 @@ jobs:
               python -m freming.cli approval-report --examples "${N:-0}"
               ;;
             post-show)        python -m freming.cli post show ;;
+            # **取り消せない。** 「本当に実行する」を外すと対象を並べるだけ。
+            # 関連する画像・予定は一緒に消える。納品済みには触らない。
+            # 非承認の理由（学習の材料）は物件との紐づけだけ外れて残る。
+            remove-source)
+              if [ -z "${{ github.event.inputs.limit }}" ]; then
+                echo "「対象の上限」欄にソースのkey（例: wowhaus）を入れてください。" >&2
+                exit 2
+              fi
+              python -m freming.cli remove --source "${{ github.event.inputs.limit }}" \
+                $( [ -n "$YES" ] || echo --dry-run )
+              ;;
             post-show-all)    python -m freming.cli post show --days 60 ;;
             post-requeue)
               # **アプリ側で先に削除してから使うこと。** 消さずに戻すと
