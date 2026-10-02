@@ -306,3 +306,50 @@ def fetch_images(
             f"短辺 {config.images.min_short_edge_px}px 未満 {stats.too_small} 件）"
         )
     return stats
+
+
+def restore_missing_files(
+    conn: DbConnection, property_id: int, client: HttpClient
+) -> int:
+    """記録はあるのに手元にファイルが無い画像を、元のURLから取り直す。
+
+    **納品の場所が Mac から GitHub Actions に移ったときの取り残し。**
+    Mac で画像を取ったあと納品まで行かなかった物件は、images の行
+    （local_path は Mac の相対パス）だけが DB に残る。Actions には
+    そのファイルが無いので加工が全部失敗し、しかも行があるせいで
+    fetch_images も「取得済み」として取りに行かない。2026-10-02 に
+    承認済みの7件がこれで止まっていた。
+
+    Instagram 側は同じ事情を media._square_from_source で取り直して
+    いる。納品でも同じことをする。相手サイトへのアクセスなので
+    HttpClient を通す（robots.txt とドメイン間隔がそのまま効く）。
+    戻り値は取り直せた枚数。
+    """
+    rows = conn.execute(
+        "SELECT source_url, local_path FROM images WHERE property_id = ? "
+        "AND local_path IS NOT NULL ORDER BY position",
+        (property_id,),
+    ).fetchall()
+    restored = 0
+    for row in rows:
+        path = Path(row["local_path"])
+        if path.exists() or not row["source_url"]:
+            continue
+        try:
+            response = client.get(row["source_url"])
+        except RobotsDisallowed:
+            log.info("robots.txt により取り直しません: %s", row["source_url"])
+            continue
+        except Exception as exc:  # noqa: BLE001 - 1枚の失敗で残りを止めない
+            log.warning("画像を取り直せませんでした: %s (%s)", row["source_url"], exc)
+            continue
+        if _probe(response.content) is None:
+            log.warning("取り直した画像が開けません: %s", row["source_url"])
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(response.content)
+        restored += 1
+    if restored:
+        log.info("手元に無かった画像を %d 枚取り直しました: property_id=%s",
+                 restored, property_id)
+    return restored

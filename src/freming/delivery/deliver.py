@@ -24,7 +24,7 @@ from freming.config import Config, load_config
 from freming.db.connection import DbConnection, Row, connect
 from freming.db.repository import delivery_queue, record_delivery_failure
 from freming.delivery.drive import DriveClient, DriveError, build_client
-from freming.images.fetch import NoImagesFound, fetch_images
+from freming.images.fetch import NoImagesFound, fetch_images, restore_missing_files
 from freming.images.process import process_property_images
 from freming.logging_setup import get_logger, setup_logging
 from freming.net.client import HttpClient
@@ -125,6 +125,8 @@ def deliver_property(
         return None
 
     fetch_images(config, conn, row, client=http)
+    # 記録だけ残ってファイルが無い画像（Mac で取った分）を取り直す
+    restore_missing_files(conn, property_id, http)
     processed = process_property_images(config, conn, property_id)
     if not processed.outputs:
         raise NoImagesFound(f"加工できた画像がありません: property_id={property_id}")

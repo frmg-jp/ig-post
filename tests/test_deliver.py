@@ -411,3 +411,60 @@ def test_dry_runでは失敗を記録しない(config, conn) -> None:
         "SELECT delivery_attempts FROM properties WHERE id = ?", (blocked,)
     ).fetchone()
     assert row["delivery_attempts"] == 0
+
+
+# --- 記録だけ残ってファイルが無い画像を取り直す（2026-10-02） ----------
+# Mac で画像を取ったあと納品まで行かなかった物件は、images の行だけが
+# DB に残る。Actions にはそのファイルが無く、7件が止まっていた。
+
+def _orphan_rows(conn, property_id: int, tmp_path) -> list[Path]:
+    """Mac で取った体の行を作る（ファイルは置かない）。"""
+    paths = []
+    for position, name in enumerate(("a.jpg", "b.jpg"), start=1):
+        path = tmp_path / "mac-only" / f"{position:02d}.jpg"
+        conn.execute(
+            "INSERT INTO images (property_id, source_url, width, height, local_path, "
+            "position, fetched_at) VALUES (?, ?, 1600, 1200, ?, ?, '2026-08-01T00:00:00')",
+            (property_id, f"https://example.com/photos/{name}", str(path), position),
+        )
+        paths.append(path)
+    conn.commit()
+    return paths
+
+
+def test_手元に無い画像は元のURLから取り直して納品する(config, conn, tmp_path) -> None:
+    property_id = _approved(conn)
+    paths = _orphan_rows(conn, property_id, tmp_path)
+    assert not any(p.exists() for p in paths)
+
+    stats = deliver_approved(config, conn, drive=FakeDrive(), http=FakeHttp())
+
+    assert [d.property_id for d in stats.delivered] == [property_id]
+    assert stats.delivered[0].image_count == 2
+    assert all(p.exists() for p in paths)
+
+
+def test_取り直せない画像があっても残りで納品する(config, conn, tmp_path) -> None:
+    property_id = _approved(conn)
+    _orphan_rows(conn, property_id, tmp_path)
+    http = FakeHttp()
+    del http.pages["https://example.com/photos/b.jpg"]   # 1枚は取れない
+
+    stats = deliver_approved(config, conn, drive=FakeDrive(), http=http)
+    assert stats.delivered[0].image_count == 1
+
+
+def test_robots_txtで禁止なら取り直さない(config, conn, tmp_path) -> None:
+    """**収集方針は取り直しでも同じ。** 禁止されたら取らない。"""
+    from freming.images.fetch import restore_missing_files
+    from freming.net.client import RobotsDisallowed
+
+    property_id = _approved(conn)
+    paths = _orphan_rows(conn, property_id, tmp_path)
+
+    class Blocked:
+        def get(self, url, **_k):
+            raise RobotsDisallowed(url)
+
+    assert restore_missing_files(conn, property_id, Blocked()) == 0
+    assert not any(p.exists() for p in paths)
