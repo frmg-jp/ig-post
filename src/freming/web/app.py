@@ -394,6 +394,47 @@ def create_app(
             worker.wake()
         return RedirectResponse(safe_back(back, status), status_code=303)
 
+    @app.post("/p/{property_id}/image-page")
+    def image_page_route(
+        property_id: int,
+        url: str = Form(""),
+        status: str = Form("approved"),
+        back: str = Form(""),
+    ):
+        """写真を取るページを貼る（0024）。次の納品でそこから取り込む。
+
+        元の記事から画像が取れない物件用（The Spaces・WowHaus）。人が
+        同じ物件の写真が載っているページを探して貼る。**自動収集が禁止の
+        サイト（Zillow など）は受け付けない。** 断った理由は納品の失敗欄に
+        出す（カードにそのまま表示される）。空で保存すると外す。
+        """
+        from freming.db.repository import set_image_page
+        from freming.images.fetch import page_domain_blocked
+
+        text = url.strip()
+        conn = _conn()
+        try:
+            if text and not text.startswith(("http://", "https://")):
+                conn.execute(
+                    "UPDATE properties SET delivery_error = ? WHERE id = ?",
+                    ("写真を取るページ: http(s) で始まるURLを貼ってください", property_id),
+                )
+                conn.commit()
+            elif text and page_domain_blocked(config, text):
+                conn.execute(
+                    "UPDATE properties SET delivery_error = ? WHERE id = ?",
+                    ("写真を取るページ: このサイトは自動収集が禁止なので使えません"
+                     "（別のページを探してください）", property_id),
+                )
+                conn.commit()
+            else:
+                set_image_page(conn, property_id, text or None)
+        finally:
+            conn.close()
+        if worker is not None:
+            worker.wake()
+        return RedirectResponse(safe_back(back, status), status_code=303)
+
     @app.post("/p/{property_id}/reject")
     def reject(
         property_id: int,

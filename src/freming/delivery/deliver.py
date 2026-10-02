@@ -24,7 +24,12 @@ from freming.config import Config, load_config
 from freming.db.connection import DbConnection, Row, connect
 from freming.db.repository import delivery_queue, record_delivery_failure
 from freming.delivery.drive import DriveClient, DriveError, build_client
-from freming.images.fetch import NoImagesFound, fetch_images, restore_missing_files
+from freming.images.fetch import (
+    NoImagesFound,
+    fetch_images,
+    import_from_page,
+    restore_missing_files,
+)
 from freming.images.process import process_property_images
 from freming.logging_setup import get_logger, setup_logging
 from freming.net.client import HttpClient
@@ -110,6 +115,21 @@ def already_delivered(conn: DbConnection, property_id: int) -> bool:
     )
 
 
+def _image_page(row: Row) -> str | None:
+    """写真を取るページ（0024）。列が無い古いDBでも落ちないように引く。"""
+    try:
+        value = row["image_page_url"]
+    except (KeyError, IndexError):
+        return None
+    return str(value).strip() or None if value else None
+
+
+def _image_rows(conn: DbConnection, property_id: int) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) AS n FROM images WHERE property_id = ?", (property_id,)
+    ).fetchone()["n"]
+
+
 def deliver_property(
     config: Config,
     conn: DbConnection,
@@ -124,7 +144,20 @@ def deliver_property(
         log.info("納品済みのためスキップ: property_id=%s", property_id)
         return None
 
-    fetch_images(config, conn, row, client=http)
+    # 人が「写真はこのページから」と指定していれば、先にそこから取る
+    # （The Spaces・WowHaus のように元の記事から取れない物件。0024）
+    page_url = _image_page(row)
+    if page_url:
+        import_from_page(config, conn, row, page_url, http)
+    try:
+        fetch_images(config, conn, row, client=http)
+    except (httpx.HTTPError, NoImagesFound):
+        # **指定ページで写真が揃っていれば、元の記事が開けなくても進む。**
+        # WowHaus はデータセンターからの記事の取得を 403 で拒否する。
+        if not (page_url and _image_rows(conn, property_id)):
+            raise
+        log.info("元の記事は使えませんが、指定ページの写真で進めます: property_id=%s",
+                 property_id)
     # 記録だけ残ってファイルが無い画像（Mac で取った分）を取り直す
     restore_missing_files(conn, property_id, http)
     processed = process_property_images(config, conn, property_id)

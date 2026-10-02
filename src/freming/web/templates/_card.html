@@ -70,6 +70,23 @@
       </div>
     {% endif %}
 
+    {% if row["status"] == "approved" %}
+      {# 元の記事から画像が取れない物件（The Spaces・WowHaus）用。0024 #}
+      <details class="axes" {{ 'open' if row["delivery_error"] and not row["image_page_url"] }}>
+        <summary>写真を別のページから取る{% if row["image_page_url"] %}（設定済み）{% endif %}</summary>
+        <div class="body">
+          <form method="post" action="/p/{{ row['id'] }}/image-page" style="display:flex; gap:8px; margin:0 0 6px;">
+            <input type="hidden" name="status" value="{{ status }}">
+            <input type="hidden" name="back" value="{{ back }}">
+            <input class="free" type="text" name="url" value="{{ row['image_page_url'] or '' }}"
+                   placeholder="同じ物件の写真が載っているページのURL">
+            <button type="submit">保存</button>
+          </form>
+          物件名で検索して、販売している不動産会社のページなどを貼ってください。次の納品（1時間以内）でそこから写真を取り込みます。Zillow・Redfin・Compass などの自動収集禁止のサイトは使えません。robots.txt で禁止されているページからも取りません。
+        </div>
+      </details>
+    {% endif %}
+
     <div class="actions">
       {% if row["status"] != "delivered" and series_options %}
         {# 連載企画は編集判断なので、スコアリングでは決めずここで人が選ぶ #}

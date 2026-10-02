@@ -1270,3 +1270,19 @@ def source_outcomes(conn: DbConnection) -> list[Row]:
         ORDER BY collected DESC
         """
     ).fetchall()
+
+
+def set_image_page(conn: DbConnection, property_id: int, url: str | None) -> bool:
+    """写真を取るページを設定し、納品の試行記録を戻す。
+
+    戻すのは、画像が取れずに上限まで失敗した物件を、ページを貼った
+    時点で次の納品に拾わせるため。承認済み（未納品）にだけ効く。
+    """
+    cursor = conn.execute(
+        "UPDATE properties SET image_page_url = ?, delivery_attempts = 0, "
+        "delivery_error = NULL, delivery_attempted_at = NULL "
+        "WHERE id = ? AND status = 'approved'",
+        (url, property_id),
+    )
+    conn.commit()
+    return cursor.rowcount > 0

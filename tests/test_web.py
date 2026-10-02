@@ -1330,3 +1330,68 @@ def test_healthz_は認証なしで開く(config) -> None:
     app = create_app(config, auth=BasicAuth("u", "p"))
     assert TestClient(app).get("/healthz").status_code == 200
     assert TestClient(app).get("/").status_code == 401
+
+
+
+# --- 写真を取るページ（0024・2026-10-02） --------------------------------
+def _approved_failing(conn) -> int:
+    property_id = _add(conn, url="https://thespaces.com/a-farmhouse/")
+    conn.execute(
+        "UPDATE properties SET status = 'approved', delivery_attempts = 3, "
+        "delivery_error = '画像なし: 使える画像が見つかりませんでした', "
+        "delivery_attempted_at = '2026-10-02T00:00:00+00:00' WHERE id = ?",
+        (property_id,),
+    )
+    conn.commit()
+    return property_id
+
+
+def test_承認済みのカードに写真ページの欄が出る(config, conn, client):
+    _approved_failing(conn)
+    page = client.get("/?status=approved").text
+    assert "写真を別のページから取る" in page
+    assert "/image-page" in page
+
+
+def test_写真ページを貼ると納品をやり直す(config, conn, client):
+    """上限まで失敗した物件でも、貼った時点で次の納品に拾われる。"""
+    property_id = _approved_failing(conn)
+    response = client.post(f"/p/{property_id}/image-page",
+                           data={"url": "https://agent.example.org/listing/1"},
+                           follow_redirects=False)
+    assert response.status_code == 303
+    row = conn.execute(
+        "SELECT image_page_url, delivery_attempts, delivery_error FROM properties "
+        "WHERE id = ?", (property_id,),
+    ).fetchone()
+    assert row["image_page_url"] == "https://agent.example.org/listing/1"
+    assert row["delivery_attempts"] == 0 and row["delivery_error"] is None
+
+
+def test_自動収集禁止のサイトは受け付けない(config, conn, client):
+    property_id = _approved_failing(conn)
+    client.post(f"/p/{property_id}/image-page",
+                data={"url": "https://www.zillow.com/homedetails/1"}, follow_redirects=False)
+    row = conn.execute(
+        "SELECT image_page_url, delivery_error FROM properties WHERE id = ?", (property_id,)
+    ).fetchone()
+    assert row["image_page_url"] is None
+    assert "自動収集が禁止" in row["delivery_error"]   # 理由はカードに出る
+
+
+def test_URLでないものは受け付けない(config, conn, client):
+    property_id = _approved_failing(conn)
+    client.post(f"/p/{property_id}/image-page",
+                data={"url": "javascript:alert(1)"}, follow_redirects=False)
+    row = conn.execute(
+        "SELECT image_page_url FROM properties WHERE id = ?", (property_id,)
+    ).fetchone()
+    assert row["image_page_url"] is None
+
+
+def test_写真ページは外部URLへ戻らない(config, conn, client):
+    property_id = _approved_failing(conn)
+    response = client.post(f"/p/{property_id}/image-page",
+                           data={"url": "", "back": "https://evil.example.com/"},
+                           follow_redirects=False)
+    assert not response.headers["location"].startswith("https://evil")

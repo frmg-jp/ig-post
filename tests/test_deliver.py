@@ -468,3 +468,99 @@ def test_robots_txtで禁止なら取り直さない(config, conn, tmp_path) -> 
 
     assert restore_missing_files(conn, property_id, Blocked()) == 0
     assert not any(p.exists() for p in paths)
+
+
+# --- 写真を取るページを人が指定する（0024・2026-10-02） ------------------
+# The Spaces は画像の配信元が robots.txt で禁止、WowHaus は記事が 403。
+# どちらも迂回せず、人が貼った別のページから取る。
+
+PAGE_URL = "https://agent.example.org/listing/123"
+
+
+def _photo(width: int, height: int) -> bytes:
+    """模様のある画像。**単色だと「写真なし」板として落とされる**（他サイトから
+    取る分には is_flat_image がかかる）。"""
+    img = Image.new("RGB", (width, height))
+    img.putdata([((x * 7) % 256, (y * 5) % 256, (x + y) % 256)
+                 for y in range(height) for x in range(width)])
+    buffer = BytesIO()
+    img.save(buffer, "PNG")
+    return buffer.getvalue()
+
+
+def _with_page(http: FakeHttp) -> FakeHttp:
+    http.pages[PAGE_URL] = _Response(
+        '<main><img src="/p/one.jpg"><img src="/p/two.jpg"><img src="/p/three.jpg"></main>',
+        "text/html",
+    )
+    for name in ("one", "two", "three"):
+        http.pages[f"https://agent.example.org/p/{name}.jpg"] = _Response(
+            _photo(800, 640), "image/jpeg"
+        )
+    return http
+
+
+def _set_page(conn, property_id: int, url: str = PAGE_URL) -> None:
+    conn.execute("UPDATE properties SET image_page_url = ? WHERE id = ?", (url, property_id))
+    conn.commit()
+
+
+def test_記事が403でも指定ページの写真で納品する(config, conn) -> None:
+    """WowHaus の形。記事は開けないが、写真は別のページから揃う。"""
+    property_id = _approved(conn, FORBIDDEN_URL)
+    _set_page(conn, property_id)
+
+    stats = deliver_approved(config, conn, drive=FakeDrive(),
+                             http=_with_page(_forbidden_http()))
+
+    assert [d.property_id for d in stats.delivered] == [property_id]
+    assert stats.delivered[0].image_count == 3
+    origins = {r["origin_url"] for r in conn.execute(
+        "SELECT origin_url FROM images WHERE property_id = ?", (property_id,))}
+    assert origins == {PAGE_URL}   # 取り消し（fill-images --undo）が効く印
+
+
+def test_記事の写真が取れなくても指定ページの写真で納品する(config, conn) -> None:
+    """The Spaces の形。記事は読めるが写真が1枚も取れない。"""
+    property_id = _approved(conn, "https://example.com/empty/")
+    _set_page(conn, property_id)
+    http = _with_page(FakeHttp())
+    http.pages["https://example.com/empty/"] = _Response("<article></article>", "text/html")
+
+    stats = deliver_approved(config, conn, drive=FakeDrive(), http=http)
+    assert stats.delivered[0].image_count == 3
+
+
+def test_指定ページが無ければ今までどおり失敗する(config, conn) -> None:
+    _approved(conn, FORBIDDEN_URL)
+    stats = deliver_approved(config, conn, drive=FakeDrive(), http=_forbidden_http())
+    assert stats.failed == 1 and stats.delivered == []
+
+
+def test_自動収集禁止のサイトからは取らない(config, conn) -> None:
+    """**人が貼っても、取りに行くのはこちらのプログラム。** Zillow などは不可。"""
+    from freming.images.fetch import import_from_page
+
+    property_id = _approved(conn)
+    row = conn.execute("SELECT * FROM properties WHERE id = ?", (property_id,)).fetchone()
+
+    class MustNotFetch:
+        def get(self, url, **_k):
+            raise AssertionError(f"取りに行ってはいけない: {url}")
+
+    url = "https://www.zillow.com/homedetails/123"
+    assert import_from_page(config, conn, row, url, MustNotFetch()) == 0
+
+
+def test_robots_txtで禁止されたページからは取らない(config, conn) -> None:
+    from freming.images.fetch import import_from_page
+    from freming.net.client import RobotsDisallowed
+
+    property_id = _approved(conn)
+    row = conn.execute("SELECT * FROM properties WHERE id = ?", (property_id,)).fetchone()
+
+    class Blocked:
+        def get(self, url, **_k):
+            raise RobotsDisallowed(url)
+
+    assert import_from_page(config, conn, row, PAGE_URL, Blocked()) == 0

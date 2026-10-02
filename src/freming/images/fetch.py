@@ -353,3 +353,58 @@ def restore_missing_files(
         log.info("手元に無かった画像を %d 枚取り直しました: property_id=%s",
                  restored, property_id)
     return restored
+
+
+def page_domain_blocked(config: Config, url: str) -> bool:
+    """自動収集が禁止されているサイトか（Zillow・Redfin・Compass など）。
+
+    **人が貼ったURLでも、取りに行くのはこちらのプログラム。** 手動URL
+    投入でしか扱わないと決めたサイトからは、この経路でも取らない。
+    """
+    host = (urlparse(url).hostname or "").lower()
+    return any(
+        host == d or host.endswith("." + d)
+        for d in (b.lower() for b in config.images.discovery.blocked_domains)
+    )
+
+
+def import_from_page(
+    config: Config, conn: DbConnection, row: Row, url: str, client: HttpClient
+) -> int:
+    """人が指定したページから写真を取り込む。戻り値は増えた枚数。
+
+    元の記事から画像が取れない物件用（The Spaces・WowHaus。0024 の説明）。
+    取り込んだ行は origin_url を持つので、他サイトから足した分と同じく
+    `fill-images --undo` で取り消せる。
+
+    **ページの中身は人が選んだものとして扱う。** fill-images のような
+    「この物件のページか」の照合はしない（人が確かめて貼っている）。
+    """
+    property_id = int(row["id"])
+    if page_domain_blocked(config, url):
+        log.warning("自動収集が禁止されているサイトなので取りません: %s", url)
+        return 0
+
+    def _count() -> int:
+        return conn.execute(
+            "SELECT COUNT(*) AS n FROM images WHERE property_id = ?", (property_id,)
+        ).fetchone()["n"]
+
+    before = _count()
+    if before >= config.images.max_per_property:
+        return 0
+    try:
+        page = client.get(url)
+    except RobotsDisallowed:
+        log.warning("robots.txt がこのページの取得を許可していません: %s", url)
+        return 0
+    except Exception as exc:  # noqa: BLE001 - 元の記事の側で続きを試す
+        log.warning("写真を取るページを開けませんでした: %s (%s)", url, exc)
+        return 0
+    urls = extract_image_urls(page.text, url)
+    ingest_urls(config, conn, row, urls, client,
+                FetchStats(property_id=property_id), origin_url=url)
+    gained = _count() - before
+    log.info("指定ページから %d 枚取り込みました: property_id=%s (%s)",
+             gained, property_id, url)
+    return gained
