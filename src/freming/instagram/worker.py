@@ -512,7 +512,9 @@ def run_once(
     kinds を渡すとその種別だけを扱う。既定は config の worker_kinds。
     リールは ffmpeg が要るので、審査UI（Render）では担当しない。
 
-    include_stale を立てると、古い枠でも出す（**人が押したとき専用**）。
+    include_stale を立てると、古い枠でも出す（**人が押したときと、週次リールの
+    定期実行専用**。どちらも limit 1 で呼ぶ。リールは 2026-10-14 から承認なしで
+    定期実行が出す）。
     古い枠を出さない歯止めは、無人のワーカーが復旧した瞬間にまとめて
     出すのを防ぐためのもの。人が押す経路まで止めると、**リールが毎週
     出せなくなる**（2026-09-29 判明。試写は定期実行で 19:00 から3〜10時間
@@ -554,9 +556,9 @@ def run_once(
         if row["kind"] in allowed and int(row["attempts"] or 0) < config.instagram.max_attempts
     ]
     if include_stale:
-        # 人が押した。古い枠も出す（件数の上限は limit が守る）。
+        # 人が押した、または週次リールの定期実行。古い枠も出す（件数の上限は limit が守る）。
         if stale:
-            log.info("古い枠も対象にします（人が押した経路）: %s",
+            log.info("古い枠も対象にします（--include-stale）: %s",
                      "、".join(f'{r["id"]}（{r["scheduled_at"][:16]}）' for r in stale[:10]))
         not_before = None
     elif stale:

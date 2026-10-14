@@ -27,11 +27,13 @@ on:
   # 予定を「動いたときに出す」経路だと思っておくこと。時刻を守りたく
   # なったら、審査UI側で作れるようにする（ffmpeg とメモリが要る）か、
   # 外部のスケジューラから叩く必要がある。
-  # **定期実行は試写までで止める。投稿はしない。**
-  # 2026-09-15 01:06 JST、承認を取る前にこの cron がリールを出した
-  # （media_id=18140889871599903）。日曜に試写して承認をもらう運用に
-  # したのに、cron を止めていなかった。出すのは人が mode=publish を
-  # 選んで押したときだけにしてある。
+  # **定期実行でそのまま出す（2026-10-14〜）。**
+  # 2026-09-15 に承認前の cron が出してしまったのを受けて、いったん
+  # 「定期実行は試写まで・出すのは人が押したとき」にしていた。
+  # 2026-10-14、ユーザー判断で承認をやめた（「承認いらない」）。
+  # 出たかどうか・中身が正しいかは、**火曜朝の判定ルーティンが確かめて
+  # 報告する**（実行の成否・media_id・枚数と尺・API で実物が引けるか）。
+  # 止めたい週は、月曜の夜までに審査UIでその週のリールを「見送り」にする。
   schedule:
     - cron: "0 10 * * 1"
   # ------------------------------------------------------------------
@@ -44,7 +46,7 @@ on:
         default: preview
         options:
           - preview   # 出さずに1本組んで、動画をダウンロードできるようにする
-          - publish   # **本番の @frmg.jpn に出る**
+          - publish   # **本番の @frmg.jpn に出る**（定期実行と同じ処理）
       dry_run:
         description: "publish のとき、投稿せず中身だけ見る"
         type: boolean
@@ -89,14 +91,14 @@ jobs:
       # 材料はアカウントの実物（/me/media）。どちらで選んだかは出力に出る
       # （picked_by）。1日1本ずつの週は選抜が起きないので recent になる。
       - name: リールを試写用に組む
-        if: ${{ github.event.inputs.mode != 'publish' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'publish' }}
         # --stash: 組んだ動画を審査UIの /m/<token> に置く。**スマホから
         # 見てもらうため。** アーティファクトのZIPは携帯では開けない。
         # 投稿はしない。置いた行は出したときに消える。
         run: python -m freming.cli reel preview --out out/reel-preview.mp4 --stash
 
       - name: 試写用の動画を置いていく
-        if: ${{ github.event.inputs.mode != 'publish' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'publish' }}
         uses: actions/upload-artifact@v4
         with:
           name: reel-preview
@@ -114,25 +116,24 @@ jobs:
       # **リールだけを扱う。** 通常投稿とストーリーズは審査UI側の担当で、
       # ここで拾うと二重に出る（状態遷移で防いではいるが、担当を分けるのが前提）。
       #
-      # **出すのは、人が publish を選んで押したときだけ。**
-      # 以前は `!= preview` だった。定期実行では inputs が空になるので
-      # この条件が真になり、**承認を取る前に cron が出してしまう**。
-      # 2026-09-15 01:06 JST に実際にそうなった（media_id=18140889871599903。
-      # 日曜に試写して承認をもらう運用にしたのに、cron を止めていなかった）。
-      #
-      # 定期実行は**試写までで止める**。枠を作って動画を組み、/m/<token> に
-      # 置くところまでやるので、承認が出たら mode=publish で押すだけでよい。
+      # **出すのは、定期実行と、人が publish を選んで押したとき。**
+      # 2026-09-15〜10-13 は定期実行を試写までで止めていた（承認前に cron が
+      # 出した事故のため。media_id=18140889871599903）。2026-10-14 に
+      # ユーザー判断で承認をやめ、定期実行でも出すようにした。
+      # 条件は「schedule か、publish を明示」で書く。`!= preview` にすると
+      # 手で preview を押したときの inputs の扱いに依存して危ない。
+      # 定期実行では inputs が空なので --dry-run は付かない（本番に出る）。
       #
       # `--limit 1` は**溜まった予定がまとめて出るのを防ぐ**ため。定期実行を
       # 止めていた間の枠（08/31 など）が残っており、上限を付けないと次に
       # 動いたとき2本続けて公開される。
       #
-      # `--include-stale` は**6時間を過ぎた枠も出す**ため。試写は定期実行で
-      # 19:00 から3〜10時間遅れて組まれ、人が見て押す頃には必ず6時間を
-      # 過ぎている。付けないと**毎週弾かれる**（2026-09-29 判明、post 48）。
-      # 古い枠を止める歯止めは無人のワーカー用で、ここは人が押す経路。
+      # `--include-stale` は**6時間を過ぎた枠も出す**ため。定期実行は
+      # 19:00 から3〜10時間遅れて動くので、6時間を過ぎていることが多い。
+      # 付けないと**弾かれる**（2026-09-29 判明、post 48）。
+      # まとめて出る心配は `--limit 1` が止める（1回の実行で1本だけ）。
       - name: リールを投稿
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'publish' }}
+        if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'publish') }}
         run: |
           python -m freming.cli post run --kind reel --limit 1 --include-stale \
             ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
