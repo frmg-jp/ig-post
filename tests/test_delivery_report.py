@@ -63,3 +63,23 @@ def test_無ければそう言う(db, monkeypatch, capsys):
     monkeypatch.setattr(cli, "load_config", lambda *_a, **_k: _config_for(db))
     assert cli.main(["delivery-report"]) == 0
     assert "ありません" in capsys.readouterr().out
+
+
+def test_再試行は既定では並べるだけ_yesで戻す(db, monkeypatch, capsys):
+    pid = _approved(db, "robbreport_shelter", "https://example.com/c")
+    for _ in range(3):
+        record_delivery_failure(db, pid, "画像なし: …")
+    _approved(db, "robbreport_shelter", "https://example.com/d")   # 未試行は対象外
+    monkeypatch.setattr(cli, "load_config", lambda *_a, **_k: _config_for(db))
+
+    assert cli.main(["retry-delivery", "--source", "robbreport_shelter"]) == 0
+    assert "1 件が対象です（まだ戻していません" in capsys.readouterr().out
+    row = db.execute("SELECT delivery_attempts FROM properties WHERE id = ?", (pid,)).fetchone()
+    assert row["delivery_attempts"] == 3
+
+    assert cli.main(["retry-delivery", "--source", "robbreport_shelter", "--yes"]) == 0
+    assert "1 件を納品の対象に戻しました" in capsys.readouterr().out
+    row = db.execute(
+        "SELECT delivery_attempts, delivery_error, status FROM properties WHERE id = ?", (pid,)
+    ).fetchone()
+    assert (row["delivery_attempts"], row["delivery_error"], row["status"]) == (0, None, "approved")

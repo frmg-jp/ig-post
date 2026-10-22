@@ -22,6 +22,7 @@ on:
           - rescore-pending    # **未審査だけ**採点し直して採点まで走らせる（API費用）
           - source-report      # ソース別の歩留まり（費用なし）
           - delivery-report    # **承認済みで納品できていない物件と理由**（読むだけ・費用なし）
+          - retry-delivery     # 止まった納品を対象に戻す（「対象の上限」にソースのkey か property_id）
           - approval-report    # **承認の実績からスコア付けを検証**（読むだけ・費用なし）
           - post-show          # 投稿予定の一覧（費用なし）
           - remove-source      # **ソースの物件をまとめて削除**（「対象の上限」にソースのkey。納品済みは残る）
@@ -166,6 +167,20 @@ jobs:
               ;;
             source-report)    python -m freming.cli source-report ;;
             delivery-report)  python -m freming.cli delivery-report ;;
+            retry-delivery)
+              # 「対象の上限」欄に、ソースの key（robbreport_shelter など）か
+              # property_id を入れる。外すと対象を並べるだけで戻さない。
+              T="${{ github.event.inputs.limit }}"
+              if [ -z "$T" ]; then
+                echo "「対象の上限」欄にソースのkey か property_id を入れてください。" >&2
+                exit 2
+              fi
+              if [ "$T" -eq "$T" ] 2>/dev/null; then
+                python -m freming.cli retry-delivery --id "$T" $YES
+              else
+                python -m freming.cli retry-delivery --source "$T" $YES
+              fi
+              ;;
             # 「対象の上限」に件数。外すと対象を並べるだけで開かない。
             listing-status)
               python -m freming.cli listing-status $LIMIT \

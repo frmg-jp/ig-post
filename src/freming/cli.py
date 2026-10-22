@@ -1675,6 +1675,47 @@ def _cmd_delivery_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_retry_delivery(args: argparse.Namespace) -> int:
+    """止まった納品を、自動納品の対象に戻す（審査UIの「再試行」をまとめて）。
+
+    3回失敗した物件は自動では触らない。原因を直したあと（例: 2026-10-22 の
+    Robb Report の縮小画像）、1件ずつ審査UIで押すのは手間なので、ソース
+    単位で戻せるようにする。**既定は対象を並べるだけ。** --yes で戻す。
+    戻すのは試行回数と理由だけで、物件の状態（承認済み）は変えない。
+    """
+    from freming.db.connection import session
+    from freming.db.repository import retry_delivery
+
+    if not args.source and not args.id:
+        print("--source か --id を指定してください。", file=sys.stderr)
+        return 2
+    cfg = load_config(args.config)
+    with session(cfg.app.target()) as conn:
+        if args.id:
+            rows = conn.execute(
+                "SELECT id, source, title, delivery_attempts FROM properties "
+                "WHERE id = ? AND status = 'approved'", (args.id,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, source, title, delivery_attempts FROM properties "
+                "WHERE source = ? AND status = 'approved' AND delivery_attempts > 0 "
+                "ORDER BY score DESC", (args.source,),
+            ).fetchall()
+        if not rows:
+            print("戻す対象がありません（承認済みで、納品に失敗したもの）。")
+            return 0
+        for r in rows:
+            print(f"  id={r['id']}  [{r['source']}] 試行 {r['delivery_attempts']} 回  "
+                  f"{(r['title'] or '')[:60]}")
+        if not args.yes:
+            print(f"\n{len(rows)} 件が対象です（まだ戻していません。--yes で戻す）。")
+            return 0
+        done = sum(1 for r in rows if retry_delivery(conn, int(r["id"])))
+    print(f"\n{done} 件を納品の対象に戻しました。次の納品（1時間おき）で取り直します。")
+    return 0
+
+
 def _cmd_approval_report(args: argparse.Namespace) -> int:
     """[7] 承認の実績から、スコア付けが合っているかを確かめる。
 
@@ -2873,6 +2914,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_delivery_report.set_defaults(func=_cmd_delivery_report)
 
+    p_retry = sub.add_parser(
+        "retry-delivery",
+        help="止まった納品を対象に戻す（既定は並べるだけ。--yes で戻す）",
+    )
+    p_retry.add_argument("--source", help="ソースのkey（例: robbreport_shelter）")
+    p_retry.add_argument("--id", type=int, help="property_id（1件だけ）")
+    p_retry.add_argument("--yes", action="store_true", help="本当に戻す")
+    p_retry.set_defaults(func=_cmd_retry_delivery)
+
     p_listing = sub.add_parser(
         "listing-status",
         help="**掲載ページを開いて、いま買えるのかを確かめる**（費用なし）",
@@ -2936,7 +2986,7 @@ _NEEDS_MIGRATED_DB = frozenset({
     "collect", "score", "serve", "deliver", "learn", "rules",
     "ingest-url", "add-manual", "remove", "reset-images", "status",
     "instagram", "post", "redeliver", "rescore", "source-report",
-    "approval-report", "delivery-report",
+    "approval-report", "delivery-report", "retry-delivery",
     "backfill-captions", "backfill-listings", "image-report", "refetch-images",
     "fill-images", "listing-status", "report",
     # reel は入れない。**build と tracks はDBを見ない**（渡した画像と

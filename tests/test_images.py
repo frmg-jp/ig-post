@@ -735,3 +735,49 @@ def test_bulk_refetch_leaves_full_properties_alone(config, conn) -> None:
     _add_property(conn, "https://example.com/full", "delivered",
                   config.images.max_per_property)
     assert _refetch_targets(conn, config, None, None) == []
+
+
+# --- WordPress の縮小指定（?w=…）を外して元のサイズを取る（2026-10-22） ---
+
+
+def test_縮小指定を外して元のアップロードを取る():
+    from freming.images.extract import original_upload_url
+
+    base = "https://robbreport.com/wp-content/uploads/2026/09/kitchen.jpg"
+    assert original_upload_url(base + "?w=300") == base
+    assert original_upload_url(base + "?w=681&h=383&crop=1") == base
+
+
+def test_顔写真の小さい指定は元に戻さない():
+    from freming.images.extract import original_upload_url
+
+    # 著者の顔写真（?w=80）を元の大きさに戻すと、物件写真として拾ってしまう
+    url = "https://robbreport.com/wp-content/uploads/2023/08/Wendy-v2.jpg?w=80"
+    assert original_upload_url(url) == url
+
+
+def test_縮小以外のクエリやWordPress以外は触らない():
+    from freming.images.extract import original_upload_url
+
+    signed = "https://robbreport.com/wp-content/uploads/a.jpg?w=1200&token=abc"
+    other = "https://cdn.example.com/photo.jpg?w=300"
+    assert original_upload_url(signed) == signed
+    assert original_upload_url(other) == other
+
+
+def test_RobbReportの本文写真を元のサイズで拾う():
+    from freming.images.extract import extract_image_urls
+
+    html = """<html><head>
+      <meta property="og:image" content="https://robbreport.com/wp-content/uploads/2026/09/hero.jpg?w=681&h=383&crop=1">
+    </head><body><article>
+      <img src="https://robbreport.com/wp-content/uploads/2026/09/kitchen.jpg?w=300">
+      <img src="https://robbreport.com/wp-content/uploads/2026/09/hero.jpg?w=300">
+      <img src="https://robbreport.com/wp-content/uploads/2023/08/Wendy-v2.jpg?w=80">
+    </article></body></html>"""
+    urls = extract_image_urls(html, "https://robbreport.com/shelter/x")
+    assert urls[:2] == [
+        "https://robbreport.com/wp-content/uploads/2026/09/hero.jpg",
+        "https://robbreport.com/wp-content/uploads/2026/09/kitchen.jpg",
+    ]
+    assert urls[2].endswith("Wendy-v2.jpg?w=80")   # 小さいまま → 取得後に弾かれる

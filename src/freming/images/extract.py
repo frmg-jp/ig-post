@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import re
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from bs4 import BeautifulSoup
 
@@ -35,6 +35,38 @@ _ARTICLE_SELECTORS = ("article", "main", "[itemprop='articleBody']", ".entry-con
 _SIZE_SUFFIX = re.compile(r"-\d{2,5}x\d{2,5}(?=\.[a-z]{3,4}$)", re.IGNORECASE)
 _SCALE_SUFFIX = re.compile(r"[@_-][23]x(?=\.[a-z]{3,4}$)", re.IGNORECASE)
 _WP_SCALED = re.compile(r"-scaled(?=\.[a-z]{3,4}$)", re.IGNORECASE)
+
+
+# WordPress の画像配信（Jetpack Photon / WordPress VIP）の縮小指定。
+# `photo.jpg?w=300` は**同じファイルの縮小版**で、クエリを外せば元の
+# アップロードが返る。Robb Report は本文の写真をすべて ?w=300 / ?w=681 で
+# 載せており、そのまま取ると全部が短辺 640px 未満で弾かれた（2026-10-02〜07、
+# 承認13件が1枚も納品できなかった）。
+_WP_RESIZE_KEYS = frozenset({"w", "h", "crop", "resize", "fit", "quality", "strip", "ssl"})
+# 指定幅がこれより小さいものは元に戻さない。**著者の顔写真**（?w=77 / ?w=80）や
+# アイコンを、元の大きさに戻して物件写真として拾わないため。
+_WP_UPGRADE_MIN_W = 250
+
+
+def original_upload_url(url: str) -> str:
+    """WordPress の縮小指定（?w=…）を外して、元のアップロードのURLにする。
+
+    `/wp-content/uploads/` の下で、クエリが縮小指定だけのときに限る。
+    幅が小さく指定されたもの（顔写真・アイコン）は触らない。
+    """
+    parsed = urlparse(url)
+    if "/wp-content/uploads/" not in parsed.path or not parsed.query:
+        return url
+    params = parse_qsl(parsed.query, keep_blank_values=True)
+    if not params or any(k.lower() not in _WP_RESIZE_KEYS for k, _ in params):
+        return url
+    width = next((v for k, v in params if k.lower() == "w"), None)
+    try:
+        if width is not None and float(width) < _WP_UPGRADE_MIN_W:
+            return url
+    except ValueError:
+        return url
+    return urlunparse(parsed._replace(query=urlencode([])))
 
 
 def _is_image_url(url: str) -> bool:
@@ -172,6 +204,7 @@ def image_urls_from_soup(
             return
         if _NOISE.search(candidate) or not _is_image_url(candidate):
             return
+        candidate = original_upload_url(candidate)
         # URL文字列ではなく「同じ写真か」で重複を判定する
         key = photo_identity(candidate)
         if key in seen:
