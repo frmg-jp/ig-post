@@ -42,6 +42,11 @@ def test_理由をソースごとに数えて出す(db, monkeypatch, capsys):
     stuck = _approved(db, "robbreport_shelter", "https://example.com/a")
     for _ in range(3):
         record_delivery_failure(db, stuck, "画像なし: 加工できた画像がありません")
+    db.execute(
+        "INSERT INTO image_skips (property_id, source_url, reason, created_at) "
+        "VALUES (?, 'https://cdn.example.com/1.webp', 'wrong_type', '2026-10-02')", (stuck,)
+    )
+    db.commit()
     _approved(db, "vanguard", "https://example.com/b")   # 未試行
     monkeypatch.setattr(cli, "load_config", lambda *_a, **_k: _config_for(db))
 
@@ -51,6 +56,7 @@ def test_理由をソースごとに数えて出す(db, monkeypatch, capsys):
     assert "理由: 画像なし: 加工できた画像がありません" in out
     assert "1  robbreport_shelter / 画像なし" in out
     assert "1  vanguard / 未試行" in out
+    assert "弾いた画像 1 件: wrong_type  例 https://cdn.example.com/1.webp" in out
 
 
 def test_無ければそう言う(db, monkeypatch, capsys):

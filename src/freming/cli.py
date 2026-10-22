@@ -1631,6 +1631,14 @@ def _cmd_delivery_report(args: argparse.Namespace) -> int:
             "FROM properties p WHERE p.status = 'approved' "
             "ORDER BY p.source, p.score DESC"
         ).fetchall()
+        skips: dict[int, list] = {}
+        for k in conn.execute(
+            "SELECT s.property_id, s.reason, COUNT(*) AS n, MIN(s.source_url) AS sample "
+            "FROM image_skips s JOIN properties p ON p.id = s.property_id "
+            "WHERE p.status = 'approved' GROUP BY s.property_id, s.reason "
+            "ORDER BY s.property_id, n DESC"
+        ).fetchall():
+            skips.setdefault(k["property_id"], []).append(k)
     if not rows:
         print("承認済みで未納品の物件はありません。")
         return 0
@@ -1650,6 +1658,9 @@ def _cmd_delivery_report(args: argparse.Namespace) -> int:
             print(f"  写真ページ: {r['image_page_url']}")
         if r["delivery_error"]:
             print(f"  理由: {str(r['delivery_error']).splitlines()[0][:200]}")
+        # 「画像なし」の中身。候補は見つかったのに全部弾いたのか、どの理由でか
+        for s in skips.get(r["id"], []):
+            print(f"  弾いた画像 {s['n']} 件: {s['reason']}  例 {s['sample'][:110]}")
         print()
 
     # 理由の頭（「画像なし」「掲載ページ」など）で数える
