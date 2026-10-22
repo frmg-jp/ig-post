@@ -1611,6 +1611,59 @@ def _cmd_sources_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_delivery_report(args: argparse.Namespace) -> int:
+    """承認済みなのに納品できていない物件と、その理由（読むだけ・費用なし）。
+
+    納品は3回失敗すると自動では触らなくなり、理由は delivery_error に
+    残る。これまで審査UIのカードでしか読めず、2026-10-22 に「承認19件が
+    なぜ止まっているか」を一覧で答えられなかった。**記録しているなら、
+    まとめて読めるようにする。**
+    """
+    from freming.db.connection import session
+
+    cfg = load_config(args.config)
+    with session(cfg.app.target()) as conn:
+        rows = conn.execute(
+            "SELECT p.id, p.source, p.score, p.title, p.source_url, "
+            "p.delivery_attempts, p.delivery_attempted_at, p.delivery_error, "
+            "p.image_page_url, "
+            "(SELECT COUNT(*) FROM images i WHERE i.property_id = p.id) AS n_images "
+            "FROM properties p WHERE p.status = 'approved' "
+            "ORDER BY p.source, p.score DESC"
+        ).fetchall()
+    if not rows:
+        print("承認済みで未納品の物件はありません。")
+        return 0
+
+    limit = cfg.delivery.max_attempts
+    stuck = [r for r in rows if (r["delivery_attempts"] or 0) >= limit]
+    print(f"承認済み・未納品 {len(rows)} 件"
+          f"（うち {len(stuck)} 件は {limit} 回失敗して自動では止まっている）\n")
+    for r in rows:
+        score = f"{r['score']:.0f}" if r["score"] is not None else "—"
+        tried = (r["delivery_attempted_at"] or "")[:10] or "未試行"
+        print(f"[{r['source']}] id={r['id']}  {score}点  試行 {r['delivery_attempts'] or 0} 回"
+              f"（最後 {tried}）  画像記録 {r['n_images']} 件")
+        print(f"  {(r['title'] or '')[:70]}")
+        print(f"  {r['source_url']}")
+        if r["image_page_url"]:
+            print(f"  写真ページ: {r['image_page_url']}")
+        if r["delivery_error"]:
+            print(f"  理由: {str(r['delivery_error']).splitlines()[0][:200]}")
+        print()
+
+    # 理由の頭（「画像なし」「掲載ページ」など）で数える
+    counts: dict[str, int] = {}
+    for r in rows:
+        head = str(r["delivery_error"] or "未試行").split(":")[0].strip()
+        key = f"{r['source']} / {head}"
+        counts[key] = counts.get(key, 0) + 1
+    print("■ ソース × 理由")
+    for key, n in sorted(counts.items(), key=lambda kv: -kv[1]):
+        print(f"  {n:>3}  {key}")
+    return 0
+
+
 def _cmd_approval_report(args: argparse.Namespace) -> int:
     """[7] 承認の実績から、スコア付けが合っているかを確かめる。
 
@@ -2803,6 +2856,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_sources_report.set_defaults(func=_cmd_sources_report)
 
+    p_delivery_report = sub.add_parser(
+        "delivery-report",
+        help="承認済みなのに納品できていない物件と理由（読むだけ・費用なし）",
+    )
+    p_delivery_report.set_defaults(func=_cmd_delivery_report)
+
     p_listing = sub.add_parser(
         "listing-status",
         help="**掲載ページを開いて、いま買えるのかを確かめる**（費用なし）",
@@ -2866,7 +2925,7 @@ _NEEDS_MIGRATED_DB = frozenset({
     "collect", "score", "serve", "deliver", "learn", "rules",
     "ingest-url", "add-manual", "remove", "reset-images", "status",
     "instagram", "post", "redeliver", "rescore", "source-report",
-    "approval-report",
+    "approval-report", "delivery-report",
     "backfill-captions", "backfill-listings", "image-report", "refetch-images",
     "fill-images", "listing-status", "report",
     # reel は入れない。**build と tracks はDBを見ない**（渡した画像と
