@@ -781,3 +781,17 @@ def test_RobbReportの本文写真を元のサイズで拾う():
         "https://robbreport.com/wp-content/uploads/2026/09/kitchen.jpg",
     ]
     assert urls[2].endswith("Wendy-v2.jpg?w=80")   # 小さいまま → 取得後に弾かれる
+
+
+def test_ファイル名の縮小サイズも外して元を取る():
+    from freming.images.extract import original_upload_url
+
+    base = "https://heritagearchitecture.com/wp-content/uploads/2025/05/Futuro-House-01-scaled"
+    assert original_upload_url(base + "-740x492.jpg") == base + ".jpg"
+    assert original_upload_url(base + "-300x200.jpg") == base + ".jpg"
+    # アイコンや顔写真の小さいサイズは戻さない
+    icon = "https://example.com/wp-content/uploads/avatar-150x150.jpg"
+    assert original_upload_url(icon) == icon
+    # WordPress 以外の場所は触らない
+    other = "https://cdn.example.com/photo-740x492.jpg"
+    assert original_upload_url(other) == other

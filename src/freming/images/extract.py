@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import re
-from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
+from urllib.parse import parse_qsl, urljoin, urlparse, urlunparse
 
 from bs4 import BeautifulSoup
 
@@ -48,25 +48,47 @@ _WP_RESIZE_KEYS = frozenset({"w", "h", "crop", "resize", "fit", "quality", "stri
 _WP_UPGRADE_MIN_W = 250
 
 
-def original_upload_url(url: str) -> str:
-    """WordPress の縮小指定（?w=…）を外して、元のアップロードのURLにする。
+# WordPress がアップロード時に作る縮小版のファイル名（photo-740x492.jpg）。
+# 元のファイルは同じ場所に `photo.jpg` で置かれている。
+_WP_SIZE_SUFFIX = re.compile(r"-(\d{2,5})x(\d{2,5})(?=\.[a-z]{3,4}$)", re.IGNORECASE)
 
-    `/wp-content/uploads/` の下で、クエリが縮小指定だけのときに限る。
-    幅が小さく指定されたもの（顔写真・アイコン）は触らない。
+
+def original_upload_url(url: str) -> str:
+    """WordPress の縮小版を、元のアップロードのURLにする。
+
+    縮小の書き方は2通りある。どちらも同じファイルの縮小版で、元は同じ場所にある。
+
+      - クエリ: `photo.jpg?w=300`（Jetpack / VIP。2026-10-22 の Robb Report）
+      - ファイル名: `photo-740x492.jpg`（WordPress 標準。2026-10-25、Futuro house の
+        設計事務所のページが本文に 740x492 と 300x200 しか載せておらず、元は 2560x1702）
+
+    `/wp-content/uploads/` の下に限る。クエリに縮小指定以外（署名など）が混ざるものは
+    触らない。指定幅が小さいもの（顔写真 ?w=80・アイコン -150x150）は戻さない。
+    **元のファイルが置かれていない場合は取得に失敗して、その写真は使われない**
+    （縮小版には戻らない）。
     """
     parsed = urlparse(url)
-    if "/wp-content/uploads/" not in parsed.path or not parsed.query:
+    if "/wp-content/uploads/" not in parsed.path:
         return url
-    params = parse_qsl(parsed.query, keep_blank_values=True)
-    if not params or any(k.lower() not in _WP_RESIZE_KEYS for k, _ in params):
-        return url
-    width = next((v for k, v in params if k.lower() == "w"), None)
-    try:
-        if width is not None and float(width) < _WP_UPGRADE_MIN_W:
+    query = parsed.query
+    if query:
+        params = parse_qsl(query, keep_blank_values=True)
+        if not params or any(k.lower() not in _WP_RESIZE_KEYS for k, _ in params):
             return url
-    except ValueError:
+        width = next((v for k, v in params if k.lower() == "w"), None)
+        try:
+            if width is not None and float(width) < _WP_UPGRADE_MIN_W:
+                return url
+        except ValueError:
+            return url
+        query = ""
+    path = parsed.path
+    match = _WP_SIZE_SUFFIX.search(path)
+    if match and int(match.group(1)) >= _WP_UPGRADE_MIN_W:
+        path = path[: match.start()] + path[match.end():]
+    if path == parsed.path and query == parsed.query:
         return url
-    return urlunparse(parsed._replace(query=urlencode([])))
+    return urlunparse(parsed._replace(path=path, query=query))
 
 
 def _is_image_url(url: str) -> bool:
