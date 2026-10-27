@@ -1716,6 +1716,44 @@ def _cmd_retry_delivery(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_image_page(args: argparse.Namespace) -> int:
+    """写真を取るページを設定する（審査UIの「写真を別のページから取る」と同じ）。
+
+    元の記事の写真が小さい・取れない物件に、同じ物件の写真が大きく載った
+    別ページを指定する。設定すると納品の試行記録も戻り、次の納品で拾われる。
+    審査UIを開かずに設定できるようにする（2026-10-27、Futuro と La Voile）。
+    **既定は確認だけ。** --yes で書き込む。自動収集が禁止のサイトは断る。
+    """
+    from freming.db.connection import session
+    from freming.db.repository import set_image_page
+    from freming.images.fetch import page_domain_blocked
+
+    url = args.url.strip()
+    if not url.startswith(("http://", "https://")):
+        print("http(s) で始まるURLを指定してください。", file=sys.stderr)
+        return 2
+    cfg = load_config(args.config)
+    if page_domain_blocked(cfg, url):
+        print(f"自動収集が禁止のサイトなので使えません: {url}", file=sys.stderr)
+        return 2
+    with session(cfg.app.target()) as conn:
+        row = conn.execute(
+            "SELECT id, title, status, image_page_url FROM properties WHERE id = ?", (args.id,)
+        ).fetchone()
+        if row is None or row["status"] != "approved":
+            print(f"property {args.id} は承認済み（未納品）ではありません。", file=sys.stderr)
+            return 2
+        print(f"id={row['id']}  {(row['title'] or '')[:60]}")
+        print(f"  いま: {row['image_page_url'] or '（なし）'}")
+        print(f"  新しく: {url}")
+        if not args.yes:
+            print("（まだ書き込んでいません。--yes で設定する）")
+            return 0
+        set_image_page(conn, args.id, url)
+    print("設定しました。次の納品（1時間おき）でこのページから写真を取り込みます。")
+    return 0
+
+
 def _cmd_approval_report(args: argparse.Namespace) -> int:
     """[7] 承認の実績から、スコア付けが合っているかを確かめる。
 
@@ -2923,6 +2961,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_retry.add_argument("--yes", action="store_true", help="本当に戻す")
     p_retry.set_defaults(func=_cmd_retry_delivery)
 
+    p_page = sub.add_parser(
+        "image-page",
+        help="写真を取る別ページを設定する（既定は確認だけ。--yes で設定）",
+    )
+    p_page.add_argument("--id", type=int, required=True, help="property_id")
+    p_page.add_argument("--url", required=True, help="写真が載っているページのURL")
+    p_page.add_argument("--yes", action="store_true", help="本当に設定する")
+    p_page.set_defaults(func=_cmd_image_page)
+
     p_listing = sub.add_parser(
         "listing-status",
         help="**掲載ページを開いて、いま買えるのかを確かめる**（費用なし）",
@@ -2986,7 +3033,7 @@ _NEEDS_MIGRATED_DB = frozenset({
     "collect", "score", "serve", "deliver", "learn", "rules",
     "ingest-url", "add-manual", "remove", "reset-images", "status",
     "instagram", "post", "redeliver", "rescore", "source-report",
-    "approval-report", "delivery-report", "retry-delivery",
+    "approval-report", "delivery-report", "retry-delivery", "image-page",
     "backfill-captions", "backfill-listings", "image-report", "refetch-images",
     "fill-images", "listing-status", "report",
     # reel は入れない。**build と tracks はDBを見ない**（渡した画像と

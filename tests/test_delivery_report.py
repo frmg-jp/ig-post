@@ -83,3 +83,21 @@ def test_再試行は既定では並べるだけ_yesで戻す(db, monkeypatch, c
         "SELECT delivery_attempts, delivery_error, status FROM properties WHERE id = ?", (pid,)
     ).fetchone()
     assert (row["delivery_attempts"], row["delivery_error"], row["status"]) == (0, None, "approved")
+
+
+def test_写真ページは既定では確認だけ_yesで設定(db, monkeypatch, capsys):
+    pid = _approved(db, "designboom", "https://example.com/e")
+    for _ in range(3):
+        record_delivery_failure(db, pid, "画像なし: …")
+    monkeypatch.setattr(cli, "load_config", lambda *_a, **_k: _config_for(db))
+    page = "https://www.wallpaper.com/architecture/x"
+
+    assert cli.main(["image-page", "--id", str(pid), "--url", page]) == 0
+    assert "まだ書き込んでいません" in capsys.readouterr().out
+    assert db.execute("SELECT image_page_url FROM properties WHERE id = ?",
+                      (pid,)).fetchone()["image_page_url"] is None
+
+    assert cli.main(["image-page", "--id", str(pid), "--url", page, "--yes"]) == 0
+    row = db.execute("SELECT image_page_url, delivery_attempts FROM properties WHERE id = ?",
+                     (pid,)).fetchone()
+    assert (row["image_page_url"], row["delivery_attempts"]) == (page, 0)
