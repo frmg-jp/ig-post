@@ -35,7 +35,11 @@ from freming.instagram.plan import _parse_hhmm, next_reel_time, plan, slot_times
 from freming.instagram.publish import wait_until_ready
 from freming.instagram.tokens import InstagramError
 
-CONFIG = load_config("config.yaml")
+CONFIG = load_config("config.yaml").model_copy(deep=True)
+# 本番の config.yaml は投稿を止めている期間がある（2026-10-28〜）。
+# 予定の作り方を確かめるテストなので、動かしているときの値で固定する。
+CONFIG.instagram.post_times = ["09:00"]
+CONFIG.instagram.post_reel = True
 NOW = datetime(2026, 8, 10, 1, 0, tzinfo=UTC)  # JST 10:00 月曜
 
 

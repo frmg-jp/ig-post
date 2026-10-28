@@ -21,6 +21,10 @@ from freming.web.app import create_app
 @pytest.fixture()
 def config(tmp_path):
     cfg = load_config("config.yaml").model_copy(deep=True)
+    # 本番の config.yaml は投稿を止めている期間がある（2026-10-28〜）。
+    # 予定表の操作を確かめるので、動かしているときの枠で固定する。
+    cfg.instagram.post_times = ["09:00"]
+    cfg.instagram.post_reel = True
     cfg.app.db_path = tmp_path / "review.db"
     migrate(cfg.app.db_path)
     return cfg
