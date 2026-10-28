@@ -21,7 +21,19 @@
 福井さんの告知を優先するため、ユーザーの指示でキュレーション投稿を止めている。
 **再開の連絡があるまで、投稿を出す・予定を作る・見送りを戻す操作はしない。**
 止め方: config.yaml の auto_post / post_times / post_reel と、予定 post 81〜91 の見送り。
-再開時はその3つを戻し、post-unskip（日付が過ぎていれば post-reschedule）する。
+
+**再開の手順（承認済みの分を取りこぼさない）**
+1. config.yaml の3つを戻して push（auto_post: true / post_times: ["09:00"] / post_reel: true）
+2. maintenance.yml を `post-unskip`・apply=true・limit=`81 82 84 85 86 87 88 89 91` で1回。
+   予定に戻して、そのまま先の空き枠へ送る（reschedule 込み）
+3. maintenance.yml を `post-plan` で1回。止めている間に納品された承認済みの分が空き枠に入る。
+   リールの枠もここで新しく作られる
+4. `post-show-all` で並びを確かめ、毎朝のチェック（trig_01HAz6onfx87RuzRUinU3mJn）を有効に戻す
+
+**見送りの行は物件を握ったまま**（postable_properties は状態を見ずに feed の行の有無で判定）。
+手順2を飛ばすと、この9件は post plan で二度と拾われない。
+リール post 90 は戻さない（週が変わっているので、手順3で新しく作る）。
+post 83 は 10/27 に人が外したもの（deleted）なので対象外。
 
 ## 確認を取ってから動くもの（上と矛盾しない範囲）
 
